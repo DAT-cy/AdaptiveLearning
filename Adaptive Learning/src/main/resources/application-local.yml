@@ -1,6 +1,10 @@
 server:
   port: 9090
 
+adaptive:
+  bkt:
+    base-url: ${BKT_URL:http://localhost:8001}
+
 spring:
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/adaptivelearning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}

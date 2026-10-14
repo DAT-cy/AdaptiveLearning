@@ -5,6 +5,7 @@ const data = (request) => request.then((response) => response.data)
 export const learningService = {
   certificates: () => data(Axios.get('/api/v1/certificates')),
   exams: () => data(Axios.get('/api/v1/exams')),
+  questions: () => data(Axios.get('/api/v1/questions')),
   exam: (id) => data(Axios.get(`/api/v1/exams/${id}/detail`)),
   question: (id) => data(Axios.get(`/api/v1/questions/${id}`)),
   startAttempt: (examId) => data(Axios.post('/api/v1/attempts/start', { examId })),

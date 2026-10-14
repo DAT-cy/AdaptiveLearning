@@ -1,4 +1,21 @@
 services:
+  pybkt:
+    build:
+      context: ./pybkt
+    container_name: adaptive-learning-pybkt
+    restart: unless-stopped
+    expose:
+      - "8001"
+    environment:
+      PORT: 8001
+      TZ: Asia/Ho_Chi_Minh
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   mysql:
     image: mysql:8.4
     container_name: adaptive-learning-mysql
@@ -23,5 +40,48 @@ services:
       retries: 20
       start_period: 20s
 
+  backend:
+    image: gradle:8.8-jdk17
+    container_name: adaptive-learning-backend
+    restart: unless-stopped
+    working_dir: /workspace
+    command: ["gradle", "bootRun", "--no-daemon"]
+    ports:
+      - "9090:9090"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_URL: jdbc:mysql://mysql:3306/adaptivelearning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deploy-123456}
+      AI_API_KEY: ${AI_API_KEY:-}
+      BKT_URL: http://pybkt:8001
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - .:/workspace
+      - gradle-cache:/home/gradle/.gradle
+    depends_on:
+      mysql:
+        condition: service_healthy
+      pybkt:
+        condition: service_healthy
+
+  frontend:
+    image: node:22-alpine
+    container_name: adaptive-learning-frontend
+    restart: unless-stopped
+    working_dir: /app
+    command: ["sh", "-c", "npm ci && npm run dev -- --host 0.0.0.0 --port 3000"]
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_KEY: http://localhost:9090
+      VITE_BASE_URL: /
+    volumes:
+      - ../AdaptiveLearningFE:/app
+      - frontend-node-modules:/app/node_modules
+
 volumes:
   mysql-data:
+  gradle-cache:
+  frontend-node-modules:

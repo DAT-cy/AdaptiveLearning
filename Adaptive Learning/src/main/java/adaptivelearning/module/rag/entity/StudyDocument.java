@@ -13,6 +13,13 @@ public class StudyDocument extends BaseEntity {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long documentId;
     @Column(nullable = false) private Long userId;
     private Long certificateId;
+    private Long topicId;
+    @Builder.Default
+    @Column(name = "is_shared", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private boolean shared = false;
+    @Builder.Default
+    @Column(name = "is_active", nullable = false, columnDefinition = "BOOLEAN DEFAULT TRUE")
+    private boolean active = true;
     @NotBlank @Size(max = 200) @Column(nullable = false, length = 200) private String title;
     private String fileName; private String storagePath; private String mimeType;
     @Enumerated(EnumType.STRING) @Builder.Default @Column(nullable = false) private DocumentStatus status = DocumentStatus.UPLOADED;

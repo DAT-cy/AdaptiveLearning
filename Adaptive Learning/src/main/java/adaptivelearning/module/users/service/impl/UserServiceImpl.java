@@ -73,6 +73,21 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public User createManagedUser(String username, String password, Role role) {
+        if (findUserByEmail(username) != null) {
+            throw new CommonException(ErrorCode.USERNAME_ALREADY_EXISTS);
+        }
+        User user = new User();
+        user.setUsername(username);
+        user.setPassword(passwordEncoder.encode(password));
+        user.setRole(role);
+        user.setEnable(true);
+        user.setIsDeleted(false);
+        userMapper.insertUser(user);
+        return userMapper.findByUsername(username).orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+    }
+
+    @Override
     public ProfileUser getProfile() {
         User user = SecurityUtils.getCurrentUser();
         if (user == null) {
@@ -125,7 +140,8 @@ public class UserServiceImpl implements UserService {
             user.setRole(Role.ROLE_USER);
             userMapper.insertUser(user);
         }
+
     }
 
 
-} 
+}

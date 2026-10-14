@@ -1,6 +1,6 @@
 import { settings } from '@/config/settings'
 
-const title = settings.title || 'Vue Template'
+const title = settings.title || 'Học tập thích ứng'
 
 /**
  ** Hàm tạo tiêu đề cho trang dựa trên tiêu đề của trang và cấu hình mẫu.

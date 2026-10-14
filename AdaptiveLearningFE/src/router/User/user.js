@@ -1,6 +1,7 @@
-const dashboardPage = () => import('@/features/Home/pages/Home.vue')
-const learnerScreens = [
-  { path: '/home', name: 'Home', view: 'dashboard', title: 'Trang chủ' },
+const userHome = () => import('@/features/User/pages/Home.vue')
+
+const userRoutes = [
+  { path: '/home', name: 'UserHome', view: 'dashboard', title: 'Trang chủ' },
   { path: '/plans', name: 'LearningPlans', view: 'plans', title: 'Lộ trình học' },
   { path: '/courses', name: 'LearningCourses', view: 'courses', title: 'Khóa học' },
   { path: '/tests', name: 'LearningTests', view: 'tests', title: 'Bài kiểm tra' },
@@ -10,9 +11,14 @@ const learnerScreens = [
   { path: '/settings', name: 'LearningSettings', view: 'settings', title: 'Cài đặt' },
 ]
 
-export default learnerScreens.map(({ path, name, view, title }) => ({
+export default userRoutes.map(({ path, name, view, title }) => ({
   path,
   name,
-  meta: { title, view, layout: 'only-view' },
-  component: dashboardPage,
+  meta: {
+    title,
+    view,
+    layout: 'only-view',
+    allowedRoles: ['ROLE_USER'],
+  },
+  component: userHome,
 }))

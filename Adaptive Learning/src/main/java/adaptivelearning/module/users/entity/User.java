@@ -35,7 +35,7 @@ public class User extends BaseEntity implements UserDetails {
     private Boolean isDeleted;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = false, length = 32)
     private Role role;
 
     @Override

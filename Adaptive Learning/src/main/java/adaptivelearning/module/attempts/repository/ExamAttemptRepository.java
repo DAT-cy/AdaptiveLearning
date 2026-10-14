@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Collection;
 
 public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> {
 
@@ -14,6 +15,8 @@ public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> 
     List<ExamAttempt> findByUserId(Long userId);
 
     List<ExamAttempt> findByStatus(AttemptStatus status);
+
+    List<ExamAttempt> findByStatusIn(Collection<AttemptStatus> statuses);
 
     List<ExamAttempt> findByUserIdOrderByStartedAtDesc(Long userId);
 }

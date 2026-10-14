@@ -5,7 +5,7 @@ export default [
     path: '/login',
     name: 'Login',
     meta: {
-      title: 'Login',
+      title: 'Đăng nhập',
       layout: 'only-view'
     },
     component: loadView('Auth', 'Login'),

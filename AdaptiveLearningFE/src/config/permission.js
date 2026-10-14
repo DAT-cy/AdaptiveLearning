@@ -24,6 +24,18 @@ NProgress.configure({
 
 const { loginInterception, progressBar, recordRoute, routesWhiteList } = settings
 
+function landingPath(role) {
+  if (role === 'ROLE_ADMIN') return '/admin'
+  return '/home'
+}
+
+function roleRedirect(to, role) {
+  if (to.path === '/login') return landingPath(role)
+  const allowedRoles = to.meta.allowedRoles || (to.meta.requiredRole ? [to.meta.requiredRole] : null)
+  if (allowedRoles && !allowedRoles.includes(role)) return landingPath(role)
+  return null
+}
+
 
 
 /**
@@ -52,7 +64,13 @@ router.beforeEach(async (to, from, next) => {
   if (hasToken) {
     // Nếu tuyến mục tiêu là trang đăng nhập, hãy chuyển hướng đến trang chủ
     if (to.path === '/login') {
-      next({ path: '/home' })
+      try {
+        if (!userStore.state.role && loginInterception) await userStore.getInfo()
+        next(roleRedirect(to, userStore.state.role) || '/home')
+      } catch {
+        userStore.resetToken()
+        next()
+      }
       progressBar && NProgress.done()
     } else {
       // Kiểm tra xem người dùng có các quyền cần thiết hay không
@@ -63,12 +81,16 @@ router.beforeEach(async (to, from, next) => {
 
       if (hasGetUserInfo) {
         // Người dùng có các quyền cần thiết, tiến tới tuyến đường đích
-        next()
+        const redirect = roleRedirect(to, userStore.state.role)
+        if (redirect) next(redirect)
+        else next()
       } else {
         try {
           // Lấy thông tin người dùng
           await userStore.getInfo()
-          next()
+          const redirect = roleRedirect(to, userStore.state.role)
+          if (redirect) next(redirect)
+          else next()
         } catch (error) {
           // Người dùng không có quyền cần thiết, đặt lại mã thông báo và chuyển hướng đến trang đăng nhập
           userStore.resetToken()

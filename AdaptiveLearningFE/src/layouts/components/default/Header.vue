@@ -12,39 +12,39 @@ import {
 
 const components = [
   {
-    title: 'Alert Dialog',
+    title: 'Hộp thoại cảnh báo',
     href: '/docs/primitives/alert-dialog',
     description:
-      'A modal dialog that interrupts the user with important content and expects a response.',
+      'Hộp thoại hiển thị nội dung quan trọng và yêu cầu người dùng phản hồi.',
   },
   {
-    title: 'Hover Card',
+    title: 'Thẻ xem trước',
     href: '/docs/primitives/hover-card',
     description:
-      'For sighted users to preview content available behind a link.',
+      'Hiển thị bản xem trước nội dung được liên kết khi người dùng di chuột.',
   },
   {
-    title: 'Progress',
+    title: 'Tiến độ',
     href: '/docs/primitives/progress',
     description:
-      'Displays an indicator showing the completion progress of a task, typically displayed as a progress bar.',
+      'Hiển thị mức độ hoàn thành của một nhiệm vụ, thường bằng thanh tiến độ.',
   },
   {
-    title: 'Scroll-area',
+    title: 'Vùng cuộn',
     href: '/docs/primitives/scroll-area',
-    description: 'Visually or semantically separates content.',
+    description: 'Phân tách nội dung bằng bố cục hoặc ngữ nghĩa.',
   },
   {
-    title: 'Tabs',
+    title: 'Thẻ nội dung',
     href: '/docs/primitives/tabs',
     description:
-      'A set of layered sections of content—known as tab panels—that are displayed one at a time.',
+      'Tập hợp các vùng nội dung xếp lớp, mỗi lần chỉ hiển thị một vùng.',
   },
   {
-    title: 'Tooltip',
+    title: 'Chú giải',
     href: '/docs/primitives/tooltip',
     description:
-      'A popup that displays information related to an element when the element receives keyboard focus or the mouse hovers over it.',
+      'Thông tin bổ sung xuất hiện khi phần tử được focus hoặc khi di chuột lên.',
   },
 ]
 </script>
@@ -58,7 +58,7 @@ const components = [
       <NavigationMenu>
         <NavigationMenuList>
           <NavigationMenuItem>
-            <NavigationMenuTrigger>Getting started</NavigationMenuTrigger>
+            <NavigationMenuTrigger>Bắt đầu</NavigationMenuTrigger>
             <NavigationMenuContent>
               <ul class="grid gap-3 p-6 md:w-[400px] lg:w-[500px] lg:grid-cols-[minmax(0,.75fr)_minmax(0,1fr)]">
                 <li class="row-span-3">
@@ -70,26 +70,25 @@ const components = [
                         shadcn/ui
                       </div>
                       <p class="text-sm leading-tight text-muted-foreground">
-                        Beautifully designed components built with Radix UI and
-                        Tailwind CSS.
+                        Các thành phần giao diện được xây dựng bằng Radix UI và Tailwind CSS.
                       </p>
                     </a>
                   </NavigationMenuLink>
                 </li>
-                <a href="/docs" title="Introduction">
-                  Re-usable components built using Radix UI and Tailwind CSS.
+                <a href="/docs" title="Giới thiệu">
+                  Các thành phần giao diện có thể tái sử dụng, xây dựng bằng Radix UI và Tailwind CSS.
                 </a>
-                <a href="/docs/installation" title="Installation">
-                  How to install dependencies and structure your app.
+                <a href="/docs/installation" title="Cài đặt">
+                  Cách cài đặt các thư viện và tổ chức cấu trúc ứng dụng.
                 </a>
-                <a href="/docs/primitives/typography" title="Typography">
-                  Styles for headings, paragraphs, lists...etc
+                <a href="/docs/primitives/typography" title="Kiểu chữ">
+                  Kiểu hiển thị cho tiêu đề, đoạn văn, danh sách và các thành phần khác.
                 </a>
               </ul>
             </NavigationMenuContent>
           </NavigationMenuItem>
           <NavigationMenuItem>
-            <NavigationMenuTrigger>Components</NavigationMenuTrigger>
+            <NavigationMenuTrigger>Thành phần</NavigationMenuTrigger>
             <NavigationMenuContent>
               <ul class="grid w-[400px] gap-3 p-4 md:w-[500px] md:grid-cols-2 lg:w-[600px] ">
                 <a v-for="component in components" :key="component.title" :title="component.title"
@@ -101,14 +100,14 @@ const components = [
           </NavigationMenuItem>
           <NavigationMenuItem>
             <NavigationMenuLink href="/docs" :class="navigationMenuTriggerStyle()">
-              Documentation
+              Tài liệu
             </NavigationMenuLink>
           </NavigationMenuItem>
         </NavigationMenuList>
       </NavigationMenu>
       <div class="space-x-4">
-        <Button variant="outline">Login</Button>
-        <Button>Signup</Button>
+        <Button variant="outline">Đăng nhập</Button>
+        <Button>Đăng ký</Button>
       </div>
     </div>
   </header>

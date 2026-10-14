@@ -13,7 +13,5 @@ public interface SpeakingSubmissionRepository extends JpaRepository<SpeakingSubm
 
     List<SpeakingSubmission> findByAttemptId(Long attemptId);
 
-    Optional<SpeakingSubmission> findByIdAndUserId(Long id, Long userId);
-
     Optional<SpeakingSubmission> findBySubmissionIdAndUserId(Long submissionId, Long userId);
 }

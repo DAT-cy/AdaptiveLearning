@@ -15,7 +15,8 @@ const formSchema = toTypedSchema(z.object({
 async function onSubmit(values) {
   try {
     await userStore.login(values)
-    await router.push('/home')
+    const role = userStore.state.role
+    await router.push(role === 'ROLE_ADMIN' ? '/admin' : '/home')
   } catch (error) {
     console.error('Đăng nhập thất bại:', error)
   }

@@ -1,0 +1,6 @@
+UPDATE tbl_users
+SET role = 'ROLE_USER'
+WHERE role = 'ROLE_TEACHER';
+
+ALTER TABLE tbl_users
+    MODIFY COLUMN role ENUM('ROLE_ADMIN', 'ROLE_USER') NOT NULL;

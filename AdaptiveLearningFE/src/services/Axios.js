@@ -11,15 +11,36 @@ const { toast } = useToast()
 const { baseURL, contentType, apiLoading, debounce, invalidCode, loginInterception, noPermissionCode, requestTimeout, successCode } = settings
 let axiosInstance = null;
 
-const handleCode = (code, msg) => {
+const statusMessages = {
+  400: 'Dữ liệu gửi lên không hợp lệ. Vui lòng kiểm tra và thử lại.',
+  401: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+  403: 'Bạn không có quyền thực hiện thao tác này.',
+  404: 'Không tìm thấy dữ liệu hoặc địa chỉ yêu cầu.',
+  409: 'Dữ liệu bị xung đột. Vui lòng tải lại và thử lại.',
+  422: 'Dữ liệu chưa đáp ứng yêu cầu. Vui lòng kiểm tra lại.',
+  500: 'Máy chủ gặp sự cố. Vui lòng thử lại sau.',
+  502: 'Máy chủ chưa phản hồi. Vui lòng thử lại sau.',
+  503: 'Dịch vụ đang tạm thời không khả dụng.',
+  504: 'Máy chủ phản hồi quá thời gian chờ.',
+}
+
+function showError(description) {
+  toast({
+    title: 'Đã xảy ra lỗi',
+    description,
+    variant: 'destructive',
+  })
+}
+
+function getStatusMessage(code) {
+  return statusMessages[code] || `Yêu cầu thất bại (mã lỗi ${code}).`
+}
+
+const handleCode = (code) => {
   const userStore = useUserStore()
   switch (code) {
     case invalidCode:
-      toast({
-        title: 'Uh oh! Something went wrong.',
-        description: msg || `Backend interface ${code} exception`,
-        variant: 'destructive',
-      });
+      showError(getStatusMessage(code))
       userStore.resetToken()
       if (loginInterception) {
         router.push({ path: '/login' })
@@ -29,11 +50,7 @@ const handleCode = (code, msg) => {
       router.push({ path: '/403' })
       break
     default:
-      toast({
-        title: 'Uh oh! Something went wrong.',
-        description: msg || `Backend interface ${code} exception`,
-        variant: 'destructive',
-      });
+      showError(getStatusMessage(code))
       break
   }
 }
@@ -77,12 +94,12 @@ function getInstance() {
       if (codeVerificationArray.includes(code)) {
         return data
       } else {
-        handleCode(code, data.msg || data.responseMessage || data.message)
+        handleCode(code)
         return Promise.reject(
           `Request exception interception:${JSON.stringify({
             url: config.url,
             code,
-            msg: data.msg || data.responseMessage || data.message,
+            msg: getStatusMessage(code),
           })}` || 'Error'
         )
       }
@@ -92,26 +109,14 @@ function getInstance() {
       isLoading.value = pendingRequests > 0
       const { response, message } = error
       if (response && response.data) {
-        const { status, data } = response
-        handleCode(status, data.msg || message)
+        const { status } = response
+        handleCode(status)
         return Promise.reject(error)
       } else {
-        let msg
-        if (message === 'Network Error') {
-          msg = 'Backend interface connection abnormality'
-        }
-        if (message.includes('timeout')) {
-          msg = 'Backend interface request timeout'
-        }
-        if (message.includes('Request failed with status code')) {
-          const code = message.substr(message.length - 3)
-          msg = `backend interface ${code} abnormal`
-        }
-        toast({
-          title: 'Uh oh! Something went wrong.',
-          description: msg || `Backend interface unknown exception`,
-          variant: 'destructive',
-        });
+        const timedOut = error.code === 'ECONNABORTED' || message?.toLowerCase().includes('timeout')
+        showError(timedOut
+          ? 'Máy chủ phản hồi quá thời gian chờ. Vui lòng thử lại.'
+          : 'Không thể kết nối tới máy chủ. Hãy kiểm tra backend và thử lại.')
         return Promise.reject(error)
       }
     })

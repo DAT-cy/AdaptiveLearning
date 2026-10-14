@@ -5,8 +5,9 @@ export default [
     path: '/404',
     name: 'NotFound',
     meta: {
-      title: 'NotFound'
+      title: 'Không tìm thấy trang',
+      layout: 'only-view'
     },
-    component: loadView('InappropriatePath', 'NotFound'),
+    component: loadView('InappropriatePath', '404'),
   },
 ]

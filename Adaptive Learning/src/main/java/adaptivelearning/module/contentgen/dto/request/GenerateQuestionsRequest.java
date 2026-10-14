@@ -8,6 +8,7 @@ import lombok.Data;
 public class GenerateQuestionsRequest {
     @NotNull
     private Long certificateId;
+    @NotNull
     private Long topicId;
     @NotBlank
     private String questionType;

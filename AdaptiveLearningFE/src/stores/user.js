@@ -1,7 +1,6 @@
 import { computed, reactive } from 'vue'
 import { defineStore } from 'pinia'
 import { removeToken, setToken, getToken } from '@/utils/auth'
-import { resetRouter } from '@/router'
 import { userService } from '@/services/userService.js'
 
 export const useUserStore = defineStore('user', () => {
@@ -43,7 +42,6 @@ export const useUserStore = defineStore('user', () => {
 
   function logout() {
     resetToken()
-    resetRouter()
   }
 
   return {

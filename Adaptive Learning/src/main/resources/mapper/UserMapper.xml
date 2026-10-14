@@ -28,6 +28,13 @@
         AND is_deleted = false
     </select>
 
+    <select id="findAllForAdmin" resultMap="userResultMap">
+        SELECT user_id, username, enable, is_deleted, role, created_at, updated_at
+        FROM tbl_users
+        WHERE is_deleted = false
+        ORDER BY user_id DESC
+    </select>
+
     <select id="countAdminUsers" resultType="int">
         SELECT COUNT(*)
         FROM tbl_users
@@ -55,4 +62,18 @@
                 #{username})
     </insert>
 
-</mapper> 
+    <update id="updateRole">
+        UPDATE tbl_users
+        SET role = #{role}, updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND is_deleted = false
+    </update>
+
+    <update id="updateEnabled">
+        UPDATE tbl_users
+        SET enable = #{enabled}, updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND is_deleted = false
+    </update>
+
+</mapper>

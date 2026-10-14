@@ -124,7 +124,8 @@ public class QuestionServiceImpl implements QuestionService {
         question.setTags(request.getTags());
 
         // Editing invalidates a prior approval; the question must be re-reviewed.
-        if (question.getStatus() == ContentStatus.APPROVED
+        if (question.getStatus() == ContentStatus.IN_REVIEW
+                || question.getStatus() == ContentStatus.APPROVED
                 || question.getStatus() == ContentStatus.PUBLISHED) {
             question.setStatus(ContentStatus.DRAFT);
         }

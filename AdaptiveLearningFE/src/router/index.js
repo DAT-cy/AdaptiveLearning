@@ -1,7 +1,8 @@
 import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
 
 import auth from './Auth/auth'
-import home from './Home/home'
+import userRoutes from './User/user'
+import adminRoutes from './Admin/admin'
 import inappropriatePath from './InappropriatePath/inappropiratePath'
 import { settings } from '@/config/settings'
 
@@ -10,7 +11,8 @@ const { routerMode } = settings
 export const constantRoutes = [
   { path: '/', redirect: '/home' },
   ...auth,
-  ...home,
+  ...userRoutes,
+  ...adminRoutes,
   ...inappropriatePath,
   {
     path: "/:pathMatch(.*)*",
@@ -45,15 +47,5 @@ const router = createRouter({
     });
   }
 })
-
-/**
- * Đặt lại router bằng cách tạo một instance router mới và gán giá trị của matcher của router mới vào router hiện tại.
- *
- * @return {void} Hàm này không trả về giá trị nào.
- */
-export function resetRouter() {
-  const newRouter = createRouter()
-  router.matcher = newRouter.matcher // reset router
-}
 
 export default router

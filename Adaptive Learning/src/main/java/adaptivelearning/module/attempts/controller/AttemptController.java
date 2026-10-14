@@ -5,6 +5,7 @@ import adaptivelearning.config.response.DefaultRes;
 import adaptivelearning.config.response.ErrorCode;
 import adaptivelearning.config.response.ResponseMessage;
 import adaptivelearning.config.response.StatusCode;
+import adaptivelearning.module.adaptive.service.AdaptiveUpdateDispatcher;
 import adaptivelearning.module.attempts.dto.request.SaveAnswerRequest;
 import adaptivelearning.module.attempts.dto.request.StartAttemptRequest;
 import adaptivelearning.module.attempts.dto.request.SubmitAttemptRequest;
@@ -39,6 +40,7 @@ import java.util.List;
 public class AttemptController {
 
     private final AttemptService attemptService;
+    private final AdaptiveUpdateDispatcher adaptiveUpdateDispatcher;
 
     @PostMapping("/start")
     @Operation(summary = "Start an exam attempt for the authenticated user")
@@ -76,6 +78,7 @@ public class AttemptController {
         Long userId = SecurityUtils.getCurrentUserId();
         SubmitAttemptRequest body = (request != null) ? request : new SubmitAttemptRequest();
         AttemptResultResponse data = attemptService.submitAttempt(id, userId, body);
+        adaptiveUpdateDispatcher.updateAfterAttempt(userId, id);
         return ResponseEntity.ok(DefaultRes.res(StatusCode.OK, ResponseMessage.UPDATED, data));
     }
 

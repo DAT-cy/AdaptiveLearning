@@ -39,6 +39,7 @@ public class QuestionController {
     private final QuestionService questionService;
 
     @GetMapping("/random")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @Operation(summary = "Get random approved questions for a test")
     public ResponseEntity<DefaultRes<List<QuestionResponse>>> getRandomQuestions(
             @Parameter(description = "Certificate ID", required = true, example = "1")
@@ -55,6 +56,7 @@ public class QuestionController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @Operation(summary = "List questions with optional filters")
     public ResponseEntity<DefaultRes<List<QuestionResponse>>> getAll(
             QuestionFilterRequest filter) {
@@ -63,6 +65,7 @@ public class QuestionController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @Operation(summary = "Get a question by ID")
     public ResponseEntity<DefaultRes<QuestionResponse>> getById(@PathVariable Long id) {
         QuestionResponse question = questionService.getById(id);
@@ -70,8 +73,8 @@ public class QuestionController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'CONTENT_EDITOR')")
-    @Operation(summary = "Create a question", description = "Requires ADMIN or CONTENT_EDITOR role")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @Operation(summary = "Create a question", description = "Requires ADMIN role")
     public ResponseEntity<DefaultRes<QuestionResponse>> create(
             @Valid @RequestBody QuestionRequest request) {
         QuestionResponse created = questionService.create(request);
@@ -80,10 +83,10 @@ public class QuestionController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'CONTENT_EDITOR')")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @Operation(
             summary = "Update a question",
-            description = "Requires ADMIN or CONTENT_EDITOR role")
+            description = "Requires ADMIN role")
     public ResponseEntity<DefaultRes<QuestionResponse>> update(
             @PathVariable Long id, @Valid @RequestBody QuestionRequest request) {
         QuestionResponse updated = questionService.update(id, request);
@@ -91,6 +94,7 @@ public class QuestionController {
     }
 
     @PostMapping("/{id}/submit-review")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @Operation(summary = "Submit a draft question for review")
     public ResponseEntity<DefaultRes<QuestionResponse>> submitForReview(@PathVariable Long id) {
         QuestionResponse updated = questionService.submitForReview(id);

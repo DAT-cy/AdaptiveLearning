@@ -36,7 +36,7 @@ Bước 1: ADMIN tạo nền tảng dữ liệu
   → Topics (Skill → Topic → Question Type)
   → Rubric (tiêu chí chấm Writing/Speaking)
         ↓
-Bước 2: ADMIN/CONTENT_EDITOR nhập câu hỏi
+Bước 2: ADMIN biên soạn hoặc yêu cầu AI tạo câu hỏi nháp
   → Tạo câu hỏi (DRAFT)
   → Gửi duyệt (IN_REVIEW)
   → Duyệt (APPROVED)
@@ -57,6 +57,26 @@ Bước 5: Hệ thống phân tích + đề xuất
   → Recommendations (đề xuất gói luyện tập)
   → Learning Progress (theo dõi tiến bộ theo thời gian)
 ```
+
+### 2.2. Luồng biên soạn đề cá nhân theo AI Exam Generator
+
+Sản phẩm chỉ có hai vai trò `ROLE_USER` và `ROLE_ADMIN`. Không có tài khoản/màn hình Teacher, lớp học hay quy trình nhóm. ADMIN chịu trách nhiệm danh mục kỳ thi, ngân hàng câu hỏi và phát hành đề; người học nhận lộ trình, bài tập và trợ lý AI theo tiến độ cá nhân.
+
+```text
+ADMIN chọn kỳ thi (IELTS / TOEIC / THPT) và kỹ năng/môn học
+  → Tự biên soạn câu hỏi hoặc yêu cầu AI tạo bản nháp
+  → Xem lại nội dung, lựa chọn, đáp án và giải thích
+  → Lưu vào ngân hàng ở trạng thái DRAFT
+  → Gửi duyệt IN_REVIEW → ADMIN duyệt APPROVED
+  → Tạo đề, chỉ chọn câu APPROVED, lưu DRAFT rồi PUBLISHED
+  → USER làm đề cá nhân → xem kết quả/lỗ hổng → AI cá nhân hóa nội dung luyện tiếp
+```
+
+AI chỉ tạo nội dung luyện tập mới dựa trên các đoạn trong kho dùng chung đã truy xuất, không được gắn nhãn là câu hỏi thi chính thức. Nếu không tìm được kiến thức phù hợp thì yêu cầu sinh câu thất bại, không được bịa ngoài nguồn. Bản nháp lưu ID đoạn nguồn trong `contentJson`, không tự duyệt và không tự đưa vào đề.
+
+ADMIN hiện có thể nhập nội dung `.txt`/`.md`, gắn kỳ thi và kỹ năng/môn; xem lại toàn bộ nội dung/đoạn đã lập chỉ mục; bật hoặc tắt từng tài liệu khỏi nguồn AI mà không xóa tài liệu. Hệ thống chia đoạn có overlap và tìm theo từ khóa. Chưa hỗ trợ import XLSX/CSV, trích xuất PDF/DOCX/OCR, semantic embeddings hoặc cấu hình combo đề.
+
+Đặc tả đầu vào: `../AI_Exam_Generator_Spec_for_Codex.md`; các điều chỉnh sản phẩm được ghi ở phần “Phạm vi sản phẩm đã chốt”.
 
 ---
 
@@ -827,7 +847,7 @@ POST /api/v1/content-generation
 → generationId = 1, status = READY, itemContent = [5 câu JSON]
 
 POST /api/v1/content-generation/1/apply
-→ Tạo 5 câu DRAFT trong question bank, teacher review + approve
+→ Tạo 5 câu DRAFT trong question bank, ADMIN review + approve
 ```
 
 ### Bước 12: Nộp bài Speaking
@@ -902,16 +922,16 @@ Quy tắc AI:
 
 ### 4A.2. `contentgen` - AI sinh câu hỏi và đề luyện
 
-Mục tiêu: Teacher/Admin nhập topic, loại câu hỏi, độ khó và số lượng; AI sinh bản nháp để giảm thời gian biên soạn.
+Mục tiêu: ADMIN nhập kỳ thi, kỹ năng/môn, loại câu hỏi, độ khó và số lượng; AI sinh bản nháp để giảm thời gian biên soạn.
 
 Luồng nghiệp vụ:
 
-1. Admin/Editor gửi yêu cầu sinh nội dung.
+1. ADMIN gửi yêu cầu sinh nội dung. API chỉ cho phép `ROLE_ADMIN`.
 2. Tạo `ContentGeneration` ở trạng thái `PENDING`.
 3. AI sinh JSON bắt buộc gồm content, options, correctAnswer, explanation và metadata.
 4. Validate schema, số lượng, đáp án và nội dung trùng lặp.
 5. Chuyển `READY`; người dùng xem bản nháp.
-6. Chọn Apply để đưa vào question bank ở trạng thái `DRAFT` hoặc `IN_REVIEW`; không publish tự động.
+6. Chọn Apply để lưu câu hỏi vào question bank ở trạng thái `DRAFT`; không tự gửi duyệt hoặc publish.
 
 API:
 
@@ -970,7 +990,10 @@ GET  /api/v1/adaptive/recommend?certificateId={id}
 GET  /api/v1/adaptive/forecast?certificateId={id}
 ```
 
-Giai đoạn đầu dùng heuristic có thể giải thích; giai đoạn sau thay bằng IRT/Bayesian Knowledge Tracing nhưng vẫn giữ model version và fallback.
+Adaptive Engine có tích hợp service `pyBKT` riêng bằng Python. Sau khi nộp bài, backend xếp việc cập nhật hồ sơ vào worker nền để không kéo dài phản hồi nộp bài. Service fit tham số từ các đáp án khách quan đã chấm của những người học khác cùng kỳ thi, rồi replay chuỗi trả lời theo từng topic của learner để ước lượng xác suất mastery. Tự luận không được gán nhãn đúng/sai khi chưa có rubric grading.
+
+Nếu chưa có ít nhất hai learner khác tạo dữ liệu huấn luyện, thiếu topic phù hợp hoặc BKT service lỗi, backend giữ heuristic hiện có; không dùng dữ liệu mẫu/ngoại lai để giả lập hiệu chuẩn. BKT mastery là xác suất nắm vững topic, không phải IELTS band hay điểm TOEIC đã hiệu chuẩn.
+Hiện database chưa có câu trả lời đã chấm (`SUBMITTED/GRADED`) để tạo cohort, vì vậy kết quả vẫn dùng heuristic cho đến khi có dữ liệu thực.
 
 ### 4A.5. `rag` - Document RAG
 

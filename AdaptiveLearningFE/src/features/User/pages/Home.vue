@@ -125,6 +125,26 @@ function asList(value) {
   return value?.content || value?.items || []
 }
 
+function localizeStatus(status) {
+  const labels = {
+    ACTIVE: 'Đang học',
+    ARCHIVED: 'Đã lưu trữ',
+    COMPLETED: 'Hoàn thành',
+    EXPIRED: 'Đã hết hạn',
+    GRADED: 'Đã chấm điểm',
+    GRADING: 'Đang chấm điểm',
+    HIGH: 'Ưu tiên cao',
+    IN_PROGRESS: 'Đang làm',
+    LOW: 'Ưu tiên thấp',
+    MEDIUM: 'Ưu tiên vừa',
+    PENDING: 'Đang chờ',
+    STARTED: 'Đang thực hiện',
+    SUBMITTED: 'Đã nộp',
+    VIOLATED: 'Có vi phạm',
+  }
+  return labels[status] || status
+}
+
 function showView(view) {
   mobileMenuOpen.value = false
   pageError.value = ''
@@ -413,7 +433,7 @@ onUnmounted(() => {
 
               <section id="recommendations" class="section-block recommendation-section">
                 <div class="section-heading"><div><h2>Bài học được đề xuất</h2><p>Dựa trên dữ liệu học tập của bạn</p></div><button class="inline-link" @click="showView('progress')">Xem phân tích <ArrowRight :size="15" /></button></div>
-                <div v-if="activeRecommendations.length" class="recommendation-grid"><article v-for="(item, index) in activeRecommendations.slice(0, 3)" :key="item.recommendationId || index" class="recommendation-card"><span class="recommendation-icon" :class="`recommend-icon-${index % 3}`"><Target v-if="index === 0" :size="17" /><Brain v-else-if="index === 1" :size="17" /><BookOpen v-else :size="17" /></span><div class="recommendation-copy"><strong>{{ recommendationTitle(item, index) }}</strong><p>{{ item.reason || 'Gợi ý dựa trên kết quả học tập gần đây.' }}</p><span class="recommendation-level">{{ item.priority || item.status || 'Đề xuất' }}</span></div><button class="recommendation-action" :disabled="item.status === 'STARTED'" :title="item.status === 'STARTED' ? 'Đang thực hiện' : 'Bắt đầu học'" @click="markRecommendationStarted(item)"><ArrowRight :size="16" /></button></article></div>
+                <div v-if="activeRecommendations.length" class="recommendation-grid"><article v-for="(item, index) in activeRecommendations.slice(0, 3)" :key="item.recommendationId || index" class="recommendation-card"><span class="recommendation-icon" :class="`recommend-icon-${index % 3}`"><Target v-if="index === 0" :size="17" /><Brain v-else-if="index === 1" :size="17" /><BookOpen v-else :size="17" /></span><div class="recommendation-copy"><strong>{{ recommendationTitle(item, index) }}</strong><p>{{ item.reason || 'Gợi ý dựa trên kết quả học tập gần đây.' }}</p><span class="recommendation-level">{{ localizeStatus(item.priority || item.status || 'Đề xuất') }}</span></div><button class="recommendation-action" :disabled="item.status === 'STARTED'" :title="item.status === 'STARTED' ? 'Đang thực hiện' : 'Bắt đầu học'" @click="markRecommendationStarted(item)"><ArrowRight :size="16" /></button></article></div>
                 <div v-else class="empty-recommendation"><Sparkles :size="19" /><span>Chưa có gợi ý mới. Hãy làm một bài kiểm tra để nhận đề xuất phù hợp.</span><button class="text-link" @click="showView('tests')">Chọn bài kiểm tra <ArrowRight :size="14" /></button></div>
               </section>
             </div>
@@ -458,7 +478,7 @@ onUnmounted(() => {
           <div class="view-heading"><div><p class="view-kicker">LUYỆN TẬP VÀ ĐÁNH GIÁ</p><h1>Bài kiểm tra</h1><p>Chọn đề thi để bắt đầu một lượt luyện tập mới.</p></div><label class="search-field"><Search :size="17" /><input v-model="searchQuery" placeholder="Tìm bài kiểm tra" aria-label="Tìm bài kiểm tra"></label></div>
           <div v-if="filteredExams.length" class="test-list"><article v-for="(exam, index) in filteredExams" :key="exam.examId" class="test-row"><span class="test-icon" :class="`test-icon-${index % 4}`"><BookOpen :size="20" /></span><div class="test-info"><h2>{{ exam.title }}</h2><p>{{ exam.description || 'Bài đánh giá kiến thức tổng hợp' }}</p><div class="test-meta"><span><Clock3 :size="14" /> {{ exam.durationMinutes }} phút</span><span>{{ exam.questionCount || exam.totalQuestions || 0 }} câu hỏi</span><span>{{ exam.totalPoints ?? '—' }} điểm</span></div></div><button class="primary-button" :disabled="loading" @click="startExam(exam)">Bắt đầu <ArrowRight :size="15" /></button></article></div>
           <div v-else-if="!loading" class="empty-page"><BookOpen :size="28" /><h2>Chưa có bài kiểm tra</h2><p>Đề thi đã xuất bản sẽ được hiển thị tại đây.</p></div>
-          <div v-if="history.length" class="recent-history"><div class="section-heading"><div><h2>Lịch sử gần đây</h2><p>Các lượt làm bài của bạn</p></div><button class="inline-link" @click="showView('history')">Xem tất cả <ArrowRight :size="14" /></button></div><article v-for="item in history.slice(0, 3)" :key="item.attemptId" class="history-row"><span class="history-status"><CheckCircle2 :size="16" /></span><div><strong>{{ exams.find((exam) => exam.examId === item.examId)?.title || `Bài thi #${item.examId}` }}</strong><small>{{ formatDate(item.startedAt) }} · {{ item.status === 'SUBMITTED' ? 'Đã nộp' : item.status }}</small></div><strong class="history-score">{{ item.score ?? '—' }}<small v-if="item.maxScore != null"> / {{ item.maxScore }}</small></strong></article></div>
+          <div v-if="history.length" class="recent-history"><div class="section-heading"><div><h2>Lịch sử gần đây</h2><p>Các lượt làm bài của bạn</p></div><button class="inline-link" @click="showView('history')">Xem tất cả <ArrowRight :size="14" /></button></div><article v-for="item in history.slice(0, 3)" :key="item.attemptId" class="history-row"><span class="history-status"><CheckCircle2 :size="16" /></span><div><strong>{{ exams.find((exam) => exam.examId === item.examId)?.title || `Bài thi #${item.examId}` }}</strong><small>{{ formatDate(item.startedAt) }} · {{ localizeStatus(item.status) }}</small></div><strong class="history-score">{{ item.score ?? '—' }}<small v-if="item.maxScore != null"> / {{ item.maxScore }}</small></strong></article></div>
         </section>
 
         <section v-else-if="activeView === 'progress' || activeView === 'history'" class="page-view">
@@ -469,7 +489,7 @@ onUnmounted(() => {
             <section class="detail-section score-panel"><div class="section-heading"><div><h2>Tổng quan điểm số</h2><p>{{ selectedCertificate?.name || 'Kết quả học tập' }}</p></div></div><div class="score-ring" :style="{ '--score': `${averageScorePercent}%` }"><div><strong>{{ progress?.averageScore != null ? Number(progress.averageScore).toFixed(1) : averageScore != null ? averageScore.toFixed(1) : '—' }}</strong><small>điểm TB</small></div></div><div class="score-legend"><span><i></i>Lượt đã nộp <strong>{{ progress?.totalAttempts ?? history.length }}</strong></span><span><i></i>Đề đã xuất bản <strong>{{ publishedExams.length }}</strong></span></div></section>
           </div>
           <section v-if="activeView === 'progress'" class="detail-section"><div class="section-heading"><div><h2>Mức độ thành thạo</h2><p>Theo dõi kỹ năng từ các bài kiểm tra đã nộp</p></div></div><div v-if="masterySkills.length" class="mastery-list"><div v-for="(skill, index) in masterySkills" :key="skill.name" class="mastery-row"><div class="skill-label"><span class="skill-bullet" :class="`bullet-${index % 4}`"><Target :size="14" /></span><strong>{{ skill.name }}</strong><small>{{ Math.round(skill.value) }}%</small></div><div class="skill-bar"><span :class="`bar-${index % 4}`" :style="{ width: `${Math.max(0, Math.min(100, skill.value))}%` }"></span></div></div></div><div v-else class="empty-inline">Chưa có đủ dữ liệu để phân tích kỹ năng.</div></section>
-          <section class="detail-section"><div class="section-heading"><div><h2>{{ activeView === 'history' ? 'Tất cả lượt làm bài' : 'Kết quả gần đây' }}</h2><p>Các bài thi và điểm số đã ghi nhận</p></div></div><div v-if="history.length" class="history-list"><article v-for="item in history" :key="item.attemptId" class="history-row"><span class="history-status"><CheckCircle2 :size="16" /></span><div><strong>{{ exams.find((exam) => exam.examId === item.examId)?.title || `Bài thi #${item.examId}` }}</strong><small>{{ formatDate(item.startedAt) }} · {{ item.status === 'SUBMITTED' ? 'Đã nộp' : item.status }}</small></div><strong class="history-score">{{ item.score ?? '—' }}<small v-if="item.maxScore != null"> / {{ item.maxScore }}</small></strong></article></div><div v-else class="empty-inline">Chưa có lượt làm bài. <button class="text-link" @click="showView('tests')">Chọn bài kiểm tra <ArrowRight :size="14" /></button></div></section>
+          <section class="detail-section"><div class="section-heading"><div><h2>{{ activeView === 'history' ? 'Tất cả lượt làm bài' : 'Kết quả gần đây' }}</h2><p>Các bài thi và điểm số đã ghi nhận</p></div></div><div v-if="history.length" class="history-list"><article v-for="item in history" :key="item.attemptId" class="history-row"><span class="history-status"><CheckCircle2 :size="16" /></span><div><strong>{{ exams.find((exam) => exam.examId === item.examId)?.title || `Bài thi #${item.examId}` }}</strong><small>{{ formatDate(item.startedAt) }} · {{ localizeStatus(item.status) }}</small></div><strong class="history-score">{{ item.score ?? '—' }}<small v-if="item.maxScore != null"> / {{ item.maxScore }}</small></strong></article></div><div v-else class="empty-inline">Chưa có lượt làm bài. <button class="text-link" @click="showView('tests')">Chọn bài kiểm tra <ArrowRight :size="14" /></button></div></section>
         </section>
 
         <section v-else-if="activeView === 'tutor'" class="page-view tutor-view">
