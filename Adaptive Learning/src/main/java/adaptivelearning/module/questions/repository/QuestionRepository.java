@@ -23,6 +23,13 @@ public interface QuestionRepository extends JpaRepository<Question, Long> {
     List<Question> findByCertificateIdAndTopicIdAndDifficultyAndStatus(
             Long certId, Long topicId, QuestionDifficulty diff, ContentStatus status);
 
+    List<Question> findByCertificateIdAndTopicIdAndQuestionTypeIgnoreCaseAndDifficultyAndStatus(
+            Long certificateId,
+            Long topicId,
+            String questionType,
+            QuestionDifficulty difficulty,
+            ContentStatus status);
+
     long countByCertificateIdAndStatus(Long certificateId, ContentStatus status);
 
     /**

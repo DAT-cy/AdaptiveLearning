@@ -12,10 +12,13 @@
     FileQuestion,
     GraduationCap,
     LayoutDashboard,
+    Layers3,
     LogOut,
     Menu,
+    Plus,
     Search,
     Shield,
+    Trash2,
     Users,
     X,
   } from 'lucide-vue-next'
@@ -30,6 +33,7 @@
     'accounts',
     'programs',
     'exams',
+    'templates',
     'questions',
     'knowledge',
   ]
@@ -40,13 +44,12 @@
   const users = ref([])
   const programs = ref([])
   const exams = ref([])
+  const examTemplates = ref([])
   const questions = ref([])
   const knowledgeDocuments = ref([])
   const knowledgeDetail = ref(null)
   const loadingKnowledgeDetail = ref(false)
   const topics = ref([])
-  const approvedQuestions = ref([])
-  const selectedQuestionIds = ref([])
   const query = ref('')
   const loading = ref(false)
   const pageError = ref('')
@@ -73,12 +76,24 @@
     passingBand: 0,
     skills: '[]',
   })
-  const examForm = reactive({
+  const templateForm = reactive({
     certificateId: '',
+    topicId: '',
     title: '',
     description: '',
     durationMinutes: 60,
+    targetScoreMin: 0,
+    targetScoreMax: 0,
     passingScore: 0,
+    sections: [
+      {
+        topicId: '',
+        name: 'Part 1',
+        questionType: 'MULTIPLE_CHOICE',
+        questionCount: 10,
+        pointsPerQuestion: 1,
+      },
+    ],
   })
   const questionForm = reactive({
     certificateId: '',
@@ -114,6 +129,7 @@
     { id: 'accounts', label: 'Tài khoản', icon: Users },
     { id: 'programs', label: 'Kỳ thi & chứng chỉ', icon: GraduationCap },
     { id: 'exams', label: 'Bài kiểm tra', icon: ClipboardCheck },
+    { id: 'templates', label: 'Mẫu đề', icon: Layers3 },
     { id: 'questions', label: 'Ngân hàng câu hỏi', icon: FileQuestion },
     { id: 'knowledge', label: 'Kho kiến thức', icon: Database },
   ]
@@ -163,16 +179,53 @@
         .includes(query.value.toLowerCase())
     )
   )
+  const filteredExamTemplates = computed(() =>
+    examTemplates.value.filter((template) =>
+      `${template.title || ''} ${template.description || ''} ${programName(template.certificateId)}`
+        .toLowerCase()
+        .includes(query.value.toLowerCase())
+    )
+  )
+  const selectedTemplateTopic = computed(() =>
+    topics.value.find(
+      (topic) => String(topic.topicId) === String(templateForm.sections[0]?.topicId)
+    )
+  )
+  const templateMaxPoints = computed(() =>
+    templateForm.sections.reduce(
+      (total, section) => total + Number(section.questionCount || 0) * Number(section.pointsPerQuestion || 0),
+      0
+    )
+  )
+  const templateTopicHasScale = computed(() =>
+    selectedTemplateTopic.value?.scoreMin != null &&
+    selectedTemplateTopic.value?.scoreMax != null &&
+    selectedTemplateTopic.value?.scoreStep > 0 &&
+    Boolean(selectedTemplateTopic.value?.scoreUnit)
+  )
+  const templateBandOptions = computed(() => {
+    const topic = selectedTemplateTopic.value
+    if (!topic || topic.scoreUnit !== 'band' || topic.scoreStep <= 0) return []
+    const count = Math.floor((topic.scoreMax - topic.scoreMin) / topic.scoreStep + 1e-8)
+    return Array.from({ length: count + 1 }, (_, index) =>
+      Number((topic.scoreMin + index * topic.scoreStep).toFixed(2))
+    )
+  })
+  const allowedTemplateBandMins = templateBandOptions
+  const allowedTemplateBandMaxes = templateBandOptions
+  const templateScoreLabel = computed(() =>
+    selectedTemplateTopic.value?.scoreUnit === 'band' ? 'Band' : 'Điểm mục tiêu'
+  )
+  const templateTopics = computed(() =>
+    topics.value.filter(
+      (topic) => String(topic.certificateId) === String(templateForm.certificateId)
+    )
+  )
   const filteredQuestions = computed(() =>
     questions.value.filter((item) =>
       `${item.content || item.questionText || ''} ${item.skill || item.topicName || ''}`
         .toLowerCase()
         .includes(query.value.toLowerCase())
-    )
-  )
-  const examQuestionChoices = computed(() =>
-    approvedQuestions.value.filter((question) =>
-      selectedQuestionIds.value.includes(question.questionId)
     )
   )
   const generatedQuestions = computed(() => {
@@ -198,6 +251,7 @@
       adminService.exams(),
       adminService.questions(),
       adminService.knowledgeDocuments(),
+      adminService.examTemplates(),
     ])
     if (results[0].status === 'fulfilled')
       users.value = asList(results[0].value)
@@ -209,6 +263,8 @@
       questions.value = asList(results[3].value)
     if (results[4].status === 'fulfilled')
       knowledgeDocuments.value = asList(results[4].value)
+    if (results[5].status === 'fulfilled')
+      examTemplates.value = asList(results[5].value)
     if (programs.value.length) {
       const topicResults = await Promise.allSettled(
         programs.value.map((program) =>
@@ -288,24 +344,138 @@
     Object.assign(programForm, preset)
   }
 
-  function openExam() {
-    Object.assign(examForm, {
-      certificateId: programs.value[0]?.certificateId
-        ? String(programs.value[0].certificateId)
-        : '',
+  function defaultTargetRange(topic) {
+    if (!topic || topic.scoreMin == null || topic.scoreMax == null || topic.scoreStep <= 0) {
+      return { min: 0, max: 0 }
+    }
+    const steps = Math.floor((topic.scoreMax - topic.scoreMin) / topic.scoreStep + 1e-8)
+    return {
+      min: Number((topic.scoreMin + Math.floor(steps * 0.5) * topic.scoreStep).toFixed(2)),
+      max: Number((topic.scoreMin + Math.floor(steps * 0.75) * topic.scoreStep).toFixed(2)),
+    }
+  }
+
+  function openTemplate() {
+    const certificateId = programs.value[0]?.certificateId
+    const topic = topics.value.find(
+      (item) => String(item.certificateId) === String(certificateId)
+    )
+    const targetRange = defaultTargetRange(topic)
+    Object.assign(templateForm, {
+      certificateId: certificateId ? String(certificateId) : '',
+      topicId: String(topic?.topicId || ''),
       title: '',
       description: '',
       durationMinutes: 60,
-      passingScore: 0,
+      targetScoreMin: targetRange.min,
+      targetScoreMax: targetRange.max,
+      passingScore: 5,
+      sections: [
+        {
+          topicId: String(topic?.topicId || ''),
+          name: 'Part 1',
+          questionType: 'MULTIPLE_CHOICE',
+          questionCount: 10,
+          pointsPerQuestion: 1,
+        },
+      ],
     })
-    approvedQuestions.value = questions.value.filter(
-      (question) =>
-        String(question.certificateId) === String(examForm.certificateId) &&
-        question.status === 'APPROVED'
-    )
-    selectedQuestionIds.value = []
-    modal.value = 'exam'
+    modal.value = 'template'
   }
+
+  function addTemplateSection() {
+    templateForm.sections.push({
+      topicId: templateForm.sections[0]?.topicId || '',
+      name: `Part ${templateForm.sections.length + 1}`,
+      questionType: 'MULTIPLE_CHOICE',
+      questionCount: 10,
+      pointsPerQuestion: 1,
+    })
+  }
+
+  function removeTemplateSection(index) {
+    if (templateForm.sections.length <= 1) return
+    templateForm.sections.splice(index, 1)
+    templateForm.sections.forEach((section, sectionIndex) => {
+      if (/^Part \d+$/.test(section.name)) section.name = `Part ${sectionIndex + 1}`
+    })
+  }
+
+  function topicName(topicId) {
+    if (topicId == null) return '—'
+    return topics.value.find((topic) => String(topic.topicId) === String(topicId))?.name || 'Kỹ năng'
+  }
+
+  function templateSkillsLabel(template) {
+    const topicIds = [...new Set((template.sections || []).map((section) => String(section.topicId)))]
+    return topicIds.map(topicName).join(', ')
+  }
+
+  function templateQuestionTotal(template) {
+    return (template.sections || []).reduce(
+      (total, section) => total + Number(section.questionCount || 0),
+      0
+    )
+  }
+
+  watch(
+    () => templateForm.certificateId,
+    (certificateId, previousCertificateId) => {
+      if (previousCertificateId && String(certificateId) !== String(previousCertificateId)) {
+        const firstTopicId = String(
+          topics.value.find((topic) => String(topic.certificateId) === String(certificateId))?.topicId || ''
+        )
+        templateForm.topicId = firstTopicId
+        templateForm.sections.forEach((section, index) => {
+          if (index === 0 || !templateTopics.value.some((topic) => String(topic.topicId) === String(section.topicId))) {
+            section.topicId = firstTopicId
+          }
+        })
+        templateForm.passingScore = Math.floor(templateMaxPoints.value * 0.5 * 2) / 2
+      }
+    }
+  )
+
+  watch(
+    () => templateForm.sections[0]?.topicId,
+    (topicId) => {
+      templateForm.topicId = topicId || ''
+      const topic = topics.value.find((item) => String(item.topicId) === String(topicId))
+      if (topic?.scoreMin == null || topic?.scoreMax == null || topic?.scoreStep <= 0) {
+        templateForm.targetScoreMin = 0
+        templateForm.targetScoreMax = 0
+        return
+      }
+      const range = defaultTargetRange(topic)
+      templateForm.targetScoreMin = range.min
+      templateForm.targetScoreMax = range.max
+    }
+  )
+
+  watch(
+    () => templateMaxPoints.value,
+    (maxPoints) => {
+      if (templateForm.passingScore > maxPoints) templateForm.passingScore = maxPoints
+    }
+  )
+
+  watch(
+    () => templateForm.targetScoreMin,
+    (minimum) => {
+      if (minimum > templateForm.targetScoreMax) {
+        templateForm.targetScoreMax = minimum
+      }
+    }
+  )
+
+  watch(
+    () => templateForm.targetScoreMax,
+    (maximum) => {
+      if (maximum < templateForm.targetScoreMin) {
+        templateForm.targetScoreMin = maximum
+      }
+    }
+  )
 
   async function openQuestion(question = null) {
     editingQuestionId.value = question?.questionId ?? null
@@ -356,20 +526,6 @@
       (topic) =>
         String(topic.certificateId) === String(knowledgeForm.certificateId)
     )
-  )
-
-  watch(
-    () => examForm.certificateId,
-    (certificateId) => {
-      approvedQuestions.value = questions.value.filter(
-        (question) =>
-          String(question.certificateId) === String(certificateId) &&
-          question.status === 'APPROVED'
-      )
-      selectedQuestionIds.value = selectedQuestionIds.value.filter((id) =>
-        approvedQuestions.value.some((question) => question.questionId === id)
-      )
-    }
   )
 
   watch(
@@ -492,32 +648,57 @@
     }
   }
 
-  async function saveExam() {
+  async function saveTemplate() {
     saving.value = true
     pageError.value = ''
     try {
-      const exam = await adminService.createExam({
-        certificateId: Number(examForm.certificateId),
-        title: examForm.title.trim(),
-        description: examForm.description.trim(),
-        durationMinutes: Number(examForm.durationMinutes),
-        passingScore: Number(examForm.passingScore),
+      await adminService.createExamTemplate({
+        certificateId: Number(templateForm.certificateId),
+        topicId: Number(templateForm.sections[0]?.topicId),
+        title: templateForm.title.trim(),
+        description: templateForm.description.trim(),
+        durationMinutes: Number(templateForm.durationMinutes),
+        targetScoreMin: Number(templateForm.targetScoreMin),
+        targetScoreMax: Number(templateForm.targetScoreMax),
+        passingScore: Number(templateForm.passingScore),
+        sections: templateForm.sections.map((section) => ({
+          topicId: Number(section.topicId),
+          name: section.name.trim(),
+          questionType: section.questionType,
+          questionCount: Number(section.questionCount),
+          pointsPerQuestion: Number(section.pointsPerQuestion),
+        })),
       })
-      for (const [index, question] of examQuestionChoices.value.entries()) {
-        await adminService.addQuestionToExam(exam.examId, {
-          questionId: question.questionId,
-          questionOrder: index + 1,
-          sectionName: programName(exam.certificateId),
-        })
-      }
       modal.value = ''
       await loadData()
     } catch (error) {
       pageError.value =
-        error?.response?.data?.responseMessage || 'Không thể tạo đề kiểm tra.'
+        error?.response?.data?.message ||
+        error?.response?.data?.responseMessage ||
+        'Không thể lưu mẫu đề.'
     } finally {
       saving.value = false
     }
+  }
+
+  async function deactivateTemplate(template) {
+    if (!window.confirm(`Ngừng sử dụng mẫu đề “${template.title}”?`)) return
+    try {
+      await adminService.deactivateExamTemplate(template.templateId)
+      await loadData()
+    } catch (error) {
+      pageError.value =
+        error?.response?.data?.responseMessage || 'Không thể ngừng mẫu đề.'
+    }
+  }
+
+  function previewTemplate() {
+    pageError.value = ''
+    modal.value = 'template-preview'
+  }
+
+  function previewQuestionNumbers(count) {
+    return Array.from({ length: Math.min(Number(count || 0), 12) }, (_, index) => index + 1)
   }
 
   async function saveQuestion() {
@@ -727,17 +908,6 @@
     }
   }
 
-  async function publishExam(exam) {
-    try {
-      await adminService.publishExam(exam.examId)
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage ||
-        'Chưa thể phát hành. Hãy thêm câu hỏi đã duyệt vào đề.'
-    }
-  }
-
   async function updateRole(user, event) {
     const oldRole = user.role
     user.role = event.target.value
@@ -804,18 +974,6 @@
       skills: '["TOAN","VAN","ANH","LY","HOA","SINH","SU","DIA"]',
     },
   ]
-
-  async function archiveExam(exam) {
-    if (!window.confirm(`Lưu trữ bài kiểm tra ${exam.title}?`)) return
-    try {
-      await adminService.archiveExam(exam.examId)
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage ||
-        'Không thể lưu trữ bài kiểm tra.'
-    }
-  }
 
   function logout() {
     userStore.logout()
@@ -932,12 +1090,21 @@
             </button>
             <button
               v-if="activeSection === 'overview' || activeSection === 'exams'"
-              class="admin-primary-button"
-              :disabled="!programs.length"
-              @click="openExam"
+              class="admin-secondary-button"
+              :disabled="!programs.length || !topics.length"
+              @click="openTemplate"
             >
-              <ClipboardCheck :size="16" />
-              Tạo đề kiểm tra
+              <Layers3 :size="16" />
+              Tạo bài kiểm tra
+            </button>
+            <button
+              v-if="activeSection === 'templates'"
+              class="admin-primary-button"
+              :disabled="!programs.length || !topics.length"
+              @click="openTemplate"
+            >
+              <Plus :size="16" />
+              Tạo bài kiểm tra
             </button>
             <button
               v-if="
@@ -1277,19 +1444,18 @@
           <div class="admin-panel-heading">
             <div>
               <h2>Bài kiểm tra</h2>
-              <p>
-                {{ filteredExams.length }} đề · phân loại theo IELTS, TOEIC,
-                THPT
-              </p>
+              <p>{{ filteredExams.length }} đề · nhóm theo kỹ năng / môn thi</p>
             </div>
-            <button
-              class="admin-primary-button"
-              :disabled="!programs.length"
-              @click="openExam"
-            >
-              <ClipboardCheck :size="16" />
-              Tạo đề kiểm tra
-            </button>
+            <div class="heading-actions">
+              <button
+                class="admin-secondary-button"
+                :disabled="!programs.length || !topics.length"
+                @click="openTemplate"
+              >
+                <Plus :size="16" />
+                Tạo bài kiểm tra
+              </button>
+            </div>
           </div>
           <div v-if="loading" class="admin-empty">Đang tải bài kiểm tra...</div>
           <div v-else-if="!filteredExams.length" class="admin-empty">
@@ -1300,7 +1466,8 @@
               <thead>
                 <tr>
                   <th>Đề kiểm tra</th>
-                  <th>Kỳ thi</th>
+                  <th>Kỳ thi / kỹ năng</th>
+                  <th>Mục tiêu</th>
                   <th>Thời lượng</th>
                   <th>Số câu</th>
                   <th>Trạng thái</th>
@@ -1315,7 +1482,8 @@
                       {{ exam.description || 'Bài đánh giá học tập' }}
                     </small>
                   </td>
-                  <td>{{ programName(exam.certificateId) }}</td>
+                  <td>{{ programName(exam.certificateId) }} · {{ topicName(exam.topicId) }}</td>
+                  <td>{{ exam.targetScoreMin != null ? `${exam.targetScoreMin}–${exam.targetScoreMax} ${exam.targetScoreUnit || ''}` : '—' }}</td>
                   <td>{{ exam.durationMinutes || 0 }} phút</td>
                   <td>{{ exam.questionCount || exam.totalQuestions || 0 }}</td>
                   <td>
@@ -1332,21 +1500,47 @@
                       }}
                     </span>
                   </td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section
+          v-else-if="activeSection === 'templates'"
+          class="admin-panel admin-table-panel"
+        >
+          <div class="admin-panel-heading">
+            <div>
+              <h2>Mẫu đề thi</h2>
+              <p>{{ filteredExamTemplates.length }} mẫu · cấu trúc đề dùng lại</p>
+            </div>
+            <button
+              class="admin-primary-button"
+              :disabled="!programs.length || !topics.length"
+              @click="openTemplate"
+            >
+              <Plus :size="16" /> Tạo bài kiểm tra
+            </button>
+          </div>
+          <div v-if="loading" class="admin-empty">Đang tải mẫu đề...</div>
+          <div v-else-if="!filteredExamTemplates.length" class="admin-empty">
+            Chưa có mẫu đề. Tạo mẫu với các phần, dạng câu hỏi và số câu cần dùng.
+          </div>
+          <div v-else class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Tên mẫu</th><th>Kỳ thi / kỹ năng</th><th>Thời lượng</th><th>Cấu trúc</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="template in filteredExamTemplates" :key="template.templateId">
+                  <td><strong>{{ template.title }}</strong><small class="secondary-text">{{ template.description || 'Mẫu đề thi' }}</small></td>
+                  <td>{{ programName(template.certificateId) }} · {{ templateSkillsLabel(template) }}</td>
+                  <td>{{ template.durationMinutes }} phút</td>
+                  <td>{{ template.targetScoreMin }}–{{ template.targetScoreMax }} {{ template.targetScoreUnit }} · {{ (template.sections || []).length }} phần · {{ templateQuestionTotal(template) }} câu</td>
                   <td>
-                    <button
-                      v-if="exam.status === 'DRAFT' && exam.questionCount > 0"
-                      class="table-action"
-                      @click="publishExam(exam)"
-                    >
-                      Phát hành
-                    </button>
-                    <button
-                      v-if="exam.status === 'PUBLISHED'"
-                      class="table-action"
-                      @click="archiveExam(exam)"
-                    >
-                      Lưu trữ
-                    </button>
+                    <button class="table-action danger" @click="deactivateTemplate(template)">Ngừng dùng</button>
                   </td>
                 </tr>
               </tbody>
@@ -1637,7 +1831,11 @@
                     ? editingCertificateId
                       ? 'Cập nhật chứng chỉ / kỳ thi'
                       : 'Tạo chứng chỉ / kỳ thi'
-                    : modal === 'question'
+                    : modal === 'template'
+                      ? 'Tạo bài kiểm tra'
+                      : modal === 'template-preview'
+                        ? 'Xem trước bài kiểm tra'
+                      : modal === 'question'
                       ? editingQuestionId
                         ? 'Chỉnh sửa câu hỏi'
                         : 'Biên soạn câu hỏi'
@@ -1777,84 +1975,109 @@
             </button>
           </footer>
         </form>
-        <form v-else-if="modal === 'exam'" @submit.prevent="saveExam">
-          <label>
-            Thuộc kỳ thi / chứng chỉ
-            <select v-model="examForm.certificateId" required>
+        <form v-else-if="modal === 'template'" @submit.prevent="previewTemplate">
+          <label>Kỳ thi / chứng chỉ
+            <select v-model="templateForm.certificateId" required>
               <option disabled value="">Chọn kỳ thi</option>
-              <option
-                v-for="program in programs"
-                :key="program.certificateId"
-                :value="String(program.certificateId)"
-              >
-                {{ program.name }} ({{ program.code }})
-              </option>
+              <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">{{ program.name }} ({{ program.code }})</option>
             </select>
           </label>
+          <label>Tên mẫu đề
+            <input v-model.trim="templateForm.title" required maxlength="200" placeholder="Ví dụ: IELTS Academic - Writing Practice" />
+          </label>
+          <label>Mô tả
+            <textarea v-model.trim="templateForm.description" rows="2" placeholder="Mục tiêu hoặc ghi chú về đề"></textarea>
+          </label>
+          <label>Thời lượng (phút)
+            <input v-model.number="templateForm.durationMinutes" type="number" min="1" max="600" required />
+          </label>
+          <fieldset class="template-sections">
+            <legend>Cấu trúc đề</legend>
+            <div v-for="(section, index) in templateForm.sections" :key="index" class="template-section-row">
+              <label>Kỹ năng / môn<select v-model="section.topicId" required><option disabled value="">Chọn kỹ năng / môn</option><option v-for="topic in templateTopics" :key="topic.topicId" :value="String(topic.topicId)">{{ topic.name }}</option></select></label>
+              <label>Tên phần<input v-model.trim="section.name" required maxlength="100" /></label>
+              <label>Dạng câu hỏi<select v-model="section.questionType"><option value="MULTIPLE_CHOICE">Trắc nghiệm</option><option value="TRUE_FALSE">Đúng / sai</option><option value="ESSAY">Tự luận</option><option value="FILL_BLANK">Điền khuyết</option></select></label>
+              <label>Số câu<input v-model.number="section.questionCount" type="number" min="1" max="200" required /></label>
+              <label>Điểm / câu<input v-model.number="section.pointsPerQuestion" type="number" min="0.1" step="0.1" required /></label>
+              <button type="button" class="icon-button" aria-label="Xóa phần" title="Xóa phần" :disabled="templateForm.sections.length <= 1" @click="removeTemplateSection(index)"><Trash2 :size="15" /></button>
+            </div>
+            <button type="button" class="admin-text-button" @click="addTemplateSection"><Plus :size="15" /> Thêm phần</button>
+          </fieldset>
+          <div v-if="selectedTemplateTopic" class="form-row">
+            <label>
+              {{ templateScoreLabel }} từ (theo phần đầu tiên)
+              <select v-if="selectedTemplateTopic.scoreUnit === 'band'" v-model.number="templateForm.targetScoreMin" required>
+                <option v-for="score in allowedTemplateBandMins" :key="score" :value="score">{{ score.toFixed(1) }}</option>
+              </select>
+              <input v-else v-model.number="templateForm.targetScoreMin" type="number" :min="selectedTemplateTopic.scoreMin" :max="selectedTemplateTopic.scoreMax" :step="selectedTemplateTopic.scoreStep" required />
+            </label>
+            <label>
+              {{ templateScoreLabel }} đến
+              <select v-if="selectedTemplateTopic.scoreUnit === 'band'" v-model.number="templateForm.targetScoreMax" required>
+                <option v-for="score in allowedTemplateBandMaxes" :key="score" :value="score">{{ score.toFixed(1) }}</option>
+              </select>
+              <input v-else v-model.number="templateForm.targetScoreMax" type="number" :min="selectedTemplateTopic.scoreMin" :max="selectedTemplateTopic.scoreMax" :step="selectedTemplateTopic.scoreStep" required />
+            </label>
+          </div>
+          <p v-if="selectedTemplateTopic" class="template-summary">
+            Thang điểm {{ selectedTemplateTopic.scoreMin }}–{{ selectedTemplateTopic.scoreMax }} {{ selectedTemplateTopic.scoreUnit }}, bước {{ selectedTemplateTopic.scoreStep }}
+          </p>
+          <p v-if="selectedTemplateTopic && !templateTopicHasScale" class="availability-low">
+            Kỹ năng / môn đầu tiên chưa được cấu hình thang điểm.
+          </p>
+          <label>Điểm đạt theo tổng điểm câu hỏi (tối đa {{ templateMaxPoints }})
+            <input v-model.number="templateForm.passingScore" type="number" min="0" :max="templateMaxPoints" step="any" required />
+          </label>
+          <footer>
+            <button type="button" class="admin-secondary-button" @click="modal = ''">Hủy</button>
+            <button class="admin-primary-button" :disabled="!templateTopicHasScale || templateForm.passingScore > templateMaxPoints"><Check :size="16" />Xem trước</button>
+          </footer>
+        </form>
+        <section v-else-if="modal === 'template-preview'" class="exam-form-preview">
+          <div class="preview-heading">
+            <p>{{ programName(templateForm.certificateId) }} · {{ templateForm.durationMinutes }} phút · {{ templateQuestionTotal({ sections: templateForm.sections }) }} câu</p>
+            <h3>{{ templateForm.title }}</h3>
+            <small v-if="selectedTemplateTopic">Mục tiêu {{ templateForm.targetScoreMin }}–{{ templateForm.targetScoreMax }} {{ selectedTemplateTopic.scoreUnit }} · Điểm đạt {{ templateForm.passingScore }} / {{ templateMaxPoints }}</small>
+          </div>
+          <article v-for="(section, sectionIndex) in templateForm.sections" :key="sectionIndex" class="preview-section">
+            <header><div><strong>{{ section.name }}</strong><small>{{ topicName(section.topicId) }} · {{ section.questionType }}</small></div><span>{{ section.questionCount }} câu</span></header>
+            <div v-for="questionNumber in previewQuestionNumbers(section.questionCount)" :key="questionNumber" class="preview-question"><span>{{ questionNumber }}</span><div></div></div>
+            <small v-if="section.questionCount > 12" class="template-summary">Còn {{ section.questionCount - 12 }} câu trống</small>
+          </article>
+          <footer>
+            <button type="button" class="admin-secondary-button" @click="modal = 'template'">Quay lại chỉnh sửa</button>
+            <button type="button" class="admin-primary-button" :disabled="saving" @click="saveTemplate"><Check :size="16" />{{ saving ? 'Đang lưu...' : 'Lưu cấu hình bài kiểm tra' }}</button>
+          </footer>
+        </section>
+        <form v-else-if="false" @submit.prevent="saveExam">
+          <label>Mẫu đề
+            <select v-model="examForm.templateId" required>
+              <option disabled value="">Chọn mẫu đề</option>
+              <option v-for="template in examTemplates" :key="template.templateId" :value="String(template.templateId)">{{ template.title }} · {{ programName(template.certificateId) }} / {{ templateSkillsLabel(template) }}</option>
+            </select>
+          </label>
+          <p v-if="selectedExamTemplate" class="template-summary">{{ programName(selectedExamTemplate.certificateId) }} · {{ templateSkillsLabel(selectedExamTemplate) }} · {{ selectedExamTemplate.durationMinutes }} phút · {{ templateQuestionTotal(selectedExamTemplate) }} câu</p>
           <label>
-            Tên đề kiểm tra
+            Tên đề thi
             <input
               v-model.trim="examForm.title"
               required
               maxlength="200"
-              placeholder="vd: IELTS Academic Reading - Practice 01"
+              placeholder="Tên lần thi này"
             />
           </label>
-          <label>
-            Mô tả
-            <textarea
-              v-model.trim="examForm.description"
-              rows="3"
-              placeholder="Kỹ năng, dạng đề và mục tiêu đánh giá"
-            ></textarea>
-          </label>
-          <div class="form-row">
-            <label>
-              Thời lượng (phút)
-              <input
-                v-model.number="examForm.durationMinutes"
-                type="number"
-                min="1"
-                required
-              />
-            </label>
-            <label>
-              Điểm mục tiêu
-              <input
-                v-model.number="examForm.passingScore"
-                type="number"
-                min="0"
-                required
-              />
-            </label>
-          </div>
-          <fieldset class="question-picker">
-            <legend>
-              Câu hỏi đã được duyệt cho
-              {{ programName(examForm.certificateId) }}
-            </legend>
-            <p v-if="!approvedQuestions.length" class="picker-empty">
-              Chưa có câu hỏi được duyệt thuộc kỳ thi này. Hãy tạo câu hỏi, gửi
-              duyệt rồi duyệt trong ngân hàng câu hỏi.
-            </p>
-            <label
-              v-for="question in approvedQuestions"
-              :key="question.questionId"
-              class="question-choice"
-            >
-              <input
-                v-model="selectedQuestionIds"
-                type="checkbox"
-                :value="question.questionId"
-              />
-              <span>
-                <strong>{{ question.content }}</strong>
-                <small>
-                  {{ question.questionType }} · {{ question.points }} điểm
-                </small>
-              </span>
-            </label>
+          <p v-if="selectedExamTemplate" class="template-summary">
+            Mục tiêu: {{ selectedExamTemplate.targetScoreMin }}–{{ selectedExamTemplate.targetScoreMax }} {{ selectedExamTemplate.targetScoreUnit }}
+          </p>
+          <fieldset v-if="selectedExamTemplate" class="template-sections">
+            <legend>Chọn độ khó cho từng phần</legend>
+            <div v-for="(section, index) in selectedTemplateSections" :key="index" class="exam-section-row">
+              <div><strong>{{ section.name }}</strong><small>{{ section.questionCount }} câu · {{ section.questionType }}</small></div>
+              <label>Độ khó<select v-model="examForm.sectionDifficulties[index]" required><option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option></select></label>
+              <small :class="sectionAvailableCount(index) < section.questionCount ? 'availability-low' : 'availability-ok'">Có {{ sectionAvailableCount(index) }} / {{ section.questionCount }} câu</small>
+            </div>
           </fieldset>
+          <p v-else class="picker-empty">Chọn mẫu bài kiểm tra để cấu hình độ khó từng phần.</p>
           <footer>
             <button
               type="button"
@@ -1865,15 +2088,13 @@
             </button>
             <button
               class="admin-primary-button"
-              :disabled="
-                saving || !programs.length || !selectedQuestionIds.length
-              "
+              :disabled="saving || !selectedExamTemplate || selectedTemplateSections.some((section, index) => sectionAvailableCount(index) < section.questionCount)"
             >
               <Check :size="16" />
               {{
                 saving
                   ? 'Đang lưu...'
-                  : `Tạo đề và gắn ${selectedQuestionIds.length} câu hỏi`
+                  : 'Sinh đề từ ngân hàng câu hỏi'
               }}
             </button>
           </footer>
@@ -2683,6 +2904,90 @@
     color: #82909d;
     font-size: 8px;
   }
+  .template-sections {
+    display: grid;
+    gap: 9px;
+    min-width: 0;
+    margin: 4px 0;
+    padding: 10px;
+    border: 1px solid #e5ebef;
+    border-radius: 5px;
+  }
+  .template-sections legend {
+    padding: 0 5px;
+    color: #526878;
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .template-section-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(90px, .8fr) minmax(120px, 1.2fr) 70px 80px 28px;
+    align-items: end;
+    gap: 7px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #edf1f4;
+  }
+  .template-section-row label,
+  .exam-section-row label { min-width: 0; }
+  .template-section-row .icon-button {
+    width: 28px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #e5ebef;
+    border-radius: 4px;
+    background: #fff;
+    color: #a24f4f;
+    cursor: pointer;
+  }
+  .template-section-row .icon-button:disabled { opacity: .4; cursor: not-allowed; }
+  .exam-section-row {
+    display: grid;
+    grid-template-columns: minmax(100px, 1fr) minmax(125px, .8fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid #edf1f4;
+  }
+  .exam-section-row > div { display: grid; gap: 4px; }
+  .exam-section-row strong { color: #35495a; font-size: 9px; }
+  .exam-section-row small, .template-summary { color: #82909d; font-size: 8px; }
+  .availability-low { color: #b14f43 !important; }
+  .availability-ok { color: #28806f !important; }
+  .template-summary { margin: -3px 0 0; }
+  .exam-form-preview {
+    display: grid;
+    gap: 12px;
+  }
+  .preview-heading {
+    display: grid;
+    gap: 5px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e8edf1;
+  }
+  .preview-heading h3 { margin: 0; color: #263a4e; font-size: 15px; }
+  .preview-heading p, .preview-heading small { margin: 0; color: #82909d; font-size: 9px; }
+  .preview-section {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid #e5ebef;
+    border-radius: 5px;
+  }
+  .preview-section > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid #edf1f4;
+  }
+  .preview-section > header > div { display: grid; gap: 3px; }
+  .preview-section strong { color: #35495a; font-size: 10px; }
+  .preview-section small, .preview-section > header > span { color: #82909d; font-size: 8px; }
+  .preview-question { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+  .preview-question > span { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid #dce5e9; border-radius: 50%; color: #617787; font-size: 8px; }
+  .preview-question > div { height: 1px; flex: 1; background: #e8edf1; }
   .admin-text-button {
     display: inline-flex;
     align-items: center;
@@ -3004,7 +3309,7 @@
     background: rgba(17, 31, 45, 0.46);
   }
   .admin-modal {
-    width: min(100%, 480px);
+    width: min(100%, 640px);
     max-height: min(90vh, 760px);
     overflow: auto;
     padding: 19px;
@@ -3186,5 +3491,18 @@
     .admin-modal {
       padding: 15px;
     }
+    .template-section-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px;
+    }
+    .template-section-row label:nth-child(1) { grid-column: 1; grid-row: 1; }
+    .template-section-row label:nth-child(2) { grid-column: 2; grid-row: 1; }
+    .template-section-row label:nth-child(3) { grid-column: 1 / -1; grid-row: 2; }
+    .template-section-row label:nth-child(4) { grid-column: 1; grid-row: 3; }
+    .template-section-row label:nth-child(5) { grid-column: 2; grid-row: 3; }
+    .template-section-row .icon-button { grid-column: 3; grid-row: 1; }
+    .exam-section-row {
+      grid-template-columns: minmax(0, 1fr) minmax(100px, .8fr);
+    }
+    .exam-section-row > small { grid-column: 1 / -1; }
   }
 </style>

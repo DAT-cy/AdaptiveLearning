@@ -60,6 +60,12 @@ public class AttemptServiceImpl implements AttemptService {
         if (exam.getStatus() != ContentStatus.PUBLISHED) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
+        if (exam.getOwnerUserId() != null && !exam.getOwnerUserId().equals(userId)) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
+        if (exam.getOwnerUserId() != null && !exam.getOwnerUserId().equals(userId)) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
         attemptRepository.findByUserIdAndExamId(userId, examId).ifPresent(existing -> {
             if (existing.getStatus() == AttemptStatus.IN_PROGRESS) {
                 throw new CommonException(ErrorCode.BAD_REQUEST);

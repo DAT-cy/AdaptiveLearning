@@ -10,6 +10,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.ForeignKey;
+import jakarta.persistence.Index;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -19,7 +21,9 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "exams")
+@Table(name = "exams", indexes = {
+        @Index(name = "idx_exams_owner_status", columnList = "owner_user_id,status")
+})
 @Data
 @Builder
 @NoArgsConstructor
@@ -34,6 +38,21 @@ public class Exam extends BaseEntity {
     @NotNull
     @Column(name = "certificate_id", nullable = false)
     private Long certificateId;
+
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
+    @Column(name = "topic_id")
+    private Long topicId;
+
+    @Column(name = "target_score_min")
+    private Double targetScoreMin;
+
+    @Column(name = "target_score_max")
+    private Double targetScoreMax;
+
+    @Column(name = "target_score_unit", length = 30)
+    private String targetScoreUnit;
 
     @NotBlank
     @Column(name = "title", length = 200, nullable = false)

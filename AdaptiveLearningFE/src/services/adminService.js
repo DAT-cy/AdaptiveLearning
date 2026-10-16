@@ -12,6 +12,11 @@ export const adminService = {
     data(Axios.patch(`/api/v1/admin/users/${userId}/status`, { enabled })),
   certificates: () => data(Axios.get('/api/v1/certificates')),
   exams: () => data(Axios.get('/api/v1/exams')),
+  examTemplates: () => data(Axios.get('/api/v1/exam-templates')),
+  createExamTemplate: (payload) =>
+    data(Axios.post('/api/v1/exam-templates', payload)),
+  deactivateExamTemplate: (id) =>
+    data(Axios.delete(`/api/v1/exam-templates/${id}`)),
   questions: (filters = {}) => data(Axios.get('/api/v1/questions', filters)),
   knowledgeDocuments: () => data(Axios.get('/api/v1/admin/knowledge-base')),
   knowledgeDocument: (id) =>
@@ -44,9 +49,4 @@ export const adminService = {
   updateCertificate: (id, payload) =>
     data(Axios.put(`/api/v1/certificates/${id}`, payload)),
   deleteCertificate: (id) => data(Axios.delete(`/api/v1/certificates/${id}`)),
-  createExam: (payload) => data(Axios.post('/api/v1/exams', payload)),
-  addQuestionToExam: (examId, payload) =>
-    data(Axios.post(`/api/v1/exams/${examId}/questions`, payload)),
-  publishExam: (id) => data(Axios.post(`/api/v1/exams/${id}/publish`)),
-  archiveExam: (id) => data(Axios.post(`/api/v1/exams/${id}/archive`)),
 }

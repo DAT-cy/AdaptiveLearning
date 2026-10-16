@@ -12,9 +12,15 @@ public interface ExamService {
 
     List<ExamResponse> getAll(Long certificateId);
 
+    List<ExamResponse> getAvailableToUser(Long certificateId, Long userId);
+
     ExamResponse getById(Long id);
 
     ExamDetailResponse getDetail(Long id);
+
+    ExamResponse getVisibleById(Long id, Long userId, boolean admin);
+
+    ExamDetailResponse getVisibleDetail(Long id, Long userId, boolean admin);
 
     ExamResponse create(ExamRequest request);
 

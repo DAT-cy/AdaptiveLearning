@@ -124,6 +124,15 @@ public class TopicServiceImpl implements TopicService {
     }
 
     private void applyFields(Topic topic, TopicRequest request) {
+        boolean hasAnyScaleValue = request.getScoreMin() != null || request.getScoreMax() != null
+                || request.getScoreStep() != null || request.getScoreUnit() != null;
+        boolean hasCompleteScale = request.getScoreMin() != null && request.getScoreMax() != null
+                && request.getScoreStep() != null && request.getScoreUnit() != null
+                && !request.getScoreUnit().isBlank();
+        if (hasAnyScaleValue && (!hasCompleteScale || request.getScoreMin() < 0
+                || request.getScoreMax() < request.getScoreMin() || request.getScoreStep() <= 0)) {
+            throw new IllegalArgumentException("Score scale requires valid minimum, maximum, positive step and unit.");
+        }
         topic.setName(request.getName());
         topic.setCode(request.getCode());
         topic.setDescription(request.getDescription());
@@ -131,6 +140,12 @@ public class TopicServiceImpl implements TopicService {
         topic.setCertificateId(request.getCertificateId());
         topic.setParentId(request.getParentId());
         topic.setSortOrder(request.getSortOrder());
+        if (hasAnyScaleValue || topic.getTopicId() == null) {
+            topic.setScoreMin(request.getScoreMin());
+            topic.setScoreMax(request.getScoreMax());
+            topic.setScoreStep(request.getScoreStep());
+            topic.setScoreUnit(request.getScoreUnit());
+        }
     }
 
     private TopicResponse toResponse(Topic topic) {
@@ -144,6 +159,10 @@ public class TopicServiceImpl implements TopicService {
                 .parentId(topic.getParentId())
                 .sortOrder(topic.getSortOrder())
                 .isActive(topic.isActive())
+                .scoreMin(topic.getScoreMin())
+                .scoreMax(topic.getScoreMax())
+                .scoreStep(topic.getScoreStep())
+                .scoreUnit(topic.getScoreUnit())
                 .build();
     }
 }

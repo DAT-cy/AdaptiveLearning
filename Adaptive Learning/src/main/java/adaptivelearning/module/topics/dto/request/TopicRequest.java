@@ -18,4 +18,8 @@ public class TopicRequest {
     private Long certificateId;
     private Long parentId;
     private int sortOrder;
+    private Double scoreMin;
+    private Double scoreMax;
+    private Double scoreStep;
+    private String scoreUnit;
 }

@@ -8,7 +8,9 @@ import jakarta.validation.constraints.Size;
 import lombok.*;
 
 @Entity
-@Table(name = "topics")
+@Table(name = "topics", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_topic_certificate_code", columnNames = {"certificate_id", "code"})
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -51,4 +53,16 @@ public class Topic extends BaseEntity {
     @Builder.Default
     @Column(name = "is_active")
     private boolean isActive = true;
+
+    @Column(name = "score_min")
+    private Double scoreMin;
+
+    @Column(name = "score_max")
+    private Double scoreMax;
+
+    @Column(name = "score_step")
+    private Double scoreStep;
+
+    @Column(name = "score_unit", length = 30)
+    private String scoreUnit;
 }

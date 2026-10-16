@@ -22,6 +22,14 @@ public class ExamResponse {
     @Schema(description = "Certificate ID", example = "1")
     private Long certificateId;
 
+    private Long topicId;
+
+    private Double targetScoreMin;
+
+    private Double targetScoreMax;
+
+    private String targetScoreUnit;
+
     @Schema(description = "Exam title", example = "IELTS Reading Practice Test 1")
     private String title;
 

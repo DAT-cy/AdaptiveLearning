@@ -16,12 +16,17 @@ const userStore = useUserStore()
 const activeView = ref(route.meta.view || 'dashboard')
 const searchQuery = ref('')
 const exams = ref([])
+const examTemplates = ref([])
 const history = ref([])
 const recommendations = ref([])
 const certificates = ref([])
 const plans = ref([])
 const progress = ref(null)
 const loading = ref(false)
+const generatingExam = ref(false)
+const templatePickerOpen = ref(false)
+const selectedTemplate = ref(null)
+const sectionDifficulties = ref([])
 const pageError = ref('')
 const selectedCertificateId = ref('')
 const showPlanForm = ref(false)
@@ -77,6 +82,10 @@ const filteredExams = computed(() => publishedExams.value.filter((exam) => {
   const query = searchQuery.value.trim().toLowerCase()
   return !query || `${exam.title} ${exam.description || ''}`.toLowerCase().includes(query)
 }))
+const filteredExamTemplates = computed(() => examTemplates.value.filter((template) => {
+  const query = searchQuery.value.trim().toLowerCase()
+  return !query || `${template.title} ${template.description || ''} ${template.sections?.map((section) => section.name).join(' ') || ''}`.toLowerCase().includes(query)
+}))
 const activePlans = computed(() => plans.value.filter((plan) => plan.status === 'ACTIVE'))
 const activePlan = computed(() => activePlans.value[0] || null)
 const activeRecommendations = computed(() => recommendations.value.filter((item) => item.status !== 'COMPLETED'))
@@ -122,7 +131,7 @@ const formattedTimeLeft = computed(() => `${Math.floor(secondsLeft.value / 60).t
 
 function asList(value) {
   if (Array.isArray(value)) return value
-  return value?.content || value?.items || []
+  return value?.data || value?.content || value?.items || []
 }
 
 function localizeStatus(status) {
@@ -162,9 +171,9 @@ async function loadDashboard() {
   pageError.value = ''
   const results = await Promise.allSettled([
     learningService.exams(), learningService.history(), learningService.recommendations(),
-    learningService.certificates(), learningService.plans(),
+    learningService.certificates(), learningService.plans(), learningService.examTemplates(),
   ])
-  const [examResult, historyResult, recommendationResult, certificateResult, plansResult] = results
+  const [examResult, historyResult, recommendationResult, certificateResult, plansResult, templatesResult] = results
   if (examResult.status === 'fulfilled') exams.value = asList(examResult.value)
   if (historyResult.status === 'fulfilled') history.value = asList(historyResult.value)
   if (recommendationResult.status === 'fulfilled') recommendations.value = asList(recommendationResult.value)
@@ -173,6 +182,7 @@ async function loadDashboard() {
     if (!selectedCertificateId.value && certificates.value.length) selectedCertificateId.value = String(certificates.value[0].certificateId)
   }
   if (plansResult.status === 'fulfilled') plans.value = asList(plansResult.value)
+  if (templatesResult.status === 'fulfilled') examTemplates.value = asList(templatesResult.value)
   if (results.every((item) => item.status === 'rejected')) {
     pageError.value = 'Không kết nối được backend. Hãy kiểm tra backend và cơ sở dữ liệu rồi tải lại.'
   }
@@ -306,6 +316,7 @@ async function startExam(exam) {
   loading.value = true
   pageError.value = ''
   result.value = null
+  for (const key of Object.keys(answers)) delete answers[key]
   try {
     const examDetail = await learningService.exam(exam.examId)
     const started = await learningService.startAttempt(exam.examId)
@@ -327,6 +338,30 @@ async function startExam(exam) {
     pageError.value = error?.response?.data?.responseMessage || error?.message || 'Không thể bắt đầu bài thi.'
   } finally {
     loading.value = false
+  }
+}
+
+function openTemplateExam(template) {
+  selectedTemplate.value = template
+  sectionDifficulties.value = (template.sections || []).map(() => 'MEDIUM')
+  templatePickerOpen.value = true
+}
+
+async function generateAndStartExam() {
+  if (!selectedTemplate.value || generatingExam.value) return
+  generatingExam.value = true
+  pageError.value = ''
+  try {
+    const exam = await learningService.generateExamFromTemplate(
+      selectedTemplate.value.templateId,
+      { sectionDifficulties: sectionDifficulties.value }
+    )
+    templatePickerOpen.value = false
+    await startExam(exam)
+  } catch (error) {
+    pageError.value = error?.response?.data?.responseMessage || error?.response?.data?.message || error?.message || 'Không thể tạo đề từ form đã chọn.'
+  } finally {
+    generatingExam.value = false
   }
 }
 
@@ -475,9 +510,26 @@ onUnmounted(() => {
         </section>
 
         <section v-else-if="activeView === 'tests'" class="page-view">
-          <div class="view-heading"><div><p class="view-kicker">LUYỆN TẬP VÀ ĐÁNH GIÁ</p><h1>Bài kiểm tra</h1><p>Chọn đề thi để bắt đầu một lượt luyện tập mới.</p></div><label class="search-field"><Search :size="17" /><input v-model="searchQuery" placeholder="Tìm bài kiểm tra" aria-label="Tìm bài kiểm tra"></label></div>
+          <div class="view-heading"><div><p class="view-kicker">LUYỆN TẬP VÀ ĐÁNH GIÁ</p><h1>Bài kiểm tra</h1><p>Chọn một form; đề được tạo khi bạn bắt đầu làm.</p></div><label class="search-field"><Search :size="17" /><input v-model="searchQuery" placeholder="Tìm form bài thi" aria-label="Tìm form bài thi"></label></div>
+          <div v-if="filteredExamTemplates.length" class="test-list template-test-list">
+            <article v-for="(template, index) in filteredExamTemplates" :key="template.templateId" class="test-row">
+              <span class="test-icon" :class="`test-icon-${index % 4}`"><BookOpen :size="20" /></span>
+              <div class="test-info">
+                <h2>{{ template.title }}</h2>
+                <p>{{ template.sections.map((section) => section.name).join(' · ') }}</p>
+                <div class="test-meta">
+                  <span><Clock3 :size="14" /> {{ template.durationMinutes }} phút</span>
+                  <span>{{ template.sections.reduce((sum, section) => sum + section.questionCount, 0) }} câu</span>
+                  <span>{{ template.targetScoreMin }}–{{ template.targetScoreMax }} {{ template.targetScoreUnit }}</span>
+                </div>
+              </div>
+              <button class="primary-button" :disabled="loading || generatingExam" @click="openTemplateExam(template)">Chọn form <ArrowRight :size="15" /></button>
+            </article>
+          </div>
+          <div v-else-if="!loading" class="empty-inline">Chưa có form bài thi được mở.</div>
           <div v-if="filteredExams.length" class="test-list"><article v-for="(exam, index) in filteredExams" :key="exam.examId" class="test-row"><span class="test-icon" :class="`test-icon-${index % 4}`"><BookOpen :size="20" /></span><div class="test-info"><h2>{{ exam.title }}</h2><p>{{ exam.description || 'Bài đánh giá kiến thức tổng hợp' }}</p><div class="test-meta"><span><Clock3 :size="14" /> {{ exam.durationMinutes }} phút</span><span>{{ exam.questionCount || exam.totalQuestions || 0 }} câu hỏi</span><span>{{ exam.totalPoints ?? '—' }} điểm</span></div></div><button class="primary-button" :disabled="loading" @click="startExam(exam)">Bắt đầu <ArrowRight :size="15" /></button></article></div>
-          <div v-else-if="!loading" class="empty-page"><BookOpen :size="28" /><h2>Chưa có bài kiểm tra</h2><p>Đề thi đã xuất bản sẽ được hiển thị tại đây.</p></div>
+          <div v-if="filteredExams.length" class="section-heading legacy-exam-heading"><div><h2>Đề thi đã xuất bản</h2><p>Các bài thi có sẵn trong hệ thống</p></div></div>
+          <div v-if="!loading && !filteredExams.length && !filteredExamTemplates.length" class="empty-page"><BookOpen :size="28" /><h2>Chưa có form bài thi</h2><p>Các form do quản trị viên mở sẽ xuất hiện tại đây.</p></div>
           <div v-if="history.length" class="recent-history"><div class="section-heading"><div><h2>Lịch sử gần đây</h2><p>Các lượt làm bài của bạn</p></div><button class="inline-link" @click="showView('history')">Xem tất cả <ArrowRight :size="14" /></button></div><article v-for="item in history.slice(0, 3)" :key="item.attemptId" class="history-row"><span class="history-status"><CheckCircle2 :size="16" /></span><div><strong>{{ exams.find((exam) => exam.examId === item.examId)?.title || `Bài thi #${item.examId}` }}</strong><small>{{ formatDate(item.startedAt) }} · {{ localizeStatus(item.status) }}</small></div><strong class="history-score">{{ item.score ?? '—' }}<small v-if="item.maxScore != null"> / {{ item.maxScore }}</small></strong></article></div>
         </section>
 
@@ -511,6 +563,23 @@ onUnmounted(() => {
         <section v-else-if="activeView === 'result' && result" class="result-panel"><span class="result-icon"><CheckCircle2 :size="28" /></span><p class="view-kicker">ĐÃ HOÀN THÀNH</p><h1>Kết quả bài thi</h1><strong class="result-score">{{ result.score ?? 0 }}<small> / {{ result.maxScore ?? 0 }}</small></strong><div class="result-counts"><div><strong>{{ result.correctCount }}</strong><small>Đúng</small></div><div><strong>{{ result.wrongCount }}</strong><small>Sai</small></div><div><strong>{{ result.unansweredCount }}</strong><small>Bỏ trống</small></div></div><button class="primary-button" @click="showView('dashboard')">Về trang chủ <ArrowRight :size="16" /></button></section>
       </div>
     </section>
+    <div v-if="templatePickerOpen && selectedTemplate" class="template-picker-backdrop" @click.self="templatePickerOpen = false">
+      <section class="template-picker" role="dialog" aria-modal="true" :aria-label="`Cấu hình ${selectedTemplate.title}`">
+        <header class="template-picker-heading">
+          <div><p class="view-kicker">FORM BÀI THI</p><h2>{{ selectedTemplate.title }}</h2><p>{{ selectedTemplate.durationMinutes }} phút · {{ selectedTemplate.targetScoreMin }}–{{ selectedTemplate.targetScoreMax }} {{ selectedTemplate.targetScoreUnit }}</p></div>
+          <button class="icon-action" aria-label="Đóng" @click="templatePickerOpen = false"><X :size="18" /></button>
+        </header>
+        <form class="template-difficulty-form" @submit.prevent="generateAndStartExam">
+          <label v-for="(section, index) in selectedTemplate.sections" :key="index" class="template-difficulty-row">
+            <span><strong>{{ section.name }}</strong><small>{{ section.questionCount }} câu · {{ section.questionType }}</small></span>
+            <select v-model="sectionDifficulties[index]" aria-label="Độ khó">
+              <option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option>
+            </select>
+          </label>
+          <footer><button type="button" class="secondary-button" :disabled="generatingExam" @click="templatePickerOpen = false">Hủy</button><button class="primary-button" :disabled="generatingExam"><Check :size="16" />{{ generatingExam ? 'Đang tạo đề...' : 'Tạo đề và bắt đầu' }}</button></footer>
+        </form>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -540,6 +609,20 @@ onUnmounted(() => {
 .roadmap-track { display: grid; grid-template-columns: auto 1fr auto 1fr auto; align-items: center; gap: 7px; max-width: 540px; margin-top: 14px; }.roadmap-track > div { display: grid; justify-items: center; gap: 4px; color: #97a5bc; }.roadmap-track > div > span { display: grid; width: 23px; height: 23px; place-items: center; border: 1px solid #dce5f2; border-radius: 50%; background: #fff; color: #8192ad; font-size: 8px; font-weight: 700; }.roadmap-track > div.reached > span,.roadmap-track > div.current > span { border-color: #3476f1; background: #3476f1; color: white; }.roadmap-track > div.current > span { box-shadow: 0 0 0 4px #e8f0ff; }.roadmap-track > div small { font-size: 8px; white-space: nowrap; }.roadmap-track > i { height: 2px; background: #e4eaf4; }.roadmap-track > i.reached { background: #55c6a7; }
 .course-progress { display: grid; width: 100%; grid-template-columns: 1fr auto; align-items: center; gap: 6px 10px; margin: auto 0 13px; color: #7c8eaa; font-size: 9px; }.course-progress strong { color: #3474e9; font-size: 10px; }.course-progress > div { grid-column: 1 / -1; height: 5px; overflow: hidden; border-radius: 4px; background: #eaf0f8; }.course-progress > div i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#3475f2,#38c3a1); }
 .test-list { display: grid; gap: 10px; padding: 0; border: 0; background: transparent; }.test-row { padding: 13px; border: 1px solid #e6edf6; border-radius: 8px; background: #fff; }.test-row + .test-row { border-top: 1px solid #e6edf6; }
+.template-test-list { margin-bottom: 20px; }
+.legacy-exam-heading { margin: 20px 0 10px; }
+.template-picker-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(20,32,52,.48); }
+.template-picker { width: min(100%, 520px); max-height: min(90vh, 760px); overflow: auto; padding: 20px; border: 1px solid #e3e9ef; border-radius: 8px; background: #fff; box-shadow: 0 22px 70px rgba(10,25,38,.25); }
+.template-picker-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid #e8edf1; }
+.template-picker-heading h2 { margin: 2px 0 5px; color: #263a4e; font-size: 17px; }
+.template-picker-heading p:not(.view-kicker) { margin: 0; color: #82909d; font-size: 10px; }
+.template-difficulty-form { display: grid; gap: 0; }
+.template-difficulty-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #edf1f4; }
+.template-difficulty-row > span { display: grid; gap: 4px; }
+.template-difficulty-row strong { color: #35495a; font-size: 10px; }
+.template-difficulty-row small { color: #82909d; font-size: 9px; }
+.template-difficulty-row select { width: min(48%, 190px); min-height: 36px; }
+.template-difficulty-form footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; }
 .progress-visuals { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(230px,.8fr); gap: 13px; }.trend-panel,.score-panel { min-width: 0; }.score-chart { display: flex; height: 168px; align-items: stretch; justify-content: space-around; gap: 10px; padding: 10px 8px 0; border-bottom: 1px solid #e8eef7; background: repeating-linear-gradient(to bottom, transparent 0, transparent 40px, #edf2f9 41px, transparent 42px); }.score-column { display: grid; min-width: 24px; flex: 1; grid-template-rows: 17px 1fr 19px; justify-items: center; align-items: flex-end; gap: 4px; color: #788ba9; }.score-column strong { color: #304c7d; font-size: 9px; }.score-column small { font-size: 8px; }.score-bar-track { display: flex; width: min(25px, 65%); height: 100%; align-items: flex-end; overflow: hidden; border-radius: 5px 5px 0 0; background: #f0f4fb; }.score-bar-track i { display: block; width: 100%; min-height: 5px; border-radius: 5px 5px 0 0; background: linear-gradient(180deg,#5d8df7,#3672ed); }.chart-empty { display: grid; min-height: 170px; place-items: center; color: #8494ad; font-size: 10px; text-align: center; }.score-ring { position: relative; display: grid; width: 136px; aspect-ratio: 1; margin: 4px auto 13px; place-items: center; border-radius: 50%; background: conic-gradient(#3476f1 var(--score), #eaf0f8 0); }.score-ring::before { position: absolute; width: 106px; aspect-ratio: 1; border-radius: 50%; background: #fff; content: ''; }.score-ring > div { position: relative; z-index: 1; display: grid; gap: 2px; justify-items: center; }.score-ring strong { color: #172e5c; font-size: 21px; }.score-ring small { color: #8392aa; font-size: 9px; }.score-legend { display: grid; gap: 8px; }.score-legend span { display: flex; align-items: center; gap: 7px; color: #7184a3; font-size: 9px; }.score-legend i { width: 8px; height: 8px; border-radius: 50%; background: #3476f1; }.score-legend span:nth-child(2) i { background: #43c3a1; }.score-legend strong { margin-left: auto; color: #283f6a; }
 .tutor-workspace { grid-template-columns: 195px minmax(0,1fr) 220px; }.tutor-features { padding: 15px 12px; border-left: 1px solid #e8edf6; }.tutor-features h2 { margin: 2px 4px 12px; font-size: 12px; }.tutor-features button { display: flex; width: 100%; align-items: center; gap: 8px; margin-top: 5px; padding: 9px 6px; border: 0; border-radius: 6px; background: transparent; color: #8795ab; text-align: left; cursor: pointer; }.tutor-features button:hover { background: #f5f8fd; }.feature-icon { display: grid; width: 29px; height: 29px; flex: 0 0 auto; place-items: center; border-radius: 7px; }.feature-blue { color: #3274ed; background: #eaf1ff; }.feature-green { color: #17a984; background: #e6f7f0; }.feature-violet { color: #805de8; background: #f1edff; }.feature-orange { color: #e98241; background: #fff1e7; }.tutor-features button > span:nth-child(2) { display: grid; min-width: 0; flex: 1; gap: 3px; }.tutor-features strong { color: #35496c; font-size: 9px; }.tutor-features small { color: #8795ab; font-size: 8px; line-height: 1.35; }
 @media (max-width: 1200px) { .tutor-workspace { grid-template-columns: 170px minmax(0,1fr); }.tutor-features { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; border-top: 1px solid #e8edf6; border-left: 0; }.tutor-features h2 { grid-column: 1 / -1; }.progress-visuals { grid-template-columns: minmax(0,1.3fr) minmax(210px,.8fr); } }

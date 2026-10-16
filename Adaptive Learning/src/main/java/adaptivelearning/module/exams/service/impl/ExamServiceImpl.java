@@ -53,6 +53,14 @@ public class ExamServiceImpl implements ExamService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<ExamResponse> getAvailableToUser(Long certificateId, Long userId) {
+        return examRepository.findAvailableToUser(ContentStatus.PUBLISHED, certificateId, userId).stream()
+                .map(exam -> toResponse(exam, examQuestionRepository.countByExamId(exam.getExamId())))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public ExamResponse getById(Long id) {
         Exam exam = requireExam(id);
         return toResponse(exam, examQuestionRepository.countByExamId(id));
@@ -65,6 +73,20 @@ public class ExamServiceImpl implements ExamService {
         List<ExamQuestion> questions = examQuestionRepository.findByExamId(id);
 
         return toDetailResponse(exam, questions);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ExamResponse getVisibleById(Long id, Long userId, boolean admin) {
+        Exam exam = requireVisibleExam(id, userId, admin);
+        return toResponse(exam, examQuestionRepository.countByExamId(id));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ExamDetailResponse getVisibleDetail(Long id, Long userId, boolean admin) {
+        Exam exam = requireVisibleExam(id, userId, admin);
+        return toDetailResponse(exam, examQuestionRepository.findByExamId(id));
     }
 
     // ---------------------------------------------------------------------
@@ -236,6 +258,15 @@ public class ExamServiceImpl implements ExamService {
         return examRepository.findById(id).orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
     }
 
+    private Exam requireVisibleExam(Long id, Long userId, boolean admin) {
+        Exam exam = requireExam(id);
+        if (!admin && (exam.getStatus() != ContentStatus.PUBLISHED
+                || (exam.getOwnerUserId() != null && !exam.getOwnerUserId().equals(userId)))) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
+        return exam;
+    }
+
     /**
      * Recalculates totalQuestions and totalPoints on the parent exam.
      * Points come from pointsOverride when present, otherwise the question's default points.
@@ -269,6 +300,10 @@ public class ExamServiceImpl implements ExamService {
         return ExamResponse.builder()
                 .examId(exam.getExamId())
                 .certificateId(exam.getCertificateId())
+                .topicId(exam.getTopicId())
+                .targetScoreMin(exam.getTargetScoreMin())
+                .targetScoreMax(exam.getTargetScoreMax())
+                .targetScoreUnit(exam.getTargetScoreUnit())
                 .title(exam.getTitle())
                 .description(exam.getDescription())
                 .durationMinutes(exam.getDurationMinutes())
@@ -291,6 +326,10 @@ public class ExamServiceImpl implements ExamService {
         return ExamDetailResponse.builder()
                 .examId(base.getExamId())
                 .certificateId(base.getCertificateId())
+                .topicId(base.getTopicId())
+                .targetScoreMin(base.getTargetScoreMin())
+                .targetScoreMax(base.getTargetScoreMax())
+                .targetScoreUnit(base.getTargetScoreUnit())
                 .title(base.getTitle())
                 .description(base.getDescription())
                 .durationMinutes(base.getDurationMinutes())

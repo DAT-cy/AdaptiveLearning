@@ -1,11 +1,16 @@
 package adaptivelearning.module.questions.controller;
 
 import adaptivelearning.config.response.DefaultRes;
+import adaptivelearning.config.response.CommonException;
+import adaptivelearning.config.response.ErrorCode;
 import adaptivelearning.module.questions.dto.request.QuestionFilterRequest;
 import adaptivelearning.module.questions.dto.request.QuestionRequest;
 import adaptivelearning.module.questions.dto.response.QuestionResponse;
 import adaptivelearning.module.questions.service.QuestionService;
 import adaptivelearning.shared.enums.QuestionDifficulty;
+import adaptivelearning.shared.enums.ContentStatus;
+import adaptivelearning.module.users.entity.Role;
+import adaptivelearning.utils.SecurityUtils;
 import adaptivelearning.utils.ClientUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -65,10 +70,18 @@ public class QuestionController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    @Operation(summary = "Get a question by ID")
+    @Operation(summary = "Get an approved question for an exam attempt")
     public ResponseEntity<DefaultRes<QuestionResponse>> getById(@PathVariable Long id) {
         QuestionResponse question = questionService.getById(id);
+        if (!SecurityUtils.hasRole(Role.ROLE_ADMIN)) {
+            if (question.getStatus() != ContentStatus.APPROVED) {
+                throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+            }
+            question.setCorrectAnswer(null);
+            question.setExplanation(null);
+            question.setCreatedBy(null);
+            question.setUpdatedId(null);
+        }
         return ResponseEntity.ok(DefaultRes.res(HttpStatus.OK.value(), "Success", question));
     }
 

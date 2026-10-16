@@ -23,6 +23,10 @@ public class TopicResponse {
     private Long parentId;
     private int sortOrder;
     private boolean isActive;
+    private Double scoreMin;
+    private Double scoreMax;
+    private Double scoreStep;
+    private String scoreUnit;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private List<TopicResponse> children;
