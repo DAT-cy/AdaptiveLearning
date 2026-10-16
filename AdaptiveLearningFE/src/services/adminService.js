@@ -15,6 +15,8 @@ export const adminService = {
   examTemplates: () => data(Axios.get('/api/v1/exam-templates')),
   createExamTemplate: (payload) =>
     data(Axios.post('/api/v1/exam-templates', payload)),
+  generateExamFromTemplate: (id, payload) =>
+    data(Axios.post(`/api/v1/exam-templates/${id}/generate`, payload)),
   deactivateExamTemplate: (id) =>
     data(Axios.delete(`/api/v1/exam-templates/${id}`)),
   questions: (filters = {}) => data(Axios.get('/api/v1/questions', filters)),

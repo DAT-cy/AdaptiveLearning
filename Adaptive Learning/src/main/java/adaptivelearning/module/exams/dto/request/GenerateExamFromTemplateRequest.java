@@ -11,4 +11,6 @@ public class GenerateExamFromTemplateRequest {
 
     @NotEmpty
     private List<@NotNull QuestionDifficulty> sectionDifficulties;
+
+    private List<List<@NotNull Long>> questionIdsBySection;
 }

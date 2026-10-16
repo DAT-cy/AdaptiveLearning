@@ -1,5 +1,5 @@
 <script setup>
-  import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+  import { computed, onMounted, reactive, ref, watch } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import {
     ArrowRight,
@@ -9,21 +9,19 @@
     CheckCircle2,
     ClipboardCheck,
     Database,
-    FileQuestion,
     GraduationCap,
     LayoutDashboard,
-    Layers3,
     LogOut,
     Menu,
     Plus,
     Search,
     Shield,
-    Trash2,
     Users,
     X,
   } from 'lucide-vue-next'
   import { useUserStore } from '@/stores/user'
   import { adminService } from '@/services/adminService'
+  import ExamBuilderDialog from '../components/ExamBuilderDialog.vue'
 
   const router = useRouter()
   const route = useRoute()
@@ -33,8 +31,6 @@
     'accounts',
     'programs',
     'exams',
-    'templates',
-    'questions',
     'knowledge',
   ]
   const initialSection = String(route.query.section || 'overview')
@@ -44,8 +40,6 @@
   const users = ref([])
   const programs = ref([])
   const exams = ref([])
-  const examTemplates = ref([])
-  const questions = ref([])
   const knowledgeDocuments = ref([])
   const knowledgeDetail = ref(null)
   const loadingKnowledgeDetail = ref(false)
@@ -55,12 +49,9 @@
   const pageError = ref('')
   const mobileMenuOpen = ref(false)
   const modal = ref('')
-  const questionMode = ref('manual')
-  const generating = ref(false)
-  const generatedDraft = ref(null)
+  const showExamBuilder = ref(false)
   const saving = ref(false)
   const editingCertificateId = ref(null)
-  const editingQuestionId = ref(null)
   const importingKnowledge = ref(false)
   const accountForm = reactive({
     username: '',
@@ -76,46 +67,6 @@
     passingBand: 0,
     skills: '[]',
   })
-  const templateForm = reactive({
-    certificateId: '',
-    topicId: '',
-    title: '',
-    description: '',
-    durationMinutes: 60,
-    targetScoreMin: 0,
-    targetScoreMax: 0,
-    passingScore: 0,
-    sections: [
-      {
-        topicId: '',
-        name: 'Part 1',
-        questionType: 'MULTIPLE_CHOICE',
-        questionCount: 10,
-        pointsPerQuestion: 1,
-      },
-    ],
-  })
-  const questionForm = reactive({
-    certificateId: '',
-    topicId: '',
-    questionType: 'MULTIPLE_CHOICE',
-    difficulty: 'MEDIUM',
-    content: '',
-    contentJson: '',
-    optionsJson:
-      '[{"label":"A","text":""},{"label":"B","text":""},{"label":"C","text":""},{"label":"D","text":""}]',
-    correctAnswer: '"A"',
-    explanation: '',
-    points: 1,
-    estimatedTimeSeconds: 60,
-    tags: '',
-  })
-  const generationForm = reactive({
-    questionType: 'MULTIPLE_CHOICE',
-    difficulty: 'MEDIUM',
-    count: 5,
-    instructions: '',
-  })
   const knowledgeForm = reactive({
     title: '',
     fileName: '',
@@ -129,8 +80,6 @@
     { id: 'accounts', label: 'Tài khoản', icon: Users },
     { id: 'programs', label: 'Kỳ thi & chứng chỉ', icon: GraduationCap },
     { id: 'exams', label: 'Bài kiểm tra', icon: ClipboardCheck },
-    { id: 'templates', label: 'Mẫu đề', icon: Layers3 },
-    { id: 'questions', label: 'Ngân hàng câu hỏi', icon: FileQuestion },
     { id: 'knowledge', label: 'Kho kiến thức', icon: Database },
   ]
 
@@ -179,64 +128,6 @@
         .includes(query.value.toLowerCase())
     )
   )
-  const filteredExamTemplates = computed(() =>
-    examTemplates.value.filter((template) =>
-      `${template.title || ''} ${template.description || ''} ${programName(template.certificateId)}`
-        .toLowerCase()
-        .includes(query.value.toLowerCase())
-    )
-  )
-  const selectedTemplateTopic = computed(() =>
-    topics.value.find(
-      (topic) => String(topic.topicId) === String(templateForm.sections[0]?.topicId)
-    )
-  )
-  const templateMaxPoints = computed(() =>
-    templateForm.sections.reduce(
-      (total, section) => total + Number(section.questionCount || 0) * Number(section.pointsPerQuestion || 0),
-      0
-    )
-  )
-  const templateTopicHasScale = computed(() =>
-    selectedTemplateTopic.value?.scoreMin != null &&
-    selectedTemplateTopic.value?.scoreMax != null &&
-    selectedTemplateTopic.value?.scoreStep > 0 &&
-    Boolean(selectedTemplateTopic.value?.scoreUnit)
-  )
-  const templateBandOptions = computed(() => {
-    const topic = selectedTemplateTopic.value
-    if (!topic || topic.scoreUnit !== 'band' || topic.scoreStep <= 0) return []
-    const count = Math.floor((topic.scoreMax - topic.scoreMin) / topic.scoreStep + 1e-8)
-    return Array.from({ length: count + 1 }, (_, index) =>
-      Number((topic.scoreMin + index * topic.scoreStep).toFixed(2))
-    )
-  })
-  const allowedTemplateBandMins = templateBandOptions
-  const allowedTemplateBandMaxes = templateBandOptions
-  const templateScoreLabel = computed(() =>
-    selectedTemplateTopic.value?.scoreUnit === 'band' ? 'Band' : 'Điểm mục tiêu'
-  )
-  const templateTopics = computed(() =>
-    topics.value.filter(
-      (topic) => String(topic.certificateId) === String(templateForm.certificateId)
-    )
-  )
-  const filteredQuestions = computed(() =>
-    questions.value.filter((item) =>
-      `${item.content || item.questionText || ''} ${item.skill || item.topicName || ''}`
-        .toLowerCase()
-        .includes(query.value.toLowerCase())
-    )
-  )
-  const generatedQuestions = computed(() => {
-    try {
-      const items = JSON.parse(generatedDraft.value?.resultJson || '[]')
-      return Array.isArray(items) ? items : []
-    } catch {
-      return []
-    }
-  })
-
   function asList(response) {
     if (Array.isArray(response)) return response
     return response?.content || response?.items || []
@@ -249,9 +140,7 @@
       adminService.users(),
       adminService.certificates(),
       adminService.exams(),
-      adminService.questions(),
       adminService.knowledgeDocuments(),
-      adminService.examTemplates(),
     ])
     if (results[0].status === 'fulfilled')
       users.value = asList(results[0].value)
@@ -260,11 +149,7 @@
     if (results[2].status === 'fulfilled')
       exams.value = asList(results[2].value)
     if (results[3].status === 'fulfilled')
-      questions.value = asList(results[3].value)
-    if (results[4].status === 'fulfilled')
-      knowledgeDocuments.value = asList(results[4].value)
-    if (results[5].status === 'fulfilled')
-      examTemplates.value = asList(results[5].value)
+      knowledgeDocuments.value = asList(results[3].value)
     if (programs.value.length) {
       const topicResults = await Promise.allSettled(
         programs.value.map((program) =>
@@ -344,199 +229,16 @@
     Object.assign(programForm, preset)
   }
 
-  function defaultTargetRange(topic) {
-    if (!topic || topic.scoreMin == null || topic.scoreMax == null || topic.scoreStep <= 0) {
-      return { min: 0, max: 0 }
-    }
-    const steps = Math.floor((topic.scoreMax - topic.scoreMin) / topic.scoreStep + 1e-8)
-    return {
-      min: Number((topic.scoreMin + Math.floor(steps * 0.5) * topic.scoreStep).toFixed(2)),
-      max: Number((topic.scoreMin + Math.floor(steps * 0.75) * topic.scoreStep).toFixed(2)),
-    }
-  }
-
-  function openTemplate() {
-    const certificateId = programs.value[0]?.certificateId
-    const topic = topics.value.find(
-      (item) => String(item.certificateId) === String(certificateId)
-    )
-    const targetRange = defaultTargetRange(topic)
-    Object.assign(templateForm, {
-      certificateId: certificateId ? String(certificateId) : '',
-      topicId: String(topic?.topicId || ''),
-      title: '',
-      description: '',
-      durationMinutes: 60,
-      targetScoreMin: targetRange.min,
-      targetScoreMax: targetRange.max,
-      passingScore: 5,
-      sections: [
-        {
-          topicId: String(topic?.topicId || ''),
-          name: 'Part 1',
-          questionType: 'MULTIPLE_CHOICE',
-          questionCount: 10,
-          pointsPerQuestion: 1,
-        },
-      ],
-    })
-    modal.value = 'template'
-  }
-
-  function addTemplateSection() {
-    templateForm.sections.push({
-      topicId: templateForm.sections[0]?.topicId || '',
-      name: `Part ${templateForm.sections.length + 1}`,
-      questionType: 'MULTIPLE_CHOICE',
-      questionCount: 10,
-      pointsPerQuestion: 1,
-    })
-  }
-
-  function removeTemplateSection(index) {
-    if (templateForm.sections.length <= 1) return
-    templateForm.sections.splice(index, 1)
-    templateForm.sections.forEach((section, sectionIndex) => {
-      if (/^Part \d+$/.test(section.name)) section.name = `Part ${sectionIndex + 1}`
-    })
-  }
-
   function topicName(topicId) {
     if (topicId == null) return '—'
     return topics.value.find((topic) => String(topic.topicId) === String(topicId))?.name || 'Kỹ năng'
   }
 
-  function templateSkillsLabel(template) {
-    const topicIds = [...new Set((template.sections || []).map((section) => String(section.topicId)))]
-    return topicIds.map(topicName).join(', ')
-  }
-
-  function templateQuestionTotal(template) {
-    return (template.sections || []).reduce(
-      (total, section) => total + Number(section.questionCount || 0),
-      0
-    )
-  }
-
-  watch(
-    () => templateForm.certificateId,
-    (certificateId, previousCertificateId) => {
-      if (previousCertificateId && String(certificateId) !== String(previousCertificateId)) {
-        const firstTopicId = String(
-          topics.value.find((topic) => String(topic.certificateId) === String(certificateId))?.topicId || ''
-        )
-        templateForm.topicId = firstTopicId
-        templateForm.sections.forEach((section, index) => {
-          if (index === 0 || !templateTopics.value.some((topic) => String(topic.topicId) === String(section.topicId))) {
-            section.topicId = firstTopicId
-          }
-        })
-        templateForm.passingScore = Math.floor(templateMaxPoints.value * 0.5 * 2) / 2
-      }
-    }
-  )
-
-  watch(
-    () => templateForm.sections[0]?.topicId,
-    (topicId) => {
-      templateForm.topicId = topicId || ''
-      const topic = topics.value.find((item) => String(item.topicId) === String(topicId))
-      if (topic?.scoreMin == null || topic?.scoreMax == null || topic?.scoreStep <= 0) {
-        templateForm.targetScoreMin = 0
-        templateForm.targetScoreMax = 0
-        return
-      }
-      const range = defaultTargetRange(topic)
-      templateForm.targetScoreMin = range.min
-      templateForm.targetScoreMax = range.max
-    }
-  )
-
-  watch(
-    () => templateMaxPoints.value,
-    (maxPoints) => {
-      if (templateForm.passingScore > maxPoints) templateForm.passingScore = maxPoints
-    }
-  )
-
-  watch(
-    () => templateForm.targetScoreMin,
-    (minimum) => {
-      if (minimum > templateForm.targetScoreMax) {
-        templateForm.targetScoreMax = minimum
-      }
-    }
-  )
-
-  watch(
-    () => templateForm.targetScoreMax,
-    (maximum) => {
-      if (maximum < templateForm.targetScoreMin) {
-        templateForm.targetScoreMin = maximum
-      }
-    }
-  )
-
-  async function openQuestion(question = null) {
-    editingQuestionId.value = question?.questionId ?? null
-    questionForm.certificateId = programs.value[0]?.certificateId
-      ? String(programs.value[0].certificateId)
-      : ''
-    questionForm.topicId = ''
-    questionForm.content = ''
-    questionForm.contentJson = ''
-    questionForm.explanation = ''
-    questionForm.tags = ''
-    questionMode.value = 'manual'
-    generatedDraft.value = null
-    Object.assign(generationForm, {
-      questionType: 'MULTIPLE_CHOICE',
-      difficulty: 'MEDIUM',
-      count: 5,
-      instructions: '',
-    })
-    modal.value = 'question'
-    if (question) {
-      await nextTick()
-      Object.assign(questionForm, {
-        certificateId: String(question.certificateId),
-        topicId: String(question.topicId),
-        questionType: question.questionType || 'MULTIPLE_CHOICE',
-        difficulty: question.difficulty || 'MEDIUM',
-        content: question.content || '',
-        contentJson: question.contentJson || '',
-        optionsJson: question.optionsJson || '[]',
-        correctAnswer: question.correctAnswer || '""',
-        explanation: question.explanation || '',
-        points: question.points || 1,
-        estimatedTimeSeconds: question.estimatedTimeSeconds || 60,
-        tags: question.tags || '',
-      })
-    }
-  }
-
-  const selectedTopics = computed(() =>
-    topics.value.filter(
-      (topic) =>
-        String(topic.certificateId) === String(questionForm.certificateId)
-    )
-  )
   const knowledgeTopics = computed(() =>
     topics.value.filter(
       (topic) =>
         String(topic.certificateId) === String(knowledgeForm.certificateId)
     )
-  )
-
-  watch(
-    () => questionForm.certificateId,
-    (certificateId) => {
-      questionForm.topicId = String(
-        topics.value.find(
-          (topic) => String(topic.certificateId) === String(certificateId)
-        )?.topicId || ''
-      )
-    }
   )
 
   watch(
@@ -562,15 +264,6 @@
         (item) => String(item.certificateId) === String(certificateId)
       )?.name || 'Chưa gắn kỳ thi'
     )
-  }
-
-  function sourceChunkLabels(question) {
-    try {
-      const ids = JSON.parse(question.contentJson || '[]')
-      return Array.isArray(ids) ? ids.join(', ') : ''
-    } catch {
-      return ''
-    }
   }
 
   function skillLabels(skills) {
@@ -645,174 +338,6 @@
         'Không thể lưu chứng chỉ / kỳ thi.'
     } finally {
       saving.value = false
-    }
-  }
-
-  async function saveTemplate() {
-    saving.value = true
-    pageError.value = ''
-    try {
-      await adminService.createExamTemplate({
-        certificateId: Number(templateForm.certificateId),
-        topicId: Number(templateForm.sections[0]?.topicId),
-        title: templateForm.title.trim(),
-        description: templateForm.description.trim(),
-        durationMinutes: Number(templateForm.durationMinutes),
-        targetScoreMin: Number(templateForm.targetScoreMin),
-        targetScoreMax: Number(templateForm.targetScoreMax),
-        passingScore: Number(templateForm.passingScore),
-        sections: templateForm.sections.map((section) => ({
-          topicId: Number(section.topicId),
-          name: section.name.trim(),
-          questionType: section.questionType,
-          questionCount: Number(section.questionCount),
-          pointsPerQuestion: Number(section.pointsPerQuestion),
-        })),
-      })
-      modal.value = ''
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.message ||
-        error?.response?.data?.responseMessage ||
-        'Không thể lưu mẫu đề.'
-    } finally {
-      saving.value = false
-    }
-  }
-
-  async function deactivateTemplate(template) {
-    if (!window.confirm(`Ngừng sử dụng mẫu đề “${template.title}”?`)) return
-    try {
-      await adminService.deactivateExamTemplate(template.templateId)
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage || 'Không thể ngừng mẫu đề.'
-    }
-  }
-
-  function previewTemplate() {
-    pageError.value = ''
-    modal.value = 'template-preview'
-  }
-
-  function previewQuestionNumbers(count) {
-    return Array.from({ length: Math.min(Number(count || 0), 12) }, (_, index) => index + 1)
-  }
-
-  async function saveQuestion() {
-    saving.value = true
-    pageError.value = ''
-    try {
-      const payload = {
-        ...questionForm,
-        certificateId: Number(questionForm.certificateId),
-        topicId: Number(questionForm.topicId),
-        points: Number(questionForm.points),
-        estimatedTimeSeconds: Number(questionForm.estimatedTimeSeconds),
-      }
-      if (editingQuestionId.value) {
-        await adminService.updateQuestion(editingQuestionId.value, payload)
-      } else {
-        await adminService.createQuestion(payload)
-      }
-      modal.value = ''
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage ||
-        'Không thể tạo câu hỏi. Hãy kiểm tra topic và JSON đáp án.'
-    } finally {
-      saving.value = false
-    }
-  }
-
-  async function generateQuestionDrafts() {
-    generating.value = true
-    pageError.value = ''
-    generatedDraft.value = null
-    try {
-      const result = await adminService.generateQuestions({
-        certificateId: Number(questionForm.certificateId),
-        topicId: Number(questionForm.topicId),
-        ...generationForm,
-        count: Number(generationForm.count),
-        instructions: [
-          `Kỳ thi: ${programName(questionForm.certificateId)}`,
-          `Kỹ năng hoặc môn: ${selectedTopics.value.find((topic) => String(topic.topicId) === String(questionForm.topicId))?.name || ''}`,
-          generationForm.instructions,
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      })
-      generatedDraft.value = result
-      if (result?.status === 'FAILED') {
-        pageError.value =
-          result.errorMessage ||
-          'AI chưa thể tạo câu hỏi. Kiểm tra cấu hình AI rồi thử lại.'
-      }
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage ||
-        'Không thể kết nối AI để tạo câu hỏi.'
-    } finally {
-      generating.value = false
-    }
-  }
-
-  async function applyGeneratedDrafts() {
-    if (
-      !generatedDraft.value?.generationId ||
-      generatedDraft.value.status !== 'READY'
-    )
-      return
-    saving.value = true
-    pageError.value = ''
-    try {
-      await adminService.applyGeneratedQuestions(
-        generatedDraft.value.generationId
-      )
-      modal.value = ''
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage ||
-        'Không thể lưu câu hỏi AI vào ngân hàng.'
-    } finally {
-      saving.value = false
-    }
-  }
-
-  async function reviewQuestion(question) {
-    try {
-      await adminService.submitQuestionReview(question.questionId)
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage ||
-        'Không thể gửi câu hỏi đi duyệt.'
-    }
-  }
-
-  async function approveQuestion(question) {
-    try {
-      await adminService.approveQuestion(question.questionId)
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage || 'Không thể duyệt câu hỏi.'
-    }
-  }
-
-  async function rejectQuestion(question) {
-    try {
-      await adminService.rejectQuestion(question.questionId)
-      await loadData()
-    } catch (error) {
-      pageError.value =
-        error?.response?.data?.responseMessage ||
-        'Không thể trả câu hỏi về bản nháp.'
     }
   }
 
@@ -1088,35 +613,6 @@
               <GraduationCap :size="16" />
               Tạo chứng chỉ
             </button>
-            <button
-              v-if="activeSection === 'overview' || activeSection === 'exams'"
-              class="admin-secondary-button"
-              :disabled="!programs.length || !topics.length"
-              @click="openTemplate"
-            >
-              <Layers3 :size="16" />
-              Tạo bài kiểm tra
-            </button>
-            <button
-              v-if="activeSection === 'templates'"
-              class="admin-primary-button"
-              :disabled="!programs.length || !topics.length"
-              @click="openTemplate"
-            >
-              <Plus :size="16" />
-              Tạo bài kiểm tra
-            </button>
-            <button
-              v-if="
-                activeSection === 'overview' || activeSection === 'questions'
-              "
-              class="admin-secondary-button"
-              :disabled="!programs.length || !topics.length"
-              @click="openQuestion"
-            >
-              <FileQuestion :size="16" />
-              Tạo câu hỏi
-            </button>
           </div>
         </div>
 
@@ -1241,30 +737,6 @@
                 <span>
                   <strong>Bài kiểm tra</strong>
                   <small>{{ exams.length }} đề</small>
-                </span>
-                <ArrowRight :size="16" />
-              </button>
-              <button class="content-link" @click="openSection('questions')">
-                <span class="admin-stat-icon violet">
-                  <FileQuestion :size="18" />
-                </span>
-                <span>
-                  <strong>Ngân hàng câu hỏi</strong>
-                  <small>{{ questions.length }} câu hỏi</small>
-                </span>
-                <ArrowRight :size="16" />
-              </button>
-              <button
-                class="content-link"
-                :disabled="!programs.length || !topics.length"
-                @click="openQuestion"
-              >
-                <span class="admin-stat-icon amber">
-                  <FileQuestion :size="18" />
-                </span>
-                <span>
-                  <strong>Biên soạn câu hỏi</strong>
-                  <small>{{ topics.length }} kỹ năng / môn thi</small>
                 </span>
                 <ArrowRight :size="16" />
               </button>
@@ -1446,16 +918,9 @@
               <h2>Bài kiểm tra</h2>
               <p>{{ filteredExams.length }} đề · nhóm theo kỹ năng / môn thi</p>
             </div>
-            <div class="heading-actions">
-              <button
-                class="admin-secondary-button"
-                :disabled="!programs.length || !topics.length"
-                @click="openTemplate"
-              >
-                <Plus :size="16" />
-                Tạo bài kiểm tra
-              </button>
-            </div>
+            <button class="admin-primary-button" :disabled="!programs.length || !topics.length" @click="showExamBuilder = true">
+              <Plus :size="16" /> Tạo bài kiểm tra
+            </button>
           </div>
           <div v-if="loading" class="admin-empty">Đang tải bài kiểm tra...</div>
           <div v-else-if="!filteredExams.length" class="admin-empty">
@@ -1507,131 +972,6 @@
           </div>
         </section>
 
-        <section
-          v-else-if="activeSection === 'templates'"
-          class="admin-panel admin-table-panel"
-        >
-          <div class="admin-panel-heading">
-            <div>
-              <h2>Mẫu đề thi</h2>
-              <p>{{ filteredExamTemplates.length }} mẫu · cấu trúc đề dùng lại</p>
-            </div>
-            <button
-              class="admin-primary-button"
-              :disabled="!programs.length || !topics.length"
-              @click="openTemplate"
-            >
-              <Plus :size="16" /> Tạo bài kiểm tra
-            </button>
-          </div>
-          <div v-if="loading" class="admin-empty">Đang tải mẫu đề...</div>
-          <div v-else-if="!filteredExamTemplates.length" class="admin-empty">
-            Chưa có mẫu đề. Tạo mẫu với các phần, dạng câu hỏi và số câu cần dùng.
-          </div>
-          <div v-else class="admin-table-wrap">
-            <table class="admin-table">
-              <thead>
-                <tr><th>Tên mẫu</th><th>Kỳ thi / kỹ năng</th><th>Thời lượng</th><th>Cấu trúc</th><th></th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="template in filteredExamTemplates" :key="template.templateId">
-                  <td><strong>{{ template.title }}</strong><small class="secondary-text">{{ template.description || 'Mẫu đề thi' }}</small></td>
-                  <td>{{ programName(template.certificateId) }} · {{ templateSkillsLabel(template) }}</td>
-                  <td>{{ template.durationMinutes }} phút</td>
-                  <td>{{ template.targetScoreMin }}–{{ template.targetScoreMax }} {{ template.targetScoreUnit }} · {{ (template.sections || []).length }} phần · {{ templateQuestionTotal(template) }} câu</td>
-                  <td>
-                    <button class="table-action danger" @click="deactivateTemplate(template)">Ngừng dùng</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section
-          v-else-if="activeSection === 'questions'"
-          class="admin-panel admin-table-panel"
-        >
-          <div class="admin-panel-heading">
-            <div>
-              <h2>Ngân hàng câu hỏi</h2>
-              <p>
-                {{ filteredQuestions.length }} câu hỏi · {{ topics.length }} kỹ
-                năng / môn thi
-              </p>
-            </div>
-            <button
-              class="admin-primary-button"
-              :disabled="!programs.length || !topics.length"
-              @click="openQuestion"
-            >
-              <FileQuestion :size="16" />
-              Tạo câu hỏi
-            </button>
-          </div>
-          <div v-if="loading" class="admin-empty">Đang tải câu hỏi...</div>
-          <div v-else-if="!filteredQuestions.length" class="admin-empty">
-            Chưa có câu hỏi.
-          </div>
-          <div v-else class="admin-question-list">
-            <article
-              v-for="(question, index) in filteredQuestions.slice(0, 100)"
-              :key="question.questionId || index"
-            >
-              <span class="admin-stat-icon violet">
-                <FileQuestion :size="17" />
-              </span>
-              <div>
-                <strong>
-                  {{
-                    question.content ||
-                    question.questionText ||
-                    `Câu hỏi #${question.questionId}`
-                  }}
-                </strong>
-                <small>
-                  {{ question.skill || question.topicName || 'Chưa phân loại' }}
-                  · {{ programName(question.certificateId) }} ·
-                  {{ question.difficulty || 'Mức độ chưa xác định' }}
-                </small>
-                <small v-if="sourceChunkLabels(question)">
-                  Nguồn kiến thức: đoạn {{ sourceChunkLabels(question) }}
-                </small>
-              </div>
-              <span class="account-state enabled">
-                {{ question.status || 'Có sẵn' }}
-              </span>
-              <button
-                v-if="['DRAFT', 'IN_REVIEW'].includes(question.status)"
-                class="table-action"
-                @click="openQuestion(question)"
-              >
-                Sửa
-              </button>
-              <button
-                v-if="question.status === 'DRAFT'"
-                class="table-action"
-                @click="reviewQuestion(question)"
-              >
-                Gửi duyệt
-              </button>
-              <button
-                v-else-if="question.status === 'IN_REVIEW'"
-                class="table-action"
-                @click="approveQuestion(question)"
-              >
-                Duyệt
-              </button>
-              <button
-                v-if="question.status === 'IN_REVIEW'"
-                class="table-action"
-                @click="rejectQuestion(question)"
-              >
-                Trả nháp
-              </button>
-            </article>
-          </div>
-        </section>
         <template v-else>
           <section class="knowledge-summary">
             <article>
@@ -1818,30 +1158,20 @@
       </div>
     </section>
 
+    <ExamBuilderDialog
+      :open="showExamBuilder"
+      :programs="programs"
+      :topics="topics"
+      @close="showExamBuilder = false"
+      @saved="loadData"
+    />
+
     <div v-if="modal" class="modal-backdrop" @click.self="modal = ''">
       <section class="admin-modal" role="dialog" aria-modal="true">
         <header>
           <div>
             <p class="admin-kicker">QUẢN TRỊ HỌC TẬP CÁ NHÂN</p>
-            <h2>
-              {{
-                modal === 'account'
-                  ? 'Tạo tài khoản'
-                  : modal === 'program'
-                    ? editingCertificateId
-                      ? 'Cập nhật chứng chỉ / kỳ thi'
-                      : 'Tạo chứng chỉ / kỳ thi'
-                    : modal === 'template'
-                      ? 'Tạo bài kiểm tra'
-                      : modal === 'template-preview'
-                        ? 'Xem trước bài kiểm tra'
-                      : modal === 'question'
-                      ? editingQuestionId
-                        ? 'Chỉnh sửa câu hỏi'
-                        : 'Biên soạn câu hỏi'
-                      : 'Tạo đề kiểm tra'
-              }}
-            </h2>
+            <h2>{{ modal === 'account' ? 'Tạo tài khoản' : editingCertificateId ? 'Cập nhật chứng chỉ / kỳ thi' : 'Tạo chứng chỉ / kỳ thi' }}</h2>
           </div>
           <button class="modal-close" aria-label="Đóng" @click="modal = ''">
             <X :size="19" />
@@ -1975,382 +1305,6 @@
             </button>
           </footer>
         </form>
-        <form v-else-if="modal === 'template'" @submit.prevent="previewTemplate">
-          <label>Kỳ thi / chứng chỉ
-            <select v-model="templateForm.certificateId" required>
-              <option disabled value="">Chọn kỳ thi</option>
-              <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">{{ program.name }} ({{ program.code }})</option>
-            </select>
-          </label>
-          <label>Tên mẫu đề
-            <input v-model.trim="templateForm.title" required maxlength="200" placeholder="Ví dụ: IELTS Academic - Writing Practice" />
-          </label>
-          <label>Mô tả
-            <textarea v-model.trim="templateForm.description" rows="2" placeholder="Mục tiêu hoặc ghi chú về đề"></textarea>
-          </label>
-          <label>Thời lượng (phút)
-            <input v-model.number="templateForm.durationMinutes" type="number" min="1" max="600" required />
-          </label>
-          <fieldset class="template-sections">
-            <legend>Cấu trúc đề</legend>
-            <div v-for="(section, index) in templateForm.sections" :key="index" class="template-section-row">
-              <label>Kỹ năng / môn<select v-model="section.topicId" required><option disabled value="">Chọn kỹ năng / môn</option><option v-for="topic in templateTopics" :key="topic.topicId" :value="String(topic.topicId)">{{ topic.name }}</option></select></label>
-              <label>Tên phần<input v-model.trim="section.name" required maxlength="100" /></label>
-              <label>Dạng câu hỏi<select v-model="section.questionType"><option value="MULTIPLE_CHOICE">Trắc nghiệm</option><option value="TRUE_FALSE">Đúng / sai</option><option value="ESSAY">Tự luận</option><option value="FILL_BLANK">Điền khuyết</option></select></label>
-              <label>Số câu<input v-model.number="section.questionCount" type="number" min="1" max="200" required /></label>
-              <label>Điểm / câu<input v-model.number="section.pointsPerQuestion" type="number" min="0.1" step="0.1" required /></label>
-              <button type="button" class="icon-button" aria-label="Xóa phần" title="Xóa phần" :disabled="templateForm.sections.length <= 1" @click="removeTemplateSection(index)"><Trash2 :size="15" /></button>
-            </div>
-            <button type="button" class="admin-text-button" @click="addTemplateSection"><Plus :size="15" /> Thêm phần</button>
-          </fieldset>
-          <div v-if="selectedTemplateTopic" class="form-row">
-            <label>
-              {{ templateScoreLabel }} từ (theo phần đầu tiên)
-              <select v-if="selectedTemplateTopic.scoreUnit === 'band'" v-model.number="templateForm.targetScoreMin" required>
-                <option v-for="score in allowedTemplateBandMins" :key="score" :value="score">{{ score.toFixed(1) }}</option>
-              </select>
-              <input v-else v-model.number="templateForm.targetScoreMin" type="number" :min="selectedTemplateTopic.scoreMin" :max="selectedTemplateTopic.scoreMax" :step="selectedTemplateTopic.scoreStep" required />
-            </label>
-            <label>
-              {{ templateScoreLabel }} đến
-              <select v-if="selectedTemplateTopic.scoreUnit === 'band'" v-model.number="templateForm.targetScoreMax" required>
-                <option v-for="score in allowedTemplateBandMaxes" :key="score" :value="score">{{ score.toFixed(1) }}</option>
-              </select>
-              <input v-else v-model.number="templateForm.targetScoreMax" type="number" :min="selectedTemplateTopic.scoreMin" :max="selectedTemplateTopic.scoreMax" :step="selectedTemplateTopic.scoreStep" required />
-            </label>
-          </div>
-          <p v-if="selectedTemplateTopic" class="template-summary">
-            Thang điểm {{ selectedTemplateTopic.scoreMin }}–{{ selectedTemplateTopic.scoreMax }} {{ selectedTemplateTopic.scoreUnit }}, bước {{ selectedTemplateTopic.scoreStep }}
-          </p>
-          <p v-if="selectedTemplateTopic && !templateTopicHasScale" class="availability-low">
-            Kỹ năng / môn đầu tiên chưa được cấu hình thang điểm.
-          </p>
-          <label>Điểm đạt theo tổng điểm câu hỏi (tối đa {{ templateMaxPoints }})
-            <input v-model.number="templateForm.passingScore" type="number" min="0" :max="templateMaxPoints" step="any" required />
-          </label>
-          <footer>
-            <button type="button" class="admin-secondary-button" @click="modal = ''">Hủy</button>
-            <button class="admin-primary-button" :disabled="!templateTopicHasScale || templateForm.passingScore > templateMaxPoints"><Check :size="16" />Xem trước</button>
-          </footer>
-        </form>
-        <section v-else-if="modal === 'template-preview'" class="exam-form-preview">
-          <div class="preview-heading">
-            <p>{{ programName(templateForm.certificateId) }} · {{ templateForm.durationMinutes }} phút · {{ templateQuestionTotal({ sections: templateForm.sections }) }} câu</p>
-            <h3>{{ templateForm.title }}</h3>
-            <small v-if="selectedTemplateTopic">Mục tiêu {{ templateForm.targetScoreMin }}–{{ templateForm.targetScoreMax }} {{ selectedTemplateTopic.scoreUnit }} · Điểm đạt {{ templateForm.passingScore }} / {{ templateMaxPoints }}</small>
-          </div>
-          <article v-for="(section, sectionIndex) in templateForm.sections" :key="sectionIndex" class="preview-section">
-            <header><div><strong>{{ section.name }}</strong><small>{{ topicName(section.topicId) }} · {{ section.questionType }}</small></div><span>{{ section.questionCount }} câu</span></header>
-            <div v-for="questionNumber in previewQuestionNumbers(section.questionCount)" :key="questionNumber" class="preview-question"><span>{{ questionNumber }}</span><div></div></div>
-            <small v-if="section.questionCount > 12" class="template-summary">Còn {{ section.questionCount - 12 }} câu trống</small>
-          </article>
-          <footer>
-            <button type="button" class="admin-secondary-button" @click="modal = 'template'">Quay lại chỉnh sửa</button>
-            <button type="button" class="admin-primary-button" :disabled="saving" @click="saveTemplate"><Check :size="16" />{{ saving ? 'Đang lưu...' : 'Lưu cấu hình bài kiểm tra' }}</button>
-          </footer>
-        </section>
-        <form v-else-if="false" @submit.prevent="saveExam">
-          <label>Mẫu đề
-            <select v-model="examForm.templateId" required>
-              <option disabled value="">Chọn mẫu đề</option>
-              <option v-for="template in examTemplates" :key="template.templateId" :value="String(template.templateId)">{{ template.title }} · {{ programName(template.certificateId) }} / {{ templateSkillsLabel(template) }}</option>
-            </select>
-          </label>
-          <p v-if="selectedExamTemplate" class="template-summary">{{ programName(selectedExamTemplate.certificateId) }} · {{ templateSkillsLabel(selectedExamTemplate) }} · {{ selectedExamTemplate.durationMinutes }} phút · {{ templateQuestionTotal(selectedExamTemplate) }} câu</p>
-          <label>
-            Tên đề thi
-            <input
-              v-model.trim="examForm.title"
-              required
-              maxlength="200"
-              placeholder="Tên lần thi này"
-            />
-          </label>
-          <p v-if="selectedExamTemplate" class="template-summary">
-            Mục tiêu: {{ selectedExamTemplate.targetScoreMin }}–{{ selectedExamTemplate.targetScoreMax }} {{ selectedExamTemplate.targetScoreUnit }}
-          </p>
-          <fieldset v-if="selectedExamTemplate" class="template-sections">
-            <legend>Chọn độ khó cho từng phần</legend>
-            <div v-for="(section, index) in selectedTemplateSections" :key="index" class="exam-section-row">
-              <div><strong>{{ section.name }}</strong><small>{{ section.questionCount }} câu · {{ section.questionType }}</small></div>
-              <label>Độ khó<select v-model="examForm.sectionDifficulties[index]" required><option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option></select></label>
-              <small :class="sectionAvailableCount(index) < section.questionCount ? 'availability-low' : 'availability-ok'">Có {{ sectionAvailableCount(index) }} / {{ section.questionCount }} câu</small>
-            </div>
-          </fieldset>
-          <p v-else class="picker-empty">Chọn mẫu bài kiểm tra để cấu hình độ khó từng phần.</p>
-          <footer>
-            <button
-              type="button"
-              class="admin-secondary-button"
-              @click="modal = ''"
-            >
-              Hủy
-            </button>
-            <button
-              class="admin-primary-button"
-              :disabled="saving || !selectedExamTemplate || selectedTemplateSections.some((section, index) => sectionAvailableCount(index) < section.questionCount)"
-            >
-              <Check :size="16" />
-              {{
-                saving
-                  ? 'Đang lưu...'
-                  : 'Sinh đề từ ngân hàng câu hỏi'
-              }}
-            </button>
-          </footer>
-        </form>
-        <template v-else-if="modal === 'question'">
-          <div class="question-mode" role="group" aria-label="Cách biên soạn">
-            <button
-              type="button"
-              :class="{ active: questionMode === 'manual' }"
-              @click="questionMode = 'manual'"
-            >
-              Tự biên soạn
-            </button>
-            <button
-              type="button"
-              :class="{ active: questionMode === 'ai' }"
-              @click="questionMode = 'ai'"
-            >
-              AI tạo bản nháp
-            </button>
-          </div>
-          <form v-if="questionMode === 'manual'" @submit.prevent="saveQuestion">
-            <label>
-              Kỳ thi
-              <select v-model="questionForm.certificateId" required>
-                <option disabled value="">Chọn kỳ thi</option>
-                <option
-                  v-for="program in programs"
-                  :key="program.certificateId"
-                  :value="String(program.certificateId)"
-                >
-                  {{ program.name }} ({{ program.code }})
-                </option>
-              </select>
-            </label>
-            <label>
-              Kỹ năng / môn thi
-              <select v-model="questionForm.topicId" required>
-                <option disabled value="">Chọn kỹ năng hoặc môn thi</option>
-                <option
-                  v-for="topic in selectedTopics"
-                  :key="topic.topicId"
-                  :value="String(topic.topicId)"
-                >
-                  {{ topic.name }}
-                </option>
-              </select>
-            </label>
-            <div class="form-row">
-              <label>
-                Dạng câu hỏi
-                <select v-model="questionForm.questionType">
-                  <option value="MULTIPLE_CHOICE">Trắc nghiệm</option>
-                  <option value="TRUE_FALSE">Đúng / sai</option>
-                  <option value="ESSAY">Tự luận</option>
-                </select>
-              </label>
-              <label>
-                Độ khó
-                <select v-model="questionForm.difficulty">
-                  <option value="EASY">Cơ bản</option>
-                  <option value="MEDIUM">Trung bình</option>
-                  <option value="HARD">Nâng cao</option>
-                </select>
-              </label>
-            </div>
-            <label>
-              Nội dung câu hỏi
-              <textarea
-                v-model.trim="questionForm.content"
-                rows="4"
-                required
-                placeholder="Nhập nội dung câu hỏi"
-              ></textarea>
-            </label>
-            <label v-if="questionForm.questionType === 'MULTIPLE_CHOICE'">
-              Các phương án (JSON)
-              <textarea
-                v-model.trim="questionForm.optionsJson"
-                rows="4"
-                required
-              ></textarea>
-              <small class="form-hint">Mỗi phương án gồm label và text.</small>
-            </label>
-            <div class="form-row">
-              <label>
-                Đáp án đúng (JSON)
-                <input
-                  v-model.trim="questionForm.correctAnswer"
-                  required
-                  placeholder='"A"'
-                />
-              </label>
-              <label>
-                Điểm
-                <input
-                  v-model.number="questionForm.points"
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  required
-                />
-              </label>
-            </div>
-            <label>
-              Giải thích đáp án
-              <textarea
-                v-model.trim="questionForm.explanation"
-                rows="2"
-                placeholder="Giải thích để AI có thể hướng dẫn người học"
-              ></textarea>
-            </label>
-            <footer>
-              <button
-                type="button"
-                class="admin-secondary-button"
-                @click="modal = ''"
-              >
-                Hủy
-              </button>
-              <button
-                class="admin-primary-button"
-                :disabled="saving || !selectedTopics.length"
-              >
-                <Check :size="16" />
-                {{
-                  saving
-                    ? 'Đang lưu...'
-                    : editingQuestionId
-                      ? 'Lưu thay đổi'
-                      : 'Lưu câu hỏi nháp'
-                }}
-              </button>
-            </footer>
-          </form>
-          <form v-else @submit.prevent="generateQuestionDrafts">
-            <label>
-              Kỳ thi
-              <select v-model="questionForm.certificateId" required>
-                <option disabled value="">Chọn kỳ thi</option>
-                <option
-                  v-for="program in programs"
-                  :key="program.certificateId"
-                  :value="String(program.certificateId)"
-                >
-                  {{ program.name }} ({{ program.code }})
-                </option>
-              </select>
-            </label>
-            <label>
-              Kỹ năng / môn thi
-              <select v-model="questionForm.topicId" required>
-                <option disabled value="">Chọn kỹ năng hoặc môn thi</option>
-                <option
-                  v-for="topic in selectedTopics"
-                  :key="topic.topicId"
-                  :value="String(topic.topicId)"
-                >
-                  {{ topic.name }}
-                </option>
-              </select>
-            </label>
-            <div class="form-row">
-              <label>
-                Dạng câu hỏi
-                <select v-model="generationForm.questionType">
-                  <option value="MULTIPLE_CHOICE">Trắc nghiệm</option>
-                  <option value="TRUE_FALSE">Đúng / sai</option>
-                  <option value="ESSAY">Tự luận</option>
-                </select>
-              </label>
-              <label>
-                Độ khó
-                <select v-model="generationForm.difficulty">
-                  <option value="EASY">Cơ bản</option>
-                  <option value="MEDIUM">Trung bình</option>
-                  <option value="HARD">Nâng cao</option>
-                </select>
-              </label>
-              <label>
-                Số câu
-                <input
-                  v-model.number="generationForm.count"
-                  type="number"
-                  min="1"
-                  max="20"
-                  required
-                />
-              </label>
-            </div>
-            <label>
-              Yêu cầu nội dung
-              <textarea
-                v-model.trim="generationForm.instructions"
-                rows="3"
-                placeholder="Chủ đề, mục tiêu kiến thức hoặc lưu ý cần có"
-              ></textarea>
-            </label>
-            <section
-              v-if="generatedDraft"
-              class="generated-preview"
-              aria-live="polite"
-            >
-              <strong>
-                {{
-                  generatedDraft.status === 'READY'
-                    ? `AI đã tạo ${generatedQuestions.length} câu nháp`
-                    : `Trạng thái: ${generatedDraft.status}`
-                }}
-              </strong>
-              <p v-if="generatedDraft.status === 'FAILED'">
-                {{ generatedDraft.errorMessage || 'AI chưa tạo được câu hỏi.' }}
-              </p>
-              <article v-for="(item, index) in generatedQuestions" :key="index">
-                <b>{{ index + 1 }}. {{ item.content }}</b>
-                <small v-for="option in item.options" :key="option.label">
-                  {{ option.label }}. {{ option.text }}
-                </small>
-                <small>
-                  Đáp án: {{ item.correctAnswer }} · {{ item.explanation }}
-                </small>
-                <small>
-                  Nguồn đoạn kiến thức:
-                  {{ item.sourceChunkIds?.join(', ') || 'Không có' }}
-                </small>
-              </article>
-            </section>
-            <footer>
-              <button
-                type="button"
-                class="admin-secondary-button"
-                @click="modal = ''"
-              >
-                Hủy
-              </button>
-              <button
-                v-if="generatedDraft?.status === 'READY'"
-                type="button"
-                class="admin-primary-button"
-                :disabled="saving"
-                @click="applyGeneratedDrafts"
-              >
-                <Check :size="16" />
-                {{ saving ? 'Đang lưu...' : 'Đưa bản nháp vào ngân hàng' }}
-              </button>
-              <button
-                v-else
-                class="admin-primary-button"
-                :disabled="generating || !selectedTopics.length"
-              >
-                <Check :size="16" />
-                {{ generating ? 'AI đang tạo...' : 'Tạo câu hỏi bằng AI' }}
-              </button>
-            </footer>
-          </form>
-        </template>
       </section>
     </div>
     <div
@@ -2904,90 +1858,6 @@
     color: #82909d;
     font-size: 8px;
   }
-  .template-sections {
-    display: grid;
-    gap: 9px;
-    min-width: 0;
-    margin: 4px 0;
-    padding: 10px;
-    border: 1px solid #e5ebef;
-    border-radius: 5px;
-  }
-  .template-sections legend {
-    padding: 0 5px;
-    color: #526878;
-    font-size: 9px;
-    font-weight: 700;
-  }
-  .template-section-row {
-    display: grid;
-    grid-template-columns: minmax(120px, 1fr) minmax(90px, .8fr) minmax(120px, 1.2fr) 70px 80px 28px;
-    align-items: end;
-    gap: 7px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #edf1f4;
-  }
-  .template-section-row label,
-  .exam-section-row label { min-width: 0; }
-  .template-section-row .icon-button {
-    width: 28px;
-    height: 30px;
-    display: grid;
-    place-items: center;
-    border: 1px solid #e5ebef;
-    border-radius: 4px;
-    background: #fff;
-    color: #a24f4f;
-    cursor: pointer;
-  }
-  .template-section-row .icon-button:disabled { opacity: .4; cursor: not-allowed; }
-  .exam-section-row {
-    display: grid;
-    grid-template-columns: minmax(100px, 1fr) minmax(125px, .8fr) auto;
-    align-items: center;
-    gap: 10px;
-    padding: 7px 0;
-    border-bottom: 1px solid #edf1f4;
-  }
-  .exam-section-row > div { display: grid; gap: 4px; }
-  .exam-section-row strong { color: #35495a; font-size: 9px; }
-  .exam-section-row small, .template-summary { color: #82909d; font-size: 8px; }
-  .availability-low { color: #b14f43 !important; }
-  .availability-ok { color: #28806f !important; }
-  .template-summary { margin: -3px 0 0; }
-  .exam-form-preview {
-    display: grid;
-    gap: 12px;
-  }
-  .preview-heading {
-    display: grid;
-    gap: 5px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #e8edf1;
-  }
-  .preview-heading h3 { margin: 0; color: #263a4e; font-size: 15px; }
-  .preview-heading p, .preview-heading small { margin: 0; color: #82909d; font-size: 9px; }
-  .preview-section {
-    display: grid;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid #e5ebef;
-    border-radius: 5px;
-  }
-  .preview-section > header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding-bottom: 7px;
-    border-bottom: 1px solid #edf1f4;
-  }
-  .preview-section > header > div { display: grid; gap: 3px; }
-  .preview-section strong { color: #35495a; font-size: 10px; }
-  .preview-section small, .preview-section > header > span { color: #82909d; font-size: 8px; }
-  .preview-question { display: flex; align-items: center; gap: 8px; min-height: 24px; }
-  .preview-question > span { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid #dce5e9; border-radius: 50%; color: #617787; font-size: 8px; }
-  .preview-question > div { height: 1px; flex: 1; background: #e8edf1; }
   .admin-text-button {
     display: inline-flex;
     align-items: center;
@@ -3170,134 +2040,6 @@
     max-width: 330px;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .admin-question-list {
-    display: grid;
-  }
-  .admin-question-list article {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 2px;
-    border-top: 1px solid #edf1f4;
-  }
-  .admin-question-list article > div {
-    display: grid;
-    min-width: 0;
-    flex: 1;
-    gap: 4px;
-  }
-  .admin-question-list strong {
-    overflow: hidden;
-    color: #35495a;
-    font-size: 9px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .admin-question-list small {
-    color: #8896a2;
-    font-size: 8px;
-  }
-  .question-picker {
-    display: grid;
-    max-height: 210px;
-    gap: 7px;
-    overflow-y: auto;
-    margin: 0;
-    padding: 10px;
-    border: 1px solid #e3e9ef;
-    border-radius: 6px;
-  }
-  .question-mode {
-    display: flex;
-    gap: 5px;
-    margin: -5px 0 14px;
-    padding: 4px;
-    border-radius: 6px;
-    background: #f0f4f6;
-  }
-  .question-mode button {
-    min-height: 32px;
-    flex: 1;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: #637787;
-    font: inherit;
-    font-size: 9px;
-    cursor: pointer;
-  }
-  .question-mode button.active {
-    background: #fff;
-    color: #167b70;
-    box-shadow: 0 1px 3px rgba(20, 40, 55, 0.12);
-  }
-  .generated-preview {
-    display: grid;
-    max-height: 250px;
-    gap: 8px;
-    overflow: auto;
-    padding: 10px;
-    border: 1px solid #dce8e7;
-    border-radius: 6px;
-    background: #f8fbfa;
-    color: #42605e;
-    font-size: 9px;
-  }
-  .generated-preview article {
-    display: grid;
-    gap: 4px;
-    padding-top: 8px;
-    border-top: 1px solid #e4eeec;
-  }
-  .generated-preview p,
-  .generated-preview small {
-    margin: 0;
-    color: #738582;
-    font-size: 8px;
-    line-height: 1.5;
-  }
-  .question-picker legend {
-    padding: 0 5px;
-    color: #536a7c;
-    font-size: 9px;
-    font-weight: 650;
-  }
-  .question-choice {
-    display: flex !important;
-    grid-template-columns: 15px minmax(0, 1fr);
-    align-items: flex-start;
-    gap: 8px !important;
-    padding: 8px;
-    border: 1px solid #edf1f4;
-    border-radius: 5px;
-    cursor: pointer;
-  }
-  .question-choice input {
-    width: 14px !important;
-    min-height: 14px !important;
-    margin-top: 2px;
-    accent-color: #188b7b;
-  }
-  .question-choice span {
-    display: grid;
-    gap: 4px;
-  }
-  .question-choice strong {
-    color: #40576a;
-    font-size: 9px;
-    font-weight: 550;
-  }
-  .question-choice small,
-  .form-hint,
-  .picker-empty {
-    color: #83919d;
-    font-size: 8px;
-  }
-  .picker-empty {
-    margin: 4px;
-    line-height: 1.6;
   }
   .modal-backdrop {
     position: fixed;
@@ -3491,18 +2233,6 @@
     .admin-modal {
       padding: 15px;
     }
-    .template-section-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px;
-    }
-    .template-section-row label:nth-child(1) { grid-column: 1; grid-row: 1; }
-    .template-section-row label:nth-child(2) { grid-column: 2; grid-row: 1; }
-    .template-section-row label:nth-child(3) { grid-column: 1 / -1; grid-row: 2; }
-    .template-section-row label:nth-child(4) { grid-column: 1; grid-row: 3; }
-    .template-section-row label:nth-child(5) { grid-column: 2; grid-row: 3; }
-    .template-section-row .icon-button { grid-column: 3; grid-row: 1; }
-    .exam-section-row {
-      grid-template-columns: minmax(0, 1fr) minmax(100px, .8fr);
-    }
-    .exam-section-row > small { grid-column: 1 / -1; }
+
   }
 </style>

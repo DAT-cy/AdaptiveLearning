@@ -54,12 +54,15 @@ public class ExamTemplateController {
     }
 
     @PostMapping("/{id}/generate")
-    @PreAuthorize("hasAuthority('ROLE_USER')")
-    public ResponseEntity<DefaultRes<ExamResponse>> generateForStudent(
+    @PreAuthorize("hasAnyAuthority('ROLE_USER', 'ROLE_ADMIN')")
+    public ResponseEntity<DefaultRes<ExamResponse>> generateExam(
             @PathVariable Long id,
             @Valid @RequestBody GenerateExamFromTemplateRequest request) {
-        ExamResponse response = service.generateExam(id, SecurityUtils.getCurrentUserId(), request);
+        Long ownerUserId = SecurityUtils.hasRole(adaptivelearning.module.users.entity.Role.ROLE_ADMIN)
+                ? null
+                : SecurityUtils.getCurrentUserId();
+        ExamResponse response = service.generateExam(id, ownerUserId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(DefaultRes.res(HttpStatus.CREATED.value(), "Exam generated for this learner", response));
+                .body(DefaultRes.res(HttpStatus.CREATED.value(), "Exam generated and published", response));
     }
 }

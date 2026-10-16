@@ -1,14 +1,22 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowRight, BarChart3, Bell, BookMarked, BookOpen, Brain, CalendarDays, Check, CheckCircle2,
-  ChevronDown, CircleHelp, Clock3, Compass, Flame, GraduationCap, LayoutDashboard,
-  LogOut, Menu, Plus, Search, Send, Settings, Sparkles, Target,
-  Trophy, UserRound, X,
+  BarChart3, Bell, BookMarked, BookOpen, CheckCircle2, ChevronDown, CircleHelp,
+  GraduationCap, LayoutDashboard, Menu, Search, Settings, Sparkles, Target, X,
 } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import { learningService } from '@/services/learningService'
+import { homeContextKey } from '../composables/homeContext'
+import DashboardView from '../components/views/DashboardView.vue'
+import PlansView from '../components/views/PlansView.vue'
+import CoursesView from '../components/views/CoursesView.vue'
+import TestsView from '../components/views/TestsView.vue'
+import ProgressView from '../components/views/ProgressView.vue'
+import TutorView from '../components/views/TutorView.vue'
+import SettingsView from '../components/views/SettingsView.vue'
+import ExamSessionView from '../components/views/ExamSessionView.vue'
+import ExamResultView from '../components/views/ExamResultView.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -16,17 +24,12 @@ const userStore = useUserStore()
 const activeView = ref(route.meta.view || 'dashboard')
 const searchQuery = ref('')
 const exams = ref([])
-const examTemplates = ref([])
 const history = ref([])
 const recommendations = ref([])
 const certificates = ref([])
 const plans = ref([])
 const progress = ref(null)
 const loading = ref(false)
-const generatingExam = ref(false)
-const templatePickerOpen = ref(false)
-const selectedTemplate = ref(null)
-const sectionDifficulties = ref([])
 const pageError = ref('')
 const selectedCertificateId = ref('')
 const showPlanForm = ref(false)
@@ -82,10 +85,6 @@ const filteredExams = computed(() => publishedExams.value.filter((exam) => {
   const query = searchQuery.value.trim().toLowerCase()
   return !query || `${exam.title} ${exam.description || ''}`.toLowerCase().includes(query)
 }))
-const filteredExamTemplates = computed(() => examTemplates.value.filter((template) => {
-  const query = searchQuery.value.trim().toLowerCase()
-  return !query || `${template.title} ${template.description || ''} ${template.sections?.map((section) => section.name).join(' ') || ''}`.toLowerCase().includes(query)
-}))
 const activePlans = computed(() => plans.value.filter((plan) => plan.status === 'ACTIVE'))
 const activePlan = computed(() => activePlans.value[0] || null)
 const activeRecommendations = computed(() => recommendations.value.filter((item) => item.status !== 'COMPLETED'))
@@ -129,6 +128,20 @@ const masterySkills = computed(() => {
 })
 const formattedTimeLeft = computed(() => `${Math.floor(secondsLeft.value / 60).toString().padStart(2, '0')}:${(secondsLeft.value % 60).toString().padStart(2, '0')}`)
 
+provide(homeContextKey, reactive({
+  activeView, searchQuery, exams, history, recommendations, certificates, plans,
+  progress, loading, pageError, selectedCertificateId, showPlanForm, creatingPlan,
+  planForm, attempt, attemptQuestions, answers, result, secondsLeft, submitting,
+  saveState, conversations, currentConversation, messages, tutorPrompt, askingTutor,
+  userStore, userName, greetingName, initials, publishedExams, filteredExams,
+  activePlans, activePlan, activeRecommendations, scoreTrend, averageScore,
+  averageScorePercent, doneCount, completedPlanRatio, greeting, selectedCertificate,
+  masterySkills, formattedTimeLeft,
+  showView, loadProgress, formatDate, recommendationTitle, certificateProgress,
+  markRecommendationStarted, createPlan, selectConversation, askTutor, startExam,
+  parseOptions, saveAnswer, leaveAttempt, submitExam, logout, localizeStatus,
+}))
+
 function asList(value) {
   if (Array.isArray(value)) return value
   return value?.data || value?.content || value?.items || []
@@ -171,9 +184,9 @@ async function loadDashboard() {
   pageError.value = ''
   const results = await Promise.allSettled([
     learningService.exams(), learningService.history(), learningService.recommendations(),
-    learningService.certificates(), learningService.plans(), learningService.examTemplates(),
+    learningService.certificates(), learningService.plans(),
   ])
-  const [examResult, historyResult, recommendationResult, certificateResult, plansResult, templatesResult] = results
+  const [examResult, historyResult, recommendationResult, certificateResult, plansResult] = results
   if (examResult.status === 'fulfilled') exams.value = asList(examResult.value)
   if (historyResult.status === 'fulfilled') history.value = asList(historyResult.value)
   if (recommendationResult.status === 'fulfilled') recommendations.value = asList(recommendationResult.value)
@@ -182,7 +195,6 @@ async function loadDashboard() {
     if (!selectedCertificateId.value && certificates.value.length) selectedCertificateId.value = String(certificates.value[0].certificateId)
   }
   if (plansResult.status === 'fulfilled') plans.value = asList(plansResult.value)
-  if (templatesResult.status === 'fulfilled') examTemplates.value = asList(templatesResult.value)
   if (results.every((item) => item.status === 'rejected')) {
     pageError.value = 'Không kết nối được backend. Hãy kiểm tra backend và cơ sở dữ liệu rồi tải lại.'
   }
@@ -341,30 +353,6 @@ async function startExam(exam) {
   }
 }
 
-function openTemplateExam(template) {
-  selectedTemplate.value = template
-  sectionDifficulties.value = (template.sections || []).map(() => 'MEDIUM')
-  templatePickerOpen.value = true
-}
-
-async function generateAndStartExam() {
-  if (!selectedTemplate.value || generatingExam.value) return
-  generatingExam.value = true
-  pageError.value = ''
-  try {
-    const exam = await learningService.generateExamFromTemplate(
-      selectedTemplate.value.templateId,
-      { sectionDifficulties: sectionDifficulties.value }
-    )
-    templatePickerOpen.value = false
-    await startExam(exam)
-  } catch (error) {
-    pageError.value = error?.response?.data?.responseMessage || error?.response?.data?.message || error?.message || 'Không thể tạo đề từ form đã chọn.'
-  } finally {
-    generatingExam.value = false
-  }
-}
-
 function saveAnswer(question) {
   if (!attempt.value) return
   saveState.value = 'Đang lưu đáp án...'
@@ -437,153 +425,21 @@ onUnmounted(() => {
       <div class="content-area">
         <div v-if="pageError" class="notice" role="alert"><CircleHelp :size="17" />{{ pageError }}<button class="notice-close" aria-label="Đóng thông báo" @click="pageError = ''"><X :size="16" /></button></div>
 
-        <template v-if="activeView === 'dashboard'">
-          <div class="dashboard-grid">
-            <div class="main-column">
-              <section class="welcome-banner">
-                <div class="welcome-copy"><p class="welcome-kicker">KHÔNG GIAN HỌC TẬP CỦA BẠN</p><h1>{{ greeting }}, {{ greetingName }}!</h1><p>Hôm nay là một ngày tốt để học hỏi và phát triển bản thân.<br class="wide-break"> Cùng khám phá bước tiếp theo trong hành trình của bạn.</p>
-                  <div class="quick-stats"><div class="quick-stat"><span class="quick-icon lavender"><BookOpen :size="18" /></span><span><strong>{{ activePlans.length }}</strong><small>Lộ trình đang học</small></span></div><div class="quick-stat"><span class="quick-icon sky"><Target :size="18" /></span><span><strong>{{ doneCount }}</strong><small>Bài đã hoàn thành</small></span></div><div class="quick-stat"><span class="quick-icon peach"><Flame :size="18" /></span><span><strong>{{ publishedExams.length }}</strong><small>Đề luyện tập</small></span></div></div>
-                </div>
-                <div class="welcome-art" aria-hidden="true"><div class="art-orbit orbit-a"></div><div class="art-orbit orbit-b"></div><span class="art-node node-book"><BookOpen :size="19" /></span><span class="art-node node-ai"><Brain :size="22" /></span><span class="art-node node-bars"><BarChart3 :size="20" /></span><span class="art-node node-check"><Check :size="15" /></span><span class="art-track track-one"></span><span class="art-track track-two"></span><span class="art-spark spark-one">✦</span><span class="art-spark spark-two">✧</span></div>
-              </section>
-
-              <section class="section-block continue-section">
-                <div class="section-heading"><div><h2>Tiếp tục học tập</h2><p>Lộ trình bạn đang theo đuổi</p></div><button class="inline-link" @click="showView('plans')">Xem tất cả <ArrowRight :size="15" /></button></div>
-                <article v-if="activePlan" class="continue-card">
-                  <div class="course-art"><span class="course-label">LỘ TRÌNH</span><Compass :size="38" /><div class="course-art-ring"></div><small>{{ selectedCertificate?.name || 'Học tập thích ứng' }}</small></div>
-                  <div class="continue-body"><div class="continue-title"><h3>{{ activePlan.title }}</h3><span class="status-label"><span></span>Đang học</span></div><p class="course-tags"><span>{{ selectedCertificate?.name || 'Mục tiêu học tập' }}</span><span>{{ activePlan.hoursPerWeek || 0 }} giờ / tuần</span></p><div class="plan-progress"><div><span :style="{ width: `${completedPlanRatio}%` }"></span></div><small>{{ completedPlanRatio }}%</small></div><div class="continue-meta"><span><CalendarDays :size="13" /> {{ formatDate(activePlan.examDate) }}</span><span>{{ activePlan.completedCount || 0 }}/{{ activePlan.taskCount || 0 }} nhiệm vụ</span></div></div>
-                  <button class="continue-button" @click="showView('plans')"><ArrowRight :size="16" /> Mở lộ trình</button>
-                </article>
-                <div v-else class="empty-inline"><span class="empty-symbol"><BookMarked :size="20" /></span><div><strong>Chưa có lộ trình học</strong><p>Tạo mục tiêu để hệ thống sắp xếp kế hoạch học tập cho bạn.</p></div><button class="outline-button" @click="showView('plans'); showPlanForm = true"><Plus :size="16" /> Tạo lộ trình</button></div>
-              </section>
-
-              <section class="section-block plan-overview">
-                <div class="section-heading"><div><h2>Năng lực học tập</h2><p>{{ selectedCertificate?.name || 'Chọn chứng chỉ để xem mức độ thành thạo' }}</p></div><button class="inline-link" @click="showView('progress')">Xem chi tiết <ArrowRight :size="15" /></button></div>
-                <div class="skill-overview">
-                  <div class="mastery-summary"><div class="mastery-ring" :style="{ '--mastery': `${averageScorePercent}%` }"><span>{{ progress?.averageScore != null ? Number(progress.averageScore).toFixed(1) : '—' }}</span></div><strong>Điểm trung bình</strong><small>{{ progress?.totalAttempts || 0 }} lượt đã nộp</small></div>
-                  <div v-if="masterySkills.length" class="skill-list"><div v-for="(skill, index) in masterySkills.slice(0, 4)" :key="skill.name" class="skill-row"><div class="skill-label"><span class="skill-bullet" :class="`bullet-${index % 4}`"><Target :size="13" /></span><strong>{{ skill.name }}</strong><small>{{ Math.round(skill.value) }}%</small></div><div class="skill-bar"><span :class="`bar-${index % 4}`" :style="{ width: `${Math.max(0, Math.min(100, skill.value))}%` }"></span></div></div></div>
-                  <div v-else class="skills-empty"><Sparkles :size="22" /><strong>Chưa đủ dữ liệu đánh giá</strong><span>Hoàn thành một bài kiểm tra để xem phân tích kỹ năng.</span><button class="text-link" @click="showView('tests')">Tìm bài kiểm tra <ArrowRight :size="14" /></button></div>
-                </div>
-              </section>
-
-              <section id="recommendations" class="section-block recommendation-section">
-                <div class="section-heading"><div><h2>Bài học được đề xuất</h2><p>Dựa trên dữ liệu học tập của bạn</p></div><button class="inline-link" @click="showView('progress')">Xem phân tích <ArrowRight :size="15" /></button></div>
-                <div v-if="activeRecommendations.length" class="recommendation-grid"><article v-for="(item, index) in activeRecommendations.slice(0, 3)" :key="item.recommendationId || index" class="recommendation-card"><span class="recommendation-icon" :class="`recommend-icon-${index % 3}`"><Target v-if="index === 0" :size="17" /><Brain v-else-if="index === 1" :size="17" /><BookOpen v-else :size="17" /></span><div class="recommendation-copy"><strong>{{ recommendationTitle(item, index) }}</strong><p>{{ item.reason || 'Gợi ý dựa trên kết quả học tập gần đây.' }}</p><span class="recommendation-level">{{ localizeStatus(item.priority || item.status || 'Đề xuất') }}</span></div><button class="recommendation-action" :disabled="item.status === 'STARTED'" :title="item.status === 'STARTED' ? 'Đang thực hiện' : 'Bắt đầu học'" @click="markRecommendationStarted(item)"><ArrowRight :size="16" /></button></article></div>
-                <div v-else class="empty-recommendation"><Sparkles :size="19" /><span>Chưa có gợi ý mới. Hãy làm một bài kiểm tra để nhận đề xuất phù hợp.</span><button class="text-link" @click="showView('tests')">Chọn bài kiểm tra <ArrowRight :size="14" /></button></div>
-              </section>
-            </div>
-
-            <aside class="right-column">
-              <section class="assistant-panel">
-                <div class="panel-heading"><span class="assistant-mark"><Brain :size="19" /></span><h2>Trợ lý AI</h2><span class="personalized"><Sparkles :size="12" /> Cá nhân hóa</span></div>
-                <p class="assistant-description">Hỏi về bài học, kết quả hoặc những chủ đề bạn muốn hiểu sâu hơn.</p>
-                <div class="assistant-message"><span class="bot-avatar"><Brain :size="18" /></span><p>{{ activeRecommendations[0]?.reason || 'Mình có thể giúp bạn giải đáp thắc mắc và ôn tập theo mục tiêu học tập.' }}</p></div>
-                <button class="assistant-button" @click="showView('tutor')"><Sparkles :size="16" /> Hỏi AI ngay <ArrowRight :size="16" /></button>
-              </section>
-
-              <section class="weekly-panel">
-                <div class="panel-heading"><span class="small-panel-icon purple"><BarChart3 :size="16" /></span><h2>Tiến độ của bạn</h2><button class="inline-link" @click="showView('progress')">Chi tiết <ArrowRight :size="14" /></button></div>
-                <label v-if="certificates.length" class="certificate-select-label"><span>Chứng chỉ</span><select v-model="selectedCertificateId" @change="loadProgress"><option v-for="certificate in certificates" :key="certificate.certificateId" :value="String(certificate.certificateId)">{{ certificate.name }}</option></select></label>
-                <div class="metric-grid"><div class="metric-cell"><span class="metric-icon blue"><Trophy :size="16" /></span><strong>{{ progress?.totalAttempts ?? history.length }}</strong><small>Lượt làm bài</small></div><div class="metric-cell"><span class="metric-icon mint"><CheckCircle2 :size="16" /></span><strong>{{ progress?.averageScore != null ? Number(progress.averageScore).toFixed(1) : averageScore != null ? averageScore.toFixed(1) : '—' }}</strong><small>Điểm trung bình</small></div><div class="metric-cell"><span class="metric-icon violet"><BookMarked :size="16" /></span><strong>{{ activePlans.length }}</strong><small>Lộ trình đang học</small></div><div class="metric-cell"><span class="metric-icon amber"><Flame :size="16" /></span><strong>{{ activeRecommendations.length }}</strong><small>Gợi ý cần xem</small></div></div>
-              </section>
-
-              <section class="goal-panel">
-                <div class="panel-heading"><span class="small-panel-icon blue"><Target :size="16" /></span><h2>Mục tiêu hiện tại</h2><button class="inline-link" @click="showView('plans')">Chi tiết <ArrowRight :size="14" /></button></div>
-                <div v-if="activePlan" class="goal-content"><div class="goal-heading"><span class="goal-symbol"><Target :size="18" /></span><strong>{{ activePlan.title }}</strong></div><div class="goal-track"><span :style="{ width: `${completedPlanRatio}%` }"></span></div><div class="goal-details"><span>{{ completedPlanRatio }}% hoàn thành</span><span>{{ activePlan.targetScore ? `Mục tiêu ${activePlan.targetScore} điểm` : formatDate(activePlan.examDate) }}</span></div></div>
-                <div v-else class="goal-empty"><p>Bạn chưa đặt mục tiêu học tập.</p><button class="text-link" @click="showView('plans'); showPlanForm = true">Tạo mục tiêu <ArrowRight :size="14" /></button></div>
-              </section>
-            </aside>
-          </div>
-        </template>
-
-        <section v-else-if="activeView === 'plans'" class="page-view">
-          <div class="view-heading"><div><p class="view-kicker">KẾ HOẠCH CỦA BẠN</p><h1>Lộ trình học</h1><p>Theo dõi mục tiêu và lịch học được xây dựng cho bạn.</p></div><button class="primary-button" @click="showPlanForm = !showPlanForm"><Plus :size="17" /> Tạo lộ trình</button></div>
-          <form v-if="showPlanForm" class="plan-form" @submit.prevent="createPlan"><div class="form-heading"><div><h2>Tạo lộ trình mới</h2><p>Chọn mục tiêu và thời gian học mỗi tuần.</p></div><button class="icon-action" type="button" aria-label="Đóng" @click="showPlanForm = false"><X :size="18" /></button></div><label class="form-field">Tên lộ trình<input v-model="planForm.title" required maxlength="200" placeholder="Ví dụ: Luyện thi IELTS" /></label><div class="form-row"><label class="form-field">Chứng chỉ<select v-model="selectedCertificateId"><option value="">Không chọn</option><option v-for="certificate in certificates" :key="certificate.certificateId" :value="String(certificate.certificateId)">{{ certificate.name }}</option></select></label><label class="form-field">Ngày dự kiến thi<input v-model="planForm.examDate" type="date" required /></label></div><div class="form-row"><label class="form-field">Điểm mục tiêu<input v-model="planForm.targetScore" type="number" min="0" step="0.5" placeholder="Ví dụ: 7.0" /></label><label class="form-field">Giờ học mỗi tuần<input v-model.number="planForm.hoursPerWeek" type="number" min="1" max="80" required /></label></div><div class="form-actions"><button class="secondary-button" type="button" @click="showPlanForm = false">Hủy</button><button class="primary-button" type="submit" :disabled="creatingPlan">{{ creatingPlan ? 'Đang tạo...' : 'Tạo kế hoạch' }}</button></div></form>
-          <div v-if="plans.length" class="plan-list"><article v-for="plan in plans" :key="plan.planId" class="plan-row"><span class="plan-row-icon"><Compass :size="21" /></span><div class="plan-row-content"><div class="plan-row-title"><h2>{{ plan.title }}</h2><span :class="['plan-status', plan.status === 'ACTIVE' ? 'plan-active' : '']">{{ plan.status === 'ACTIVE' ? 'Đang học' : plan.status === 'COMPLETED' ? 'Hoàn thành' : 'Đã lưu trữ' }}</span></div><p>{{ certificates.find((certificate) => certificate.certificateId === plan.certificateId)?.name || 'Lộ trình học cá nhân' }} · {{ plan.hoursPerWeek }} giờ mỗi tuần · {{ formatDate(plan.examDate) }}</p><div class="plan-progress"><div><span :style="{ width: `${plan.taskCount ? Math.round(plan.completedCount / plan.taskCount * 100) : 0}%` }"></span></div><small>{{ plan.completedCount || 0 }} / {{ plan.taskCount || 0 }} nhiệm vụ</small></div><div class="roadmap-track" :aria-label="`Tiến độ ${plan.title}`"><div :class="{ reached: plan.completedCount > 0 }"><span>01</span><small>Bắt đầu</small></div><i :class="{ reached: plan.completedCount > 0 }"></i><div :class="{ reached: plan.completedCount > 0 && plan.completedCount < plan.taskCount, current: plan.status === 'ACTIVE' }"><span>02</span><small>Đang học</small></div><i :class="{ reached: plan.status === 'COMPLETED' }"></i><div :class="{ reached: plan.status === 'COMPLETED' }"><span>03</span><small>Hoàn thành</small></div></div></div><button class="icon-action" :title="`Xem thống kê ${plan.title}`" @click="showView('progress')"><ArrowRight :size="18" /></button></article></div>
-          <div v-else-if="!loading && !showPlanForm" class="empty-page"><Compass :size="28" /><h2>Chưa có lộ trình</h2><p>Tạo kế hoạch theo ngày thi và số giờ học bạn có thể dành mỗi tuần.</p><button class="primary-button" @click="showPlanForm = true"><Plus :size="16" /> Tạo lộ trình đầu tiên</button></div>
-        </section>
-
-        <section v-else-if="activeView === 'courses'" class="page-view">
-          <div class="view-heading"><div><p class="view-kicker">NỘI DUNG HỌC TẬP</p><h1>Khóa học và chứng chỉ</h1><p>Chọn lĩnh vực học tập để xem đề luyện tập tương ứng.</p></div><label class="search-field"><Search :size="17" /><input v-model="searchQuery" placeholder="Tìm khóa học" aria-label="Tìm khóa học"></label></div>
-          <div v-if="certificates.length" class="certificate-grid"><article v-for="(certificate, index) in certificates.filter((item) => !searchQuery || `${item.name} ${item.description || ''}`.toLowerCase().includes(searchQuery.toLowerCase()))" :key="certificate.certificateId" class="certificate-card"><span class="certificate-icon" :class="`certificate-color-${index % 4}`"><GraduationCap :size="21" /></span><h2>{{ certificate.name }}</h2><p>{{ certificate.description || 'Chương trình học tập và đánh giá theo chứng chỉ.' }}</p><div class="certificate-stats"><span>{{ certificateProgress(certificate).total }} bài học</span><span v-if="certificate.passingScore">Mục tiêu {{ certificate.passingScore }}</span></div><div class="course-progress"><span>{{ certificateProgress(certificate).completed }}/{{ certificateProgress(certificate).total }} bài hoàn thành</span><strong>{{ certificateProgress(certificate).percent }}%</strong><div><i :style="{ width: `${certificateProgress(certificate).percent}%` }"></i></div></div><button class="outline-button" @click="showView('tests'); searchQuery = ''">{{ certificateProgress(certificate).completed ? 'Tiếp tục học' : 'Bắt đầu học' }} <ArrowRight :size="15" /></button></article></div>
-          <div v-else class="empty-page"><GraduationCap :size="28" /><h2>Chưa có chứng chỉ học tập</h2><p>Các chứng chỉ được quản trị viên cấu hình sẽ hiển thị tại đây.</p></div>
-        </section>
-
-        <section v-else-if="activeView === 'tests'" class="page-view">
-          <div class="view-heading"><div><p class="view-kicker">LUYỆN TẬP VÀ ĐÁNH GIÁ</p><h1>Bài kiểm tra</h1><p>Chọn một form; đề được tạo khi bạn bắt đầu làm.</p></div><label class="search-field"><Search :size="17" /><input v-model="searchQuery" placeholder="Tìm form bài thi" aria-label="Tìm form bài thi"></label></div>
-          <div v-if="filteredExamTemplates.length" class="test-list template-test-list">
-            <article v-for="(template, index) in filteredExamTemplates" :key="template.templateId" class="test-row">
-              <span class="test-icon" :class="`test-icon-${index % 4}`"><BookOpen :size="20" /></span>
-              <div class="test-info">
-                <h2>{{ template.title }}</h2>
-                <p>{{ template.sections.map((section) => section.name).join(' · ') }}</p>
-                <div class="test-meta">
-                  <span><Clock3 :size="14" /> {{ template.durationMinutes }} phút</span>
-                  <span>{{ template.sections.reduce((sum, section) => sum + section.questionCount, 0) }} câu</span>
-                  <span>{{ template.targetScoreMin }}–{{ template.targetScoreMax }} {{ template.targetScoreUnit }}</span>
-                </div>
-              </div>
-              <button class="primary-button" :disabled="loading || generatingExam" @click="openTemplateExam(template)">Chọn form <ArrowRight :size="15" /></button>
-            </article>
-          </div>
-          <div v-else-if="!loading" class="empty-inline">Chưa có form bài thi được mở.</div>
-          <div v-if="filteredExams.length" class="test-list"><article v-for="(exam, index) in filteredExams" :key="exam.examId" class="test-row"><span class="test-icon" :class="`test-icon-${index % 4}`"><BookOpen :size="20" /></span><div class="test-info"><h2>{{ exam.title }}</h2><p>{{ exam.description || 'Bài đánh giá kiến thức tổng hợp' }}</p><div class="test-meta"><span><Clock3 :size="14" /> {{ exam.durationMinutes }} phút</span><span>{{ exam.questionCount || exam.totalQuestions || 0 }} câu hỏi</span><span>{{ exam.totalPoints ?? '—' }} điểm</span></div></div><button class="primary-button" :disabled="loading" @click="startExam(exam)">Bắt đầu <ArrowRight :size="15" /></button></article></div>
-          <div v-if="filteredExams.length" class="section-heading legacy-exam-heading"><div><h2>Đề thi đã xuất bản</h2><p>Các bài thi có sẵn trong hệ thống</p></div></div>
-          <div v-if="!loading && !filteredExams.length && !filteredExamTemplates.length" class="empty-page"><BookOpen :size="28" /><h2>Chưa có form bài thi</h2><p>Các form do quản trị viên mở sẽ xuất hiện tại đây.</p></div>
-          <div v-if="history.length" class="recent-history"><div class="section-heading"><div><h2>Lịch sử gần đây</h2><p>Các lượt làm bài của bạn</p></div><button class="inline-link" @click="showView('history')">Xem tất cả <ArrowRight :size="14" /></button></div><article v-for="item in history.slice(0, 3)" :key="item.attemptId" class="history-row"><span class="history-status"><CheckCircle2 :size="16" /></span><div><strong>{{ exams.find((exam) => exam.examId === item.examId)?.title || `Bài thi #${item.examId}` }}</strong><small>{{ formatDate(item.startedAt) }} · {{ localizeStatus(item.status) }}</small></div><strong class="history-score">{{ item.score ?? '—' }}<small v-if="item.maxScore != null"> / {{ item.maxScore }}</small></strong></article></div>
-        </section>
-
-        <section v-else-if="activeView === 'progress' || activeView === 'history'" class="page-view">
-          <div class="view-heading"><div><p class="view-kicker">PHÂN TÍCH HỌC TẬP</p><h1>{{ activeView === 'history' ? 'Lịch sử làm bài' : 'Thống kê tiến độ' }}</h1><p>Theo dõi kết quả theo chứng chỉ và các lượt đánh giá của bạn.</p></div><label v-if="certificates.length" class="select-field"><span>Chứng chỉ</span><select v-model="selectedCertificateId" @change="loadProgress"><option v-for="certificate in certificates" :key="certificate.certificateId" :value="String(certificate.certificateId)">{{ certificate.name }}</option></select></label></div>
-          <div class="progress-summary"><div><span class="summary-icon"><Trophy :size="20" /></span><strong>{{ progress?.averageScore != null ? Number(progress.averageScore).toFixed(1) : averageScore != null ? averageScore.toFixed(1) : '—' }}</strong><small>Điểm trung bình</small></div><div><span class="summary-icon mint"><CheckCircle2 :size="20" /></span><strong>{{ progress?.totalAttempts ?? history.length }}</strong><small>Lượt làm bài</small></div><div><span class="summary-icon violet"><Compass :size="20" /></span><strong>{{ activePlans.length }}</strong><small>Lộ trình đang học</small></div></div>
-          <div v-if="activeView === 'progress'" class="progress-visuals">
-            <section class="detail-section trend-panel"><div class="section-heading"><div><h2>Tiến độ học tập</h2><p>Điểm số qua các lượt kiểm tra gần đây</p></div></div><div v-if="scoreTrend.length" class="score-chart"><div v-for="(entry, index) in scoreTrend" :key="`${entry.label}-${index}`" class="score-column"><strong>{{ entry.score }}</strong><div class="score-bar-track"><i :style="{ height: `${Math.max(8, Math.min(100, entry.score / entry.maxScore * 100))}%` }"></i></div><small>{{ entry.label }}</small></div></div><div v-else class="chart-empty">Hoàn thành bài kiểm tra để xem xu hướng điểm.</div></section>
-            <section class="detail-section score-panel"><div class="section-heading"><div><h2>Tổng quan điểm số</h2><p>{{ selectedCertificate?.name || 'Kết quả học tập' }}</p></div></div><div class="score-ring" :style="{ '--score': `${averageScorePercent}%` }"><div><strong>{{ progress?.averageScore != null ? Number(progress.averageScore).toFixed(1) : averageScore != null ? averageScore.toFixed(1) : '—' }}</strong><small>điểm TB</small></div></div><div class="score-legend"><span><i></i>Lượt đã nộp <strong>{{ progress?.totalAttempts ?? history.length }}</strong></span><span><i></i>Đề đã xuất bản <strong>{{ publishedExams.length }}</strong></span></div></section>
-          </div>
-          <section v-if="activeView === 'progress'" class="detail-section"><div class="section-heading"><div><h2>Mức độ thành thạo</h2><p>Theo dõi kỹ năng từ các bài kiểm tra đã nộp</p></div></div><div v-if="masterySkills.length" class="mastery-list"><div v-for="(skill, index) in masterySkills" :key="skill.name" class="mastery-row"><div class="skill-label"><span class="skill-bullet" :class="`bullet-${index % 4}`"><Target :size="14" /></span><strong>{{ skill.name }}</strong><small>{{ Math.round(skill.value) }}%</small></div><div class="skill-bar"><span :class="`bar-${index % 4}`" :style="{ width: `${Math.max(0, Math.min(100, skill.value))}%` }"></span></div></div></div><div v-else class="empty-inline">Chưa có đủ dữ liệu để phân tích kỹ năng.</div></section>
-          <section class="detail-section"><div class="section-heading"><div><h2>{{ activeView === 'history' ? 'Tất cả lượt làm bài' : 'Kết quả gần đây' }}</h2><p>Các bài thi và điểm số đã ghi nhận</p></div></div><div v-if="history.length" class="history-list"><article v-for="item in history" :key="item.attemptId" class="history-row"><span class="history-status"><CheckCircle2 :size="16" /></span><div><strong>{{ exams.find((exam) => exam.examId === item.examId)?.title || `Bài thi #${item.examId}` }}</strong><small>{{ formatDate(item.startedAt) }} · {{ localizeStatus(item.status) }}</small></div><strong class="history-score">{{ item.score ?? '—' }}<small v-if="item.maxScore != null"> / {{ item.maxScore }}</small></strong></article></div><div v-else class="empty-inline">Chưa có lượt làm bài. <button class="text-link" @click="showView('tests')">Chọn bài kiểm tra <ArrowRight :size="14" /></button></div></section>
-        </section>
-
-        <section v-else-if="activeView === 'tutor'" class="page-view tutor-view">
-          <div class="view-heading"><div><p class="view-kicker">HỖ TRỢ HỌC TẬP</p><h1>Trợ lý AI</h1><p>Trao đổi về bài học, kỹ năng và kết quả luyện tập của bạn.</p></div><button v-if="conversations.length" class="outline-button" @click="currentConversation = null; messages = []"><Plus :size="16" /> Cuộc trò chuyện mới</button></div>
-          <div class="tutor-workspace"><aside class="conversation-list"><div class="conversation-list-heading"><strong>Cuộc trò chuyện</strong><button class="icon-action" aria-label="Tạo cuộc trò chuyện mới" title="Tạo cuộc trò chuyện mới" @click="currentConversation = null; messages = []"><Plus :size="17" /></button></div><button v-for="conversation in conversations" :key="conversation.id" :class="['conversation-item', { current: currentConversation?.id === conversation.id }]" @click="selectConversation(conversation)"><Brain :size="16" /><span>{{ conversation.title || 'Hỗ trợ học tập' }}</span></button><div v-if="!conversations.length" class="conversation-empty">Bắt đầu cuộc trò chuyện đầu tiên với gia sư AI.</div></aside><div class="chat-panel"><div v-if="messages.length" class="message-list"><article v-for="message in messages" :key="message.id" :class="['chat-message', message.role === 'USER' ? 'user-message' : 'assistant-message-row']"><span class="message-avatar"><UserRound v-if="message.role === 'USER'" :size="15" /><Brain v-else :size="16" /></span><div><small>{{ message.role === 'USER' ? 'Bạn' : 'Trợ lý AI' }}</small><p>{{ message.content }}</p></div></article></div><div v-else class="chat-empty"><span class="chat-empty-icon"><Sparkles :size="23" /></span><h2>Bạn muốn tìm hiểu điều gì?</h2><p>Hỏi gia sư AI về chủ đề đang học hoặc một câu hỏi bạn chưa rõ.</p><div class="prompt-suggestions"><button @click="tutorPrompt = 'Giúp mình lập kế hoạch ôn tập hiệu quả.'">Gợi ý kế hoạch ôn tập</button><button @click="tutorPrompt = 'Giải thích giúp mình một khái niệm đang học.'">Giải thích một khái niệm</button></div></div><form class="chat-composer" @submit.prevent="askTutor"><textarea v-model="tutorPrompt" rows="2" placeholder="Nhập câu hỏi của bạn..." aria-label="Câu hỏi cho trợ lý AI" @keydown.enter.exact.prevent="askTutor"></textarea><button class="send-button" type="submit" :disabled="askingTutor || !tutorPrompt.trim()" :aria-label="askingTutor ? 'Đang gửi' : 'Gửi câu hỏi'"><Send :size="18" /></button></form></div><aside class="tutor-features"><h2>Các tính năng</h2><button @click="tutorPrompt = 'Giải thích giúp mình bài học đang gặp khó khăn.'"><span class="feature-icon feature-blue"><BookOpen :size="17" /></span><span><strong>Giải thích bài học</strong><small>Hiểu sâu hơn về kiến thức</small></span><ArrowRight :size="15" /></button><button @click="tutorPrompt = 'Gợi ý lộ trình học phù hợp với mục tiêu của mình.'"><span class="feature-icon feature-green"><Compass :size="17" /></span><span><strong>Gợi ý lộ trình</strong><small>Cá nhân hóa theo tiến độ</small></span><ArrowRight :size="15" /></button><button @click="tutorPrompt = 'Phân tích giúp mình câu trả lời và chỉ ra điểm cần cải thiện.'"><span class="feature-icon feature-violet"><Target :size="17" /></span><span><strong>Hỗ trợ code</strong><small>Ví dụ và giải thích chi tiết</small></span><ArrowRight :size="15" /></button><button @click="tutorPrompt = 'Tạo cho mình một bài luyện tập ngắn về chủ đề đang học.'"><span class="feature-icon feature-orange"><Sparkles :size="17" /></span><span><strong>Tạo bài luyện</strong><small>Ôn tập theo nhu cầu</small></span><ArrowRight :size="15" /></button></aside></div>
-        </section>
-
-        <section v-else-if="activeView === 'settings'" class="page-view">
-          <div class="view-heading"><div><p class="view-kicker">TÀI KHOẢN</p><h1>Cài đặt</h1><p>Thông tin đăng nhập và quyền truy cập của bạn.</p></div></div>
-          <section class="account-panel"><div class="account-avatar">{{ initials }}</div><div class="account-details"><h2>{{ userName }}</h2><p>{{ userStore.state.role === 'ROLE_ADMIN' ? 'Quản trị viên' : 'Học viên' }}</p></div><button class="secondary-button" @click="logout"><LogOut :size="16" /> Đăng xuất</button></section>
-        </section>
-
-        <section v-else-if="activeView === 'taking'" class="page-view test-taking-view">
-          <div class="view-heading"><div><p class="view-kicker">BÀI KIỂM TRA ĐANG DIỄN RA</p><h1>{{ exams.find((exam) => exam.examId === attempt?.examId)?.title || 'Bài kiểm tra' }}</h1><p>Đáp án được tự động lưu trong quá trình làm bài.</p></div><div class="timer" :class="{ urgent: secondsLeft < 300 }"><Clock3 :size="17" />{{ formattedTimeLeft }}</div></div><p class="save-state" aria-live="polite">{{ saveState }}</p>
-          <article v-for="(question, index) in attemptQuestions" :key="question.questionId" class="question-panel"><div class="question-number">{{ index + 1 }}</div><div class="question-content"><div class="question-meta"><span>Câu {{ index + 1 }}</span><span v-if="question.sectionName">{{ question.sectionName }}</span><span>{{ question.points }} điểm</span></div><p>{{ question.content }}</p><div v-if="parseOptions(question).length" class="answer-options"><label v-for="option in parseOptions(question)" :key="option.value" class="answer-option"><input v-model="answers[question.questionId]" type="radio" :name="`question-${question.questionId}`" :value="option.value" @change="saveAnswer(question)"><span>{{ option.label }}</span></label></div><textarea v-else v-model="answers[question.questionId]" class="answer-text" rows="3" placeholder="Nhập câu trả lời" @input="saveAnswer(question)"></textarea></div></article>
-          <div class="submit-bar"><button class="secondary-button" @click="leaveAttempt">Rời bài thi</button><button class="primary-button" :disabled="submitting || !attemptQuestions.length" @click="submitExam"><Send :size="16" />{{ submitting ? 'Đang nộp...' : 'Nộp bài' }}</button></div>
-        </section>
-
-        <section v-else-if="activeView === 'result' && result" class="result-panel"><span class="result-icon"><CheckCircle2 :size="28" /></span><p class="view-kicker">ĐÃ HOÀN THÀNH</p><h1>Kết quả bài thi</h1><strong class="result-score">{{ result.score ?? 0 }}<small> / {{ result.maxScore ?? 0 }}</small></strong><div class="result-counts"><div><strong>{{ result.correctCount }}</strong><small>Đúng</small></div><div><strong>{{ result.wrongCount }}</strong><small>Sai</small></div><div><strong>{{ result.unansweredCount }}</strong><small>Bỏ trống</small></div></div><button class="primary-button" @click="showView('dashboard')">Về trang chủ <ArrowRight :size="16" /></button></section>
+        <DashboardView v-if="activeView === 'dashboard'" />
+        <PlansView v-else-if="activeView === 'plans'" />
+        <CoursesView v-else-if="activeView === 'courses'" />
+        <TestsView v-else-if="activeView === 'tests'" />
+        <ProgressView v-else-if="activeView === 'progress' || activeView === 'history'" />
+        <TutorView v-else-if="activeView === 'tutor'" />
+        <SettingsView v-else-if="activeView === 'settings'" />
+        <ExamSessionView v-else-if="activeView === 'taking'" />
+        <ExamResultView v-else-if="activeView === 'result' && result" />
       </div>
     </section>
-    <div v-if="templatePickerOpen && selectedTemplate" class="template-picker-backdrop" @click.self="templatePickerOpen = false">
-      <section class="template-picker" role="dialog" aria-modal="true" :aria-label="`Cấu hình ${selectedTemplate.title}`">
-        <header class="template-picker-heading">
-          <div><p class="view-kicker">FORM BÀI THI</p><h2>{{ selectedTemplate.title }}</h2><p>{{ selectedTemplate.durationMinutes }} phút · {{ selectedTemplate.targetScoreMin }}–{{ selectedTemplate.targetScoreMax }} {{ selectedTemplate.targetScoreUnit }}</p></div>
-          <button class="icon-action" aria-label="Đóng" @click="templatePickerOpen = false"><X :size="18" /></button>
-        </header>
-        <form class="template-difficulty-form" @submit.prevent="generateAndStartExam">
-          <label v-for="(section, index) in selectedTemplate.sections" :key="index" class="template-difficulty-row">
-            <span><strong>{{ section.name }}</strong><small>{{ section.questionCount }} câu · {{ section.questionType }}</small></span>
-            <select v-model="sectionDifficulties[index]" aria-label="Độ khó">
-              <option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option>
-            </select>
-          </label>
-          <footer><button type="button" class="secondary-button" :disabled="generatingExam" @click="templatePickerOpen = false">Hủy</button><button class="primary-button" :disabled="generatingExam"><Check :size="16" />{{ generatingExam ? 'Đang tạo đề...' : 'Tạo đề và bắt đầu' }}</button></footer>
-        </form>
-      </section>
-    </div>
   </main>
 </template>
 
-<style scoped>
+<style>
 .app-shell { --ink: #101d49; --muted: #6e82a8; --line: #e6edf8; --blue: #2d68f3; --green: #23ad8c; display: flex; min-height: 100vh; color: var(--ink); background: #f5f8fd; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .sidebar { position: fixed; z-index: 10; inset: 0 auto 0 0; display: flex; width: 252px; flex-direction: column; padding: 20px 22px 16px; border-right: 1px solid #e7edf7; background: rgba(255,255,255,.94); }
 .sidebar-brand { display: flex; min-height: 43px; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; font-size: 16px; font-weight: 730; white-space: nowrap; }.brand-symbol { display: grid; width: 40px; height: 40px; place-items: center; color: var(--blue); }

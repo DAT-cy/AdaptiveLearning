@@ -121,6 +121,10 @@ public class ExamTemplateServiceImpl implements ExamTemplateService {
         if (request.getSectionDifficulties() == null || request.getSectionDifficulties().size() != sections.size()) {
             throw new IllegalArgumentException("Cần chọn độ khó cho từng phần của mẫu đề.");
         }
+        if (request.getQuestionIdsBySection() != null
+                && request.getQuestionIdsBySection().size() != sections.size()) {
+            throw new IllegalArgumentException("Danh sách câu hỏi không khớp với cấu trúc bài thi.");
+        }
 
         var topic = topics.findById(template.getTopicId())
                 .filter(value -> value.isActive() && template.getCertificateId().equals(value.getCertificateId()))
@@ -139,21 +143,50 @@ public class ExamTemplateServiceImpl implements ExamTemplateService {
             var sectionTopic = topics.findById(section.getTopicId())
                     .filter(value -> value.isActive() && template.getCertificateId().equals(value.getCertificateId()))
                     .orElseThrow(() -> new IllegalArgumentException("A section skill/subject is inactive or belongs to another exam."));
-            List<Question> available = new ArrayList<>(questions
-                    .findByCertificateIdAndTopicIdAndQuestionTypeIgnoreCaseAndDifficultyAndStatus(
-                            template.getCertificateId(), sectionTopic.getTopicId(), section.getQuestionType(),
-                            difficulty, ContentStatus.APPROVED));
-            available.removeIf(question -> selectedIds.contains(question.getQuestionId()));
-            Collections.shuffle(available);
+            List<Long> requestedIds = request.getQuestionIdsBySection() == null
+                    ? null
+                    : request.getQuestionIdsBySection().get(sectionIndex);
+            List<Question> sectionQuestions;
+            if (requestedIds != null) {
+                if (requestedIds.size() != section.getQuestionCount()
+                        || requestedIds.contains(null)
+                        || new HashSet<>(requestedIds).size() != requestedIds.size()) {
+                    throw new IllegalArgumentException("Số câu được chọn không khớp với cấu hình phần thi.");
+                }
+                Map<Long, Question> byId = new LinkedHashMap<>();
+                questions.findAllById(requestedIds).forEach(question -> byId.put(question.getQuestionId(), question));
+                if (byId.size() != requestedIds.size()) {
+                    throw new IllegalArgumentException("Một hoặc nhiều câu hỏi đã bị xóa.");
+                }
+                sectionQuestions = requestedIds.stream().map(byId::get).toList();
+                for (Question question : sectionQuestions) {
+                    if (!template.getCertificateId().equals(question.getCertificateId())
+                            || !sectionTopic.getTopicId().equals(question.getTopicId())
+                            || !section.getQuestionType().equalsIgnoreCase(question.getQuestionType())
+                            || difficulty != question.getDifficulty()
+                            || question.getStatus() != ContentStatus.APPROVED
+                            || selectedIds.contains(question.getQuestionId())) {
+                        throw new IllegalArgumentException("Câu hỏi được chọn không phù hợp với phần thi.");
+                    }
+                }
+            } else {
+                List<Question> available = new ArrayList<>(questions
+                        .findByCertificateIdAndTopicIdAndQuestionTypeIgnoreCaseAndDifficultyAndStatus(
+                                template.getCertificateId(), sectionTopic.getTopicId(), section.getQuestionType(),
+                                difficulty, ContentStatus.APPROVED));
+                available.removeIf(question -> selectedIds.contains(question.getQuestionId()));
+                Collections.shuffle(available);
 
-            if (available.size() < section.getQuestionCount()) {
-                throw new IllegalStateException(String.format(
-                        "Phần %s cần %d câu độ khó %s nhưng chỉ còn %d câu đã duyệt phù hợp.",
-                        section.getName(), section.getQuestionCount(), difficulty, available.size()));
+                if (available.size() < section.getQuestionCount()) {
+                    throw new IllegalStateException(String.format(
+                            "Phần %s cần %d câu độ khó %s nhưng chỉ còn %d câu đã duyệt phù hợp.",
+                            section.getName(), section.getQuestionCount(), difficulty, available.size()));
+                }
+                sectionQuestions = available.subList(0, section.getQuestionCount());
             }
 
             List<Long> sectionQuestionIds = new ArrayList<>();
-            for (Question question : available.subList(0, section.getQuestionCount())) {
+            for (Question question : sectionQuestions) {
                 selectedIds.add(question.getQuestionId());
                 sectionQuestionIds.add(question.getQuestionId());
                 selected.add(new SelectedQuestion(question, section, order++));

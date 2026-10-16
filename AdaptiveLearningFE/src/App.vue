@@ -8,7 +8,7 @@ import Loading from '@/components/Loading.vue'
 const { keepAliveMaxNum } = settings
 const currentRoute = useRoute()
 const layout = computed(
-  () => (currentRoute.meta.layout || "default") + "-layout"
+  () => (currentRoute.meta.layout || "only-view") + "-layout"
 )
 </script>
 
