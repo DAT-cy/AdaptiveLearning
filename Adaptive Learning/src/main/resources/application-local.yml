@@ -33,3 +33,4 @@ gemini:
   api-key: AIzaSyACEdChYoUwlA3HSVUyLFPMLgSYyKZCoW0
   model: gemini-2.5-flash
   base-url: https://generativelanguage.googleapis.com/v1beta
+

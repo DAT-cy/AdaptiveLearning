@@ -4,6 +4,7 @@ import adaptivelearning.config.response.DefaultRes;
 import adaptivelearning.config.response.ResponseMessage;
 import adaptivelearning.config.response.StatusCode;
 import adaptivelearning.module.users.dto.request.LoginRequest;
+import adaptivelearning.module.users.dto.request.GoogleLoginRequest;
 import adaptivelearning.module.users.dto.request.SignUpRequest;
 import adaptivelearning.module.users.dto.response.LoginResponse;
 import adaptivelearning.module.users.dto.response.ProfileUser;
@@ -31,6 +32,13 @@ public class AuthController {
         return new ResponseEntity<>(DefaultRes.res(StatusCode.OK, ResponseMessage.SUCCESS, userService.login(request)), HttpStatus.OK);
 
     }
+
+    @PostMapping("/google")
+    @Operation(summary = "Sign in with a Google ID token and get an application JWT")
+    public ResponseEntity<DefaultRes<LoginResponse>> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request) {
+        return new ResponseEntity<>(DefaultRes.res(StatusCode.OK, ResponseMessage.SUCCESS,
+                userService.loginWithGoogle(request)), HttpStatus.OK);
+    }
     @PostMapping("/signup")
     public ResponseEntity<DefaultRes<Boolean>> signUp(@Valid @RequestBody SignUpRequest signUpRequest) {
         return new ResponseEntity<>(DefaultRes.res(StatusCode.OK, ResponseMessage.SUCCESS, userService.signUp(signUpRequest)), HttpStatus.OK);
@@ -40,4 +48,4 @@ public class AuthController {
     public ResponseEntity<DefaultRes<ProfileUser>> getProfile() {
         return new ResponseEntity<>(DefaultRes.res(StatusCode.OK, ResponseMessage.SUCCESS, userService.getProfile()), HttpStatus.OK);
     }
-} 
+}

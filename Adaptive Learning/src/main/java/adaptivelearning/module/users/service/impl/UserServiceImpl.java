@@ -4,6 +4,7 @@ import adaptivelearning.config.response.CommonException;
 import adaptivelearning.config.response.ErrorCode;
 import adaptivelearning.config.app.JwtService;
 import adaptivelearning.module.users.dto.request.LoginRequest;
+import adaptivelearning.module.users.dto.request.GoogleLoginRequest;
 import adaptivelearning.module.users.dto.request.SignUpRequest;
 import adaptivelearning.module.users.dto.response.LoginResponse;
 import adaptivelearning.module.users.dto.response.ProfileUser;
@@ -11,6 +12,7 @@ import adaptivelearning.module.users.entity.Role;
 import adaptivelearning.module.users.entity.User;
 import adaptivelearning.module.users.repository.UserMapper;
 import adaptivelearning.module.users.service.UserService;
+import adaptivelearning.module.users.service.GoogleTokenVerifier;
 import adaptivelearning.utils.SecurityUtils;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
+
 @Service
 @Transactional
 @RequiredArgsConstructor
@@ -33,6 +37,7 @@ public class UserServiceImpl implements UserService {
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
+    private final GoogleTokenVerifier googleTokenVerifier;
 
 
 
@@ -64,6 +69,36 @@ public class UserServiceImpl implements UserService {
         catch (Exception e) {
             throw new CommonException(ErrorCode.WRONG_PASSWORD);
         }
+    }
+
+    @Override
+    public LoginResponse loginWithGoogle(GoogleLoginRequest request) {
+        GoogleTokenVerifier.GoogleProfile googleProfile = googleTokenVerifier.verify(request.getIdToken());
+        User user = findUserByEmail(googleProfile.getEmail());
+
+        if (user == null) {
+            user = new User();
+            user.setUsername(googleProfile.getEmail());
+            user.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
+            user.setRole(Role.ROLE_USER);
+            user.setEnable(true);
+            user.setIsDeleted(false);
+            userMapper.insertUser(user);
+            user = findUserByEmail(googleProfile.getEmail());
+        }
+
+        if (user == null) {
+            throw new CommonException(ErrorCode.INTER_SERVER_ERROR);
+        }
+        if (!user.isEnabled()) {
+            throw new CommonException(ErrorCode.ACCOUNT_DEACTIVATE);
+        }
+
+        return LoginResponse.builder()
+                .username(user.getUsername())
+                .token(jwtService.generateToken(user))
+                .role(user.getRole())
+                .build();
     }
     @Override
     public Boolean signUp(SignUpRequest request) {
