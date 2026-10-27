@@ -23,7 +23,16 @@ const statusMessages = {
   504: 'Máy chủ phản hồi quá thời gian chờ.',
 }
 
+let lastErrorMessage = ''
+let lastErrorTimestamp = 0
+
 function showError(description) {
+  const now = Date.now()
+  if (description === lastErrorMessage && now - lastErrorTimestamp < 2500) {
+    return
+  }
+  lastErrorMessage = description
+  lastErrorTimestamp = now
   toast.error('Đã xảy ra lỗi', { description })
 }
 

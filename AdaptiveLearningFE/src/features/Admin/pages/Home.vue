@@ -8,14 +8,21 @@
     Check,
     CheckCircle2,
     BarChart3,
+    ChevronDown,
     ClipboardCheck,
     CircleCheck,
     CirclePause,
+    CreditCard,
     Database,
     Eye,
     FileText,
     GraduationCap,
+    Headphones,
     Info,
+    Calendar,
+    DollarSign,
+    KeyRound,
+    Layers,
     LayoutDashboard,
     LoaderCircle,
     LogOut,
@@ -23,11 +30,19 @@
     MoreHorizontal,
     Pencil,
     Plus,
+    RefreshCw,
+    RotateCcw,
     Search,
     Shield,
+    Sliders,
+    Sparkles,
+    Tag,
     Trash2,
+    TrendingUp,
     Upload,
+    User,
     Users,
+    Wallet,
     X,
   } from 'lucide-vue-next'
   import { useUserStore } from '@/stores/user'
@@ -52,6 +67,7 @@
   const sectionIds = [
     'overview',
     'accounts',
+    'billing',
     'results',
     'programs',
     'exams',
@@ -62,6 +78,35 @@
     sectionIds.includes(initialSection) ? initialSection : 'overview'
   )
   const users = ref([])
+  const payments = ref([])
+  const plans = ref([])
+  const userBillings = ref([])
+  const billingSubTab = ref('plans')
+  const selectedUserForPayments = ref(null)
+  const userPaymentsList = ref([])
+  const userPaymentsLoading = ref(false)
+  const userPaymentsDrawerOpen = ref(false)
+  const userBillingSearch = ref('')
+  const userBillingPlanFilter = ref('all')
+  const planModalOpen = ref(false)
+  const editingPlanId = ref(null)
+  const savingPlan = ref(false)
+  const planModalError = ref('')
+  const planForm = reactive({
+    code: '',
+    name: '',
+    description: '',
+    price: 0,
+    currency: 'USD',
+    billingCycle: 'LIFETIME',
+    examLimit: -1,
+    featuresText: '',
+    isActive: true,
+  })
+  const loadingPayments = ref(false)
+  const paymentSearch = ref('')
+  const paymentStatusFilter = ref('all')
+  const paymentProviderFilter = ref('all')
   const analyticsPeriod = ref('30d')
   const analyticsCertificateId = ref('')
   const analyticsData = ref(null)
@@ -108,6 +153,52 @@
   const pageError = ref('')
   const adminModalError = ref('')
   const mobileMenuOpen = ref(false)
+  const adminProfileOpen = ref(false)
+  const adminStatus = ref('ready')
+  const adminStatusLabel = computed(() => {
+    if (adminStatus.value === 'ready') return 'Sẵn sàng'
+    if (adminStatus.value === 'busy') return 'Bận'
+    return 'Vắng mặt'
+  })
+  function cycleAdminStatus() {
+    if (adminStatus.value === 'ready') adminStatus.value = 'busy'
+    else if (adminStatus.value === 'busy') adminStatus.value = 'away'
+    else adminStatus.value = 'ready'
+  }
+  const adminNotificationsMuted = ref(false)
+  function toggleAdminNotifications() {
+    adminNotificationsMuted.value = !adminNotificationsMuted.value
+    toast.info(adminNotificationsMuted.value ? 'Đã tắt thông báo' : 'Đã bật thông báo')
+  }
+
+  const adminSupportModalOpen = ref(false)
+  const adminAboutModalOpen = ref(false)
+  const adminPasswordModalOpen = ref(false)
+  const adminPasswordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+  const adminPasswordError = ref('')
+  const adminChangingPassword = ref(false)
+
+  function handleAdminChangePassword() {
+    if (!adminPasswordForm.oldPassword || !adminPasswordForm.newPassword) {
+      adminPasswordError.value = 'Vui lòng nhập đầy đủ thông tin.'
+      return
+    }
+    if (adminPasswordForm.newPassword !== adminPasswordForm.confirmPassword) {
+      adminPasswordError.value = 'Mật khẩu xác nhận không khớp.'
+      return
+    }
+    adminChangingPassword.value = true
+    adminPasswordError.value = ''
+    setTimeout(() => {
+      toast.success('Đổi mật khẩu thành công!')
+      adminPasswordModalOpen.value = false
+      adminPasswordForm.oldPassword = ''
+      adminPasswordForm.newPassword = ''
+      adminPasswordForm.confirmPassword = ''
+      adminChangingPassword.value = false
+    }, 400)
+  }
+
   const modal = ref('')
   const adminModalRef = ref(null)
   const adminModalBaseline = ref('')
@@ -185,6 +276,7 @@
   const navigation = [
     { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
     { id: 'accounts', label: 'Tài khoản', icon: Users },
+    { id: 'billing', label: 'Gói cước & Thanh toán', icon: CreditCard },
     { id: 'results', label: 'Kết quả học tập', icon: BarChart3 },
     { id: 'programs', label: 'Kỳ thi & chứng chỉ', icon: GraduationCap },
     { id: 'exams', label: 'Bài kiểm tra', icon: ClipboardCheck },
@@ -258,7 +350,7 @@
     ],
   }
   const displayAnalyticsData = computed(() => showAnalyticsSample.value ? analyticsSample : analyticsData.value)
-  const adminName = computed(() => userStore.state.username || 'Quản trị viên')
+  const adminName = computed(() => userStore.state.fullName || userStore.state.username || 'Quản trị viên')
   const activeUsers = computed(
     () => users.value.filter((item) => item.enabled && item.emailVerified !== false).length
   )
@@ -388,6 +480,9 @@
       adminService.certificates(),
       adminService.exams(),
       adminService.knowledgeDocuments(),
+      adminService.payments(),
+      adminService.plans(),
+      adminService.userBillings(),
     ])
     if (results[0].status === 'fulfilled')
       users.value = asList(results[0].value)
@@ -397,6 +492,12 @@
       exams.value = asList(results[2].value)
     if (results[3].status === 'fulfilled')
       knowledgeDocuments.value = asList(results[3].value)
+    if (results[4].status === 'fulfilled')
+      payments.value = asList(results[4].value)
+    if (results[5].status === 'fulfilled')
+      plans.value = asList(results[5].value)
+    if (results[6].status === 'fulfilled')
+      userBillings.value = asList(results[6].value)
     if (programs.value.length) {
       const topicResults = await Promise.allSettled(
         programs.value.map((program) =>
@@ -838,6 +939,7 @@
   async function toggleKnowledgeActive(document) {
     const previous = document.active
     document.active = !previous
+    pageError.value = ''
     try {
       await adminService.setKnowledgeDocumentActive(
         document.documentId,
@@ -976,6 +1078,252 @@
     }
   }
 
+  async function updateUserPlan(user, newPlan) {
+    const oldPlan = user.plan || 'FREE'
+    if (oldPlan === newPlan) return
+    const confirmed = await confirm({
+      title: 'Xác nhận thay đổi gói cước',
+      message: `Bạn có chắc muốn chuyển tài khoản "${user.username}" sang gói ${newPlan === 'PREMIUM' ? 'Cao cấp (Premium)' : 'Miễn phí (Free)'}?`,
+      confirmLabel: 'Đồng ý',
+      cancelLabel: 'Hủy',
+    })
+    if (!confirmed) return
+    user.plan = newPlan
+    try {
+      await adminService.updateUserPlan(user.userId, newPlan)
+      toast.success(`Đã cập nhật gói cước thành công cho "${user.username}"`)
+      await loadData()
+    } catch (error) {
+      user.plan = oldPlan
+      pageError.value =
+        error?.response?.data?.responseMessage ||
+        'Không thể cập nhật gói cước tài khoản.'
+      toast.error(pageError.value)
+    }
+  }
+
+  const totalRevenue = computed(() => {
+    return payments.value
+      .filter((p) => p.status === 'SUCCEEDED')
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+  })
+
+  const succeededPaymentsCount = computed(() => {
+    return payments.value.filter((p) => p.status === 'SUCCEEDED').length
+  })
+
+  const pendingPaymentsCount = computed(() => {
+    return payments.value.filter((p) => p.status === 'PENDING').length
+  })
+
+  const premiumUsersCount = computed(() => {
+    return users.value.filter((u) => u.plan === 'PREMIUM').length
+  })
+
+  const freeUsersCount = computed(() => {
+    return users.value.filter((u) => u.plan !== 'PREMIUM').length
+  })
+
+  const filteredPayments = computed(() => {
+    return payments.value.filter((p) => {
+      const q = paymentSearch.value.trim().toLowerCase()
+      const matchesSearch =
+        !q ||
+        String(p.paymentId).includes(q) ||
+        (p.username && p.username.toLowerCase().includes(q)) ||
+        (p.providerPaymentId && p.providerPaymentId.toLowerCase().includes(q)) ||
+        (p.providerTransactionId && p.providerTransactionId.toLowerCase().includes(q))
+      const matchesStatus =
+        paymentStatusFilter.value === 'all' ||
+        p.status === paymentStatusFilter.value
+      const matchesProvider =
+        paymentProviderFilter.value === 'all' ||
+        p.provider === paymentProviderFilter.value
+      return matchesSearch && matchesStatus && matchesProvider
+    })
+  })
+
+  function formatPaymentDate(dateString) {
+    if (!dateString) return '—'
+    try {
+      const d = new Date(dateString)
+      return new Intl.DateTimeFormat('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d)
+    } catch {
+      return dateString
+    }
+  }
+
+  function formatMoney(amount, currency = 'USD') {
+    if (amount == null) return '$0.00'
+    return `$${Number(amount).toFixed(2)} ${currency}`
+  }
+
+  function parseFeatures(jsonOrString) {
+    if (!jsonOrString) return []
+    try {
+      const parsed = typeof jsonOrString === 'string' ? JSON.parse(jsonOrString) : jsonOrString
+      return Array.isArray(parsed) ? parsed : [String(parsed)]
+    } catch {
+      return [String(jsonOrString)]
+    }
+  }
+
+  function openPlanModal(plan = null) {
+    editingPlanId.value = plan ? plan.planId : null
+    planModalError.value = ''
+    if (plan) {
+      const features = parseFeatures(plan.featuresJson)
+      Object.assign(planForm, {
+        code: plan.code,
+        name: plan.name,
+        description: plan.description || '',
+        price: Number(plan.price) || 0,
+        currency: plan.currency || 'USD',
+        billingCycle: plan.billingCycle || 'LIFETIME',
+        examLimit: plan.examLimit ?? -1,
+        featuresText: features.join('\n'),
+        isActive: plan.isActive !== false,
+      })
+    } else {
+      Object.assign(planForm, {
+        code: '',
+        name: '',
+        description: '',
+        price: 0,
+        currency: 'USD',
+        billingCycle: 'LIFETIME',
+        examLimit: -1,
+        featuresText: '',
+        isActive: true,
+      })
+    }
+    planModalOpen.value = true
+  }
+
+  async function savePlan() {
+    if (!planForm.code.trim() || !planForm.name.trim()) {
+      planModalError.value = 'Vui lòng nhập đầy đủ Mã gói và Tên gói.'
+      return
+    }
+    savingPlan.value = true
+    planModalError.value = ''
+    const featuresList = planForm.featuresText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const payload = {
+      code: planForm.code.trim().toUpperCase(),
+      name: planForm.name.trim(),
+      description: planForm.description.trim(),
+      price: Number(planForm.price) || 0,
+      currency: planForm.currency || 'USD',
+      billingCycle: planForm.billingCycle || 'LIFETIME',
+      examLimit: Number(planForm.examLimit) ?? -1,
+      featuresJson: JSON.stringify(featuresList),
+      isActive: planForm.isActive,
+    }
+    try {
+      if (editingPlanId.value) {
+        await adminService.updatePlan(editingPlanId.value, payload)
+        toast.success(`Đã cập nhật gói "${planForm.name}" thành công`)
+      } else {
+        await adminService.createPlan(payload)
+        toast.success(`Đã tạo gói cước mới "${planForm.name}"`)
+      }
+      planModalOpen.value = false
+      await loadData()
+    } catch (error) {
+      planModalError.value =
+        error?.response?.data?.responseMessage ||
+        'Không thể lưu thông tin gói cước.'
+    } finally {
+      savingPlan.value = false
+    }
+  }
+
+  async function togglePlanStatus(plan) {
+    try {
+      await adminService.togglePlan(plan.planId)
+      plan.isActive = !plan.isActive
+      toast.success(
+        plan.isActive
+          ? `Đã kích hoạt gói "${plan.name}"`
+          : `Đã tạm ẩn gói "${plan.name}"`
+      )
+    } catch (error) {
+      toast.error('Không thể cập nhật trạng thái gói.')
+    }
+  }
+
+  async function deletePlan(plan) {
+    const confirmed = await confirm({
+      title: 'Xóa gói cước',
+      message: `Bạn có chắc muốn xóa gói cước "${plan.name}"? Hành động này không thể hoàn tác.`,
+      confirmLabel: 'Xóa gói',
+      cancelLabel: 'Hủy',
+    })
+    if (!confirmed) return
+    try {
+      await adminService.deletePlan(plan.planId)
+      toast.success(`Đã xóa gói "${plan.name}"`)
+      await loadData()
+    } catch (error) {
+      toast.error(error?.response?.data?.responseMessage || 'Không thể xóa gói cước này.')
+    }
+  }
+
+  const filteredUserBillings = computed(() => {
+    return userBillings.value.filter((u) => {
+      const q = userBillingSearch.value.trim().toLowerCase()
+      const matchesSearch =
+        !q ||
+        String(u.userId).includes(q) ||
+        (u.username && u.username.toLowerCase().includes(q))
+      const matchesPlan =
+        userBillingPlanFilter.value === 'all' ||
+        (userBillingPlanFilter.value === 'PREMIUM' && u.plan === 'PREMIUM') ||
+        (userBillingPlanFilter.value === 'FREE' && u.plan !== 'PREMIUM')
+      return matchesSearch && matchesPlan
+    })
+  })
+
+  async function viewUserPayments(userBilling) {
+    selectedUserForPayments.value = userBilling
+    userPaymentsDrawerOpen.value = true
+    userPaymentsLoading.value = true
+    try {
+      userPaymentsList.value = await adminService.userPayments(userBilling.userId)
+    } catch (error) {
+      userPaymentsList.value = []
+      toast.error('Không thể tải lịch sử thanh toán của học viên này.')
+    } finally {
+      userPaymentsLoading.value = false
+    }
+  }
+
+  async function resetUserQuota(userBilling) {
+    const confirmed = await confirm({
+      title: 'Reset lượt làm bài thi',
+      message: `Đặt lại số lượt thi miễn phí đã dùng về 0 cho "${userBilling.username}"?`,
+      confirmLabel: 'Reset ngay',
+      cancelLabel: 'Hủy',
+    })
+    if (!confirmed) return
+    try {
+      await adminService.resetUserQuota(userBilling.userId)
+      toast.success(`Đã reset số lượt thi về 0 cho "${userBilling.username}"`)
+      await loadData()
+    } catch (error) {
+      toast.error('Không thể reset lượt thi cho tài khoản này.')
+    }
+  }
+
   const certificatePresets = [
     {
       name: 'IELTS Academic',
@@ -1080,14 +1428,77 @@
               </button>
             </template>
           </Tooltip>
-          <button class="admin-profile" @click="logout">
-            <span>{{ adminName.slice(0, 1).toUpperCase() }}</span>
-            <div>
-              <strong>{{ adminName }}</strong>
-              <small>Quản trị viên</small>
+          <DropdownMenu v-model:open="adminProfileOpen" align="end" :side-offset="8">
+            <template #trigger>
+              <button class="profile-header-btn" type="button" aria-label="Mở menu quản trị viên">
+                <span class="profile-avatar-wrap">
+                  <span class="avatar admin-header-avatar">{{ adminName.slice(0, 1).toUpperCase() }}</span>
+                  <span class="avatar-status-dot" :class="adminStatus"></span>
+                </span>
+                <strong class="profile-header-name">{{ adminName }}</strong>
+                <ChevronDown :size="15" class="profile-header-chevron" />
+              </button>
+            </template>
+
+            <div class="user-custom-menu">
+              <!-- TRẠNG THÁI -->
+              <div class="menu-control-row">
+                <span class="menu-control-label">TRẠNG THÁI</span>
+                <button type="button" class="menu-status-badge" @click.stop="cycleAdminStatus" title="Nhấp để đổi trạng thái">
+                  <span class="status-live-dot" :class="adminStatus"></span>
+                  <span class="status-live-text">{{ adminStatusLabel }}</span>
+                  <ChevronDown :size="13" class="status-live-chevron" />
+                </button>
+              </div>
+
+              <!-- TẮT THÔNG BÁO -->
+              <div class="menu-control-row">
+                <span class="menu-control-label">TẮT THÔNG BÁO</span>
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="adminNotificationsMuted"
+                  class="menu-switch"
+                  :class="{ active: adminNotificationsMuted }"
+                  @click.stop="toggleAdminNotifications"
+                  aria-label="Bật hoặc tắt thông báo"
+                >
+                  <span class="menu-switch-thumb"></span>
+                </button>
+              </div>
+
+              <DropdownMenuSeparator />
+
+              <!-- MENU ITEMS -->
+              <DropdownMenuItem @select="openSection('accounts')">
+                <template #icon><User :size="17" /></template>
+                Thông tin cán bộ
+              </DropdownMenuItem>
+
+              <DropdownMenuItem @select="adminPasswordModalOpen = true">
+                <template #icon><KeyRound :size="17" /></template>
+                Đổi mật khẩu
+              </DropdownMenuItem>
+
+              <DropdownMenuItem @select="adminSupportModalOpen = true">
+                <template #icon><Headphones :size="17" /></template>
+                Hỗ trợ
+              </DropdownMenuItem>
+
+              <DropdownMenuItem @select="adminAboutModalOpen = true">
+                <template #icon><Info :size="17" /></template>
+                Giới thiệu
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator />
+
+              <!-- ĐĂNG XUẤT -->
+              <DropdownMenuItem destructive @select="logout">
+                <template #icon><LogOut :size="17" /></template>
+                Đăng xuất
+              </DropdownMenuItem>
             </div>
-            <LogOut :size="16" />
-          </button>
+          </DropdownMenu>
         </div>
       </header>
       <div
@@ -1098,9 +1509,12 @@
 
       <div class="admin-content">
         <div v-if="pageError" class="admin-alert" role="alert">
-          <span>{{ pageError }}</span>
+          <div class="admin-alert-body">
+            <Info :size="16" class="admin-alert-icon" />
+            <span>{{ pageError }}</span>
+          </div>
           <button aria-label="Đóng thông báo" @click="pageError = ''">
-            <X :size="16" />
+            <X :size="15" />
           </button>
         </div>
         <div v-if="activeSection !== 'knowledge'" class="admin-page-heading">
@@ -1246,9 +1660,16 @@
               Tạo tài khoản
             </button>
           </div>
-          <div v-if="loading" class="admin-empty">Đang tải tài khoản...</div>
+          <div v-if="loading" class="admin-empty admin-empty-loading">
+            <LoaderCircle class="overlay-spinner" :size="22" />
+            <span>Đang tải danh sách tài khoản…</span>
+          </div>
           <div v-else-if="!filteredUsers.length" class="admin-empty">
-            Không có tài khoản phù hợp.
+            <div class="empty-icon-wrap">
+              <Users :size="26" />
+            </div>
+            <strong>Không có tài khoản phù hợp</strong>
+            <p>Không tìm thấy tài khoản người dùng nào khớp với bộ lọc tìm kiếm hiện tại.</p>
           </div>
           <div v-else class="admin-table-wrap">
             <table class="admin-table">
@@ -1287,7 +1708,15 @@
                     </select>
                   </td>
                   <td>
-                    <span class="account-plan" :class="{ premium: user.plan === 'PREMIUM' }">{{ user.plan === 'PREMIUM' ? 'Premium' : `Free · ${Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0))}/${user.freeExamLimit || 0} lượt` }}</span>
+                    <select
+                      class="role-select plan-select"
+                      :class="{ 'plan-premium-selected': user.plan === 'PREMIUM' }"
+                      :value="user.plan || 'FREE'"
+                      @change="updateUserPlan(user, $event.target.value)"
+                    >
+                      <option value="FREE">Gói Free ({{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }}/{{ user.freeExamLimit || 0 }} lượt)</option>
+                      <option value="PREMIUM">⭐ Gói Premium</option>
+                    </select>
                   </td>
                   <td>
                     <span
@@ -1310,6 +1739,391 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <!-- GÓI CƯỚC & THANH TOÁN -->
+        <section v-else-if="activeSection === 'billing'" class="admin-billing-section">
+          <!-- TOP HEADING PANEL -->
+          <div class="admin-panel billing-hero-panel">
+            <div class="billing-hero-content">
+              <div class="billing-hero-badge">
+                <CreditCard :size="15" />
+                <span>QUẢN LÝ GÓI CƯỚC & TÀI CHÍNH</span>
+              </div>
+              <h2>Quản lý các gói thanh toán & User gói cước</h2>
+              <p>Thiết lập danh mục các gói học tập, theo dõi tình trạng thanh toán của học viên và giám sát doanh thu toàn hệ thống.</p>
+            </div>
+            <div class="billing-hero-actions">
+              <button v-if="billingSubTab === 'plans'" class="admin-primary-button" @click="openPlanModal()">
+                <Plus :size="16" />
+                Thêm gói cước mới
+              </button>
+              <button class="admin-secondary-button" @click="loadData">
+                <RefreshCw :size="15" />
+                Làm mới dữ liệu
+              </button>
+            </div>
+          </div>
+
+          <!-- KEY METRICS CARDS -->
+          <div class="billing-metrics-grid">
+            <article class="billing-stat-card revenue">
+              <div class="billing-stat-icon">
+                <TrendingUp :size="20" />
+              </div>
+              <div class="billing-stat-info">
+                <span>TỔNG DOANH THU (USD)</span>
+                <strong>{{ formatMoney(totalRevenue) }}</strong>
+                <small>{{ succeededPaymentsCount }} giao dịch thành công</small>
+              </div>
+            </article>
+
+            <article class="billing-stat-card success">
+              <div class="billing-stat-icon">
+                <CheckCircle2 :size="20" />
+              </div>
+              <div class="billing-stat-info">
+                <span>ĐƠN THANH TOÁN THÀNH CÔNG</span>
+                <strong>{{ succeededPaymentsCount }}</strong>
+                <small>{{ payments.length ? Math.round((succeededPaymentsCount / payments.length) * 100) : 0 }}% tỷ lệ thành công</small>
+              </div>
+            </article>
+
+            <article class="billing-stat-card premium">
+              <div class="billing-stat-icon">
+                <Sparkles :size="20" />
+              </div>
+              <div class="billing-stat-info">
+                <span>HỌC VIÊN GÓI PREMIUM</span>
+                <strong>{{ premiumUsersCount }}</strong>
+                <small>{{ users.length ? Math.round((premiumUsersCount / users.length) * 100) : 0 }}% tổng số người dùng</small>
+              </div>
+            </article>
+
+            <article class="billing-stat-card pending">
+              <div class="billing-stat-icon">
+                <Layers :size="20" />
+              </div>
+              <div class="billing-stat-info">
+                <span>SỐ GÓI ĐANG MỞ BÁN</span>
+                <strong>{{ plans.filter((p) => p.isActive).length }} / {{ plans.length }}</strong>
+                <small>Gói cước trong hệ thống</small>
+              </div>
+            </article>
+          </div>
+
+          <!-- SUBTABS SWITCHER -->
+          <div class="billing-tabs-nav" role="tablist">
+            <button
+              :class="['billing-tab-btn', { active: billingSubTab === 'plans' }]"
+              role="tab"
+              :aria-selected="billingSubTab === 'plans'"
+              @click="billingSubTab = 'plans'"
+            >
+              <Layers :size="16" />
+              <span>Quản lý các gói thanh toán</span>
+              <span class="tab-badge">{{ plans.length }}</span>
+            </button>
+            <button
+              :class="['billing-tab-btn', { active: billingSubTab === 'users' }]"
+              role="tab"
+              :aria-selected="billingSubTab === 'users'"
+              @click="billingSubTab = 'users'"
+            >
+              <Users :size="16" />
+              <span>Quản lý User thanh toán</span>
+              <span class="tab-badge">{{ userBillings.length }}</span>
+            </button>
+            <button
+              :class="['billing-tab-btn', { active: billingSubTab === 'transactions' }]"
+              role="tab"
+              :aria-selected="billingSubTab === 'transactions'"
+              @click="billingSubTab = 'transactions'"
+            >
+              <CreditCard :size="16" />
+              <span>Lịch sử giao dịch hệ thống</span>
+              <span class="tab-badge">{{ payments.length }}</span>
+            </button>
+          </div>
+
+          <!-- TAB 1: QUẢN LÝ CÁC GÓI THANH TOÁN -->
+          <div v-if="billingSubTab === 'plans'" class="billing-tab-pane">
+            <div class="billing-plans-grid">
+              <article
+                v-for="plan in plans"
+                :key="plan.planId"
+                class="billing-plan-card"
+                :class="{ premium: plan.code.includes('PREMIUM'), inactive: !plan.isActive }"
+              >
+                <div class="plan-card-header">
+                  <div>
+                    <span class="plan-badge" :class="{ 'premium-badge': plan.code.includes('PREMIUM') }">
+                      {{ plan.code }}
+                    </span>
+                    <h3>{{ plan.name }}</h3>
+                  </div>
+                  <div class="plan-price-tag">
+                    <strong>{{ Number(plan.price) === 0 ? '0đ' : `$${Number(plan.price).toFixed(2)}` }}</strong>
+                    <small>{{ plan.currency }} / {{ plan.billingCycle === 'LIFETIME' ? 'Trọn đời' : plan.billingCycle === 'MONTHLY' ? 'Tháng' : plan.billingCycle === 'ANNUAL' ? 'Năm' : plan.billingCycle }}</small>
+                  </div>
+                </div>
+
+                <p class="plan-card-desc">{{ plan.description || 'Chưa có mô tả cho gói cước này.' }}</p>
+
+                <div class="plan-quota-badge">
+                  <ClipboardCheck :size="14" />
+                  <span>{{ plan.examLimit === -1 ? 'Không giới hạn lượt làm bài thi' : `Giới hạn: ${plan.examLimit} lượt thi thử` }}</span>
+                </div>
+
+                <ul class="plan-features-list">
+                  <li v-for="(feat, idx) in parseFeatures(plan.featuresJson)" :key="idx">
+                    <Check :size="15" /> {{ feat }}
+                  </li>
+                </ul>
+
+                <div class="plan-card-footer">
+                  <div class="plan-status-indicator">
+                    <span class="status-dot" :class="{ active: plan.isActive }"></span>
+                    <small>{{ plan.isActive ? 'Đang mở bán' : 'Tạm ẩn' }}</small>
+                  </div>
+                  <div class="plan-actions">
+                    <button class="table-action" @click="togglePlanStatus(plan)">
+                      {{ plan.isActive ? 'Tạm ẩn' : 'Mở bán' }}
+                    </button>
+                    <button class="table-action" @click="openPlanModal(plan)">
+                      <Pencil :size="13" /> Sửa
+                    </button>
+                    <button
+                      v-if="!['FREE', 'PREMIUM'].includes(plan.code)"
+                      class="table-action danger"
+                      @click="deletePlan(plan)"
+                    >
+                      <Trash2 :size="13" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <!-- TAB 2: QUẢN LÝ USER THANH TOÁN -->
+          <div v-else-if="billingSubTab === 'users'" class="billing-tab-pane">
+            <div class="admin-panel admin-table-panel">
+              <div class="admin-panel-heading">
+                <div>
+                  <h2>Danh sách học viên & Tình trạng gói cước</h2>
+                  <p>{{ filteredUserBillings.length }} tài khoản người học · Theo dõi mức chi tiêu và phân quyền gói dịch vụ.</p>
+                </div>
+                <div class="billing-table-filters">
+                  <div class="billing-search-box">
+                    <Search :size="15" />
+                    <input
+                      v-model="userBillingSearch"
+                      type="search"
+                      placeholder="Tìm theo ID, username..."
+                    />
+                  </div>
+                  <select v-model="userBillingPlanFilter" class="billing-select-filter">
+                    <option value="all">Tất cả gói</option>
+                    <option value="PREMIUM">Gói Premium</option>
+                    <option value="FREE">Gói Miễn Phí</option>
+                  </select>
+                </div>
+              </div>
+
+              <div v-if="loading" class="admin-empty">
+                <LoaderCircle class="spin" :size="24" />
+                <span>Đang tải dữ liệu học viên...</span>
+              </div>
+              <div v-else-if="!filteredUserBillings.length" class="admin-empty">
+                <Users :size="36" class="admin-empty-icon" />
+                <strong>Không tìm thấy tài khoản học viên phù hợp</strong>
+              </div>
+              <div v-else class="admin-table-wrap">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Học viên</th>
+                      <th>Gói cước hiện tại</th>
+                      <th>Ngày kích hoạt</th>
+                      <th>Lượt thi dùng</th>
+                      <th>Tổng chi tiêu</th>
+                      <th>Số đơn</th>
+                      <th>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="user in filteredUserBillings" :key="user.userId">
+                      <td>
+                        <span class="account-cell">
+                          <i class="account-avatar">
+                            {{ user.username.slice(0, 1).toUpperCase() }}
+                          </i>
+                          <div>
+                            <strong>{{ user.username }}</strong>
+                            <small class="table-secondary">ID: #{{ user.userId }}</small>
+                          </div>
+                        </span>
+                      </td>
+                      <td>
+                        <select
+                          class="role-select plan-select"
+                          :class="{ 'plan-premium-selected': user.plan === 'PREMIUM' }"
+                          :value="user.plan || 'FREE'"
+                          @change="updateUserPlan(user, $event.target.value)"
+                        >
+                          <option value="FREE">Gói Free</option>
+                          <option value="PREMIUM">⭐ Gói Premium</option>
+                        </select>
+                      </td>
+                      <td>
+                        <span v-if="user.premiumActivatedAt" class="payment-time">
+                          {{ formatPaymentDate(user.premiumActivatedAt) }}
+                        </span>
+                        <span v-else class="table-secondary">—</span>
+                      </td>
+                      <td>
+                        <div class="quota-progress-cell">
+                          <strong v-if="user.plan === 'PREMIUM'" class="unlimited-quota">
+                            Không giới hạn
+                          </strong>
+                          <span v-else class="limited-quota">
+                            {{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }} / {{ user.freeExamLimit || 0 }} lượt
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <strong class="payment-amount">{{ formatMoney(user.totalSpent) }}</strong>
+                      </td>
+                      <td>
+                        <span class="order-count-badge">{{ user.paymentCount || 0 }} đơn</span>
+                      </td>
+                      <td>
+                        <div class="table-row-actions">
+                          <button class="table-action" @click="viewUserPayments(user)">
+                            <CreditCard :size="13" /> Lịch sử GD
+                          </button>
+                          <button
+                            v-if="user.plan !== 'PREMIUM'"
+                            class="table-action"
+                            title="Reset lượt thi về 0"
+                            @click="resetUserQuota(user)"
+                          >
+                            <RotateCcw :size="13" /> Reset lượt
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: LỊCH SỬ GIAO DỊCH TOÀN HỆ THỐNG -->
+          <div v-else-if="billingSubTab === 'transactions'" class="billing-tab-pane">
+            <div class="admin-panel admin-table-panel billing-table-panel">
+              <div class="admin-panel-heading">
+                <div>
+                  <h2>Toàn bộ lịch sử giao dịch</h2>
+                  <p>{{ filteredPayments.length }} giao dịch được ghi nhận qua cổng Stripe & PayPal.</p>
+                </div>
+                <div class="billing-table-filters">
+                  <div class="billing-search-box">
+                    <Search :size="15" />
+                    <input
+                      v-model="paymentSearch"
+                      type="search"
+                      placeholder="Tìm theo mã đơn, học viên..."
+                    />
+                  </div>
+                  <select v-model="paymentStatusFilter" class="billing-select-filter">
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="SUCCEEDED">Thành công</option>
+                    <option value="PENDING">Đang chờ</option>
+                    <option value="FAILED">Thất bại</option>
+                    <option value="REFUNDED">Hoàn tiền</option>
+                  </select>
+                  <select v-model="paymentProviderFilter" class="billing-select-filter">
+                    <option value="all">Tất cả cổng</option>
+                    <option value="STRIPE">Stripe</option>
+                    <option value="PAYPAL">PayPal</option>
+                  </select>
+                </div>
+              </div>
+
+              <div v-if="loading" class="admin-empty">
+                <LoaderCircle class="spin" :size="24" />
+                <span>Đang tải lịch sử giao dịch...</span>
+              </div>
+              <div v-else-if="!filteredPayments.length" class="admin-empty">
+                <CreditCard :size="36" class="admin-empty-icon" />
+                <strong>Chưa có giao dịch thanh toán nào</strong>
+                <p>Học viên có thể nâng cấp gói cước tại trang Bảng giá (/pricing) qua cổng Stripe hoặc PayPal.</p>
+              </div>
+              <div v-else class="admin-table-wrap">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Mã giao dịch</th>
+                      <th>Học viên</th>
+                      <th>Cổng thanh toán</th>
+                      <th>Số tiền</th>
+                      <th>Trạng thái</th>
+                      <th>Thời gian</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="payment in filteredPayments" :key="payment.paymentId">
+                      <td>
+                        <span class="payment-id-badge">#PAY-{{ payment.paymentId }}</span>
+                        <small v-if="payment.providerPaymentId" class="table-secondary">
+                          Ref: {{ payment.providerPaymentId.slice(0, 18) }}...
+                        </small>
+                      </td>
+                      <td>
+                        <span class="account-cell">
+                          <i class="account-avatar">
+                            {{ (payment.username || 'U').slice(0, 1).toUpperCase() }}
+                          </i>
+                          <strong>{{ payment.username || `User #${payment.userId}` }}</strong>
+                        </span>
+                      </td>
+                      <td>
+                        <span class="provider-badge" :class="payment.provider?.toLowerCase()">
+                          {{ payment.provider }}
+                        </span>
+                      </td>
+                      <td>
+                        <strong class="payment-amount">{{ formatMoney(payment.amount, payment.currency) }}</strong>
+                      </td>
+                      <td>
+                        <span
+                          class="payment-status-pill"
+                          :class="payment.status?.toLowerCase()"
+                        >
+                          {{
+                            payment.status === 'SUCCEEDED'
+                              ? 'Thành công'
+                              : payment.status === 'PENDING'
+                              ? 'Đang chờ'
+                              : payment.status === 'FAILED'
+                              ? 'Thất bại'
+                              : payment.status === 'REFUNDED'
+                              ? 'Đã hoàn tiền'
+                              : payment.status
+                          }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="payment-time">{{ formatPaymentDate(payment.createdAt) }}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -1481,9 +2295,19 @@
               <Plus :size="16" /> Tạo bài kiểm tra
             </button>
           </div>
-          <div v-if="loading" class="admin-empty">Đang tải bài kiểm tra...</div>
+          <div v-if="loading" class="admin-empty admin-empty-loading">
+            <LoaderCircle class="overlay-spinner" :size="22" />
+            <span>Đang tải danh sách bài kiểm tra…</span>
+          </div>
           <div v-else-if="!filteredExams.length" class="admin-empty">
-            Chưa có bài kiểm tra.
+            <div class="empty-icon-wrap">
+              <ClipboardCheck :size="26" />
+            </div>
+            <strong>Chưa có bài kiểm tra nào</strong>
+            <p>Bắt đầu tạo bài kiểm tra đầu tiên để phục vụ luyện tập và đánh giá năng lực học viên.</p>
+            <button class="admin-primary-button" :disabled="!programs.length || !topics.length" @click="showExamBuilder = true">
+              <Plus :size="15" /> Tạo bài kiểm tra
+            </button>
           </div>
           <div v-else class="admin-table-wrap">
             <table class="admin-table">
@@ -1882,6 +2706,180 @@
       </div>
       <template #footer><button type="button" class="overlay-button overlay-button-secondary" @click="attemptResultOpen = false">Đóng</button></template>
     </Drawer>
+
+    <!-- MODAL CẤU HÌNH GÓI CƯỚC THANH TOÁN -->
+    <Modal
+      v-model:open="planModalOpen"
+      :title="editingPlanId ? 'Chỉnh sửa gói cước' : 'Thêm gói cước mới'"
+      :description="editingPlanId ? 'Cập nhật giá bán, quyền lợi và thời hạn áp dụng.' : 'Tạo gói học tập mới cho học viên đăng ký trên hệ thống.'"
+      :submitting="savingPlan"
+      size="md"
+    >
+      <form id="plan-form" class="admin-overlay-form" @submit.prevent="savePlan">
+        <p v-if="planModalError" class="overlay-form-error" role="alert">{{ planModalError }}</p>
+        <div class="form-row">
+          <label class="admin-overlay-field">Mã gói cước <b aria-hidden="true">*</b>
+            <input
+              v-model.trim="planForm.code"
+              :disabled="editingPlanId && ['FREE', 'PREMIUM'].includes(planForm.code)"
+              required
+              maxlength="32"
+              placeholder="vd: PREMIUM_PLUS"
+            />
+          </label>
+          <label class="admin-overlay-field">Tên gói cước <b aria-hidden="true">*</b>
+            <input v-model.trim="planForm.name" required maxlength="100" placeholder="vd: Gói Tháng Chuyên Sâu" />
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label class="admin-overlay-field">Giá gói <b aria-hidden="true">*</b>
+            <input v-model.number="planForm.price" type="number" step="0.01" min="0" required placeholder="0.00" />
+          </label>
+          <label class="admin-overlay-field">Tiền tệ
+            <select v-model="planForm.currency">
+              <option value="USD">USD ($)</option>
+              <option value="VND">VND (đ)</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label class="admin-overlay-field">Chu kỳ thanh toán
+            <select v-model="planForm.billingCycle">
+              <option value="LIFETIME">Trọn đời (Một lần)</option>
+              <option value="MONTHLY">Hàng tháng (30 ngày)</option>
+              <option value="ANNUAL">Hàng năm (365 ngày)</option>
+            </select>
+          </label>
+          <label class="admin-overlay-field">Giới hạn lượt thi
+            <input v-model.number="planForm.examLimit" type="number" placeholder="-1 cho không giới hạn" />
+            <small class="table-secondary">Nhập -1 nếu không giới hạn lượt thi</small>
+          </label>
+        </div>
+
+        <label class="admin-overlay-field">Mô tả gói cước
+          <textarea v-model="planForm.description" rows="2" placeholder="Tóm tắt mục đích và đối tượng học viên của gói cước"></textarea>
+        </label>
+
+        <label class="admin-overlay-field">Quyền lợi tính năng (Mỗi dòng một tính năng)
+          <textarea
+            v-model="planForm.featuresText"
+            rows="4"
+            placeholder="5 lượt thi chuẩn hóa miễn phí&#10;Trợ lý AI và Gia sư học tập 24/7&#10;Chấm Speaking & Writing chi tiết"
+          ></textarea>
+        </label>
+
+        <label class="admin-overlay-checkbox">
+          <input v-model="planForm.isActive" type="checkbox" />
+          <span>Mở bán gói cước này cho học viên</span>
+        </label>
+      </form>
+      <template #footer>
+        <button type="button" class="overlay-button overlay-button-secondary" :disabled="savingPlan" @click="planModalOpen = false">Hủy</button>
+        <button type="submit" form="plan-form" class="overlay-button overlay-button-loading overlay-button-primary" :class="{ 'is-loading': savingPlan }" :disabled="savingPlan">
+          <LoaderCircle v-if="savingPlan" class="overlay-spinner" :size="16" />
+          <Check v-else :size="16" />{{ savingPlan ? 'Đang lưu…' : 'Lưu gói cước' }}
+        </button>
+      </template>
+    </Modal>
+
+    <!-- DRAWER CHI TIẾT GIAO DỊCH HỌC VIÊN -->
+    <Drawer
+      :open="userPaymentsDrawerOpen"
+      :title="`Lịch sử thanh toán: ${selectedUserForPayments?.username || ''}`"
+      :description="`Mã học viên: #${selectedUserForPayments?.userId || ''} · Gói hiện tại: ${selectedUserForPayments?.plan || 'FREE'}`"
+      size="md"
+      @update:open="userPaymentsDrawerOpen = $event"
+    >
+      <div v-if="userPaymentsLoading" class="overlay-loading-state">
+        <LoaderCircle class="overlay-spinner" :size="20" />Đang tải lịch sử giao dịch...
+      </div>
+      <div v-else-if="!userPaymentsList.length" class="admin-empty">
+        <CreditCard :size="32" class="admin-empty-icon" />
+        <strong>Học viên này chưa phát sinh giao dịch</strong>
+        <p>Tài khoản đang sử dụng gói mặc định của hệ thống.</p>
+      </div>
+      <div v-else class="user-payments-list">
+        <div v-for="item in userPaymentsList" :key="item.paymentId" class="user-payment-card">
+          <div class="user-payment-head">
+            <span class="payment-id-badge">#PAY-{{ item.paymentId }}</span>
+            <span class="provider-badge" :class="item.provider?.toLowerCase()">{{ item.provider }}</span>
+            <strong class="payment-amount">{{ formatMoney(item.amount, item.currency) }}</strong>
+          </div>
+          <div class="user-payment-meta">
+            <span class="payment-status-pill" :class="item.status?.toLowerCase()">
+              {{ item.status === 'SUCCEEDED' ? 'Thành công' : item.status === 'PENDING' ? 'Đang chờ' : item.status }}
+            </span>
+            <small class="payment-time">{{ formatPaymentDate(item.createdAt) }}</small>
+          </div>
+          <small v-if="item.providerPaymentId" class="table-secondary">
+            Ref ID: {{ item.providerPaymentId }}
+          </small>
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="overlay-button overlay-button-secondary" @click="userPaymentsDrawerOpen = false">Đóng</button>
+      </template>
+    </Drawer>
+
+    <!-- Modal Hỗ trợ -->
+    <Modal v-model:open="adminSupportModalOpen" title="Trung tâm Hỗ trợ" description="Chúng tôi luôn sẵn sàng hỗ trợ bạn 24/7" :icon="Headphones">
+      <div class="modal-info-stack">
+        <div class="modal-info-row">
+          <strong>Kênh hỗ trợ quản trị</strong>
+          <p>1900 6868 (Line nội bộ: 102)</p>
+        </div>
+        <div class="modal-info-row">
+          <strong>Email kỹ thuật</strong>
+          <p>admin-support@adaptivelearning.edu.vn</p>
+        </div>
+        <div class="modal-info-row">
+          <strong>Tài liệu hướng dẫn quản trị</strong>
+          <p>Truy cập chuyên mục Quản trị & Kho kiến thức để xem các tài liệu hướng dẫn.</p>
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="overlay-button overlay-button-primary" @click="adminSupportModalOpen = false">Đã hiểu</button>
+      </template>
+    </Modal>
+
+    <!-- Modal Giới thiệu -->
+    <Modal v-model:open="adminAboutModalOpen" title="Giới thiệu Adaptive Learning" description="Nền tảng quản trị học tập & luyện thi cá nhân hóa AI" :icon="Info">
+      <div class="modal-info-stack">
+        <p><strong>Adaptive Learning Admin Portal</strong> - Hệ thống quản lý người dùng, phân phối đề thi, thiết lập gói cước và vận hành kho kiến thức AI.</p>
+        <div class="modal-info-row">
+          <strong>Phiên bản</strong>
+          <p>Adaptive Learning v2.4.0 (Build 2026)</p>
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="overlay-button overlay-button-primary" @click="adminAboutModalOpen = false">Đóng</button>
+      </template>
+    </Modal>
+
+    <!-- Modal Đổi mật khẩu -->
+    <Modal v-model:open="adminPasswordModalOpen" title="Đổi mật khẩu" description="Cập nhật mật khẩu để bảo vệ tài khoản quản trị của bạn" :icon="KeyRound">
+      <form class="password-form-stack" @submit.prevent="handleAdminChangePassword">
+        <div v-if="adminPasswordError" class="notice notice-danger">{{ adminPasswordError }}</div>
+        <label class="form-field">
+          <span>Mật khẩu hiện tại</span>
+          <input v-model="adminPasswordForm.oldPassword" type="password" placeholder="Nhập mật khẩu cũ" required />
+        </label>
+        <label class="form-field">
+          <span>Mật khẩu mới</span>
+          <input v-model="adminPasswordForm.newPassword" type="password" placeholder="Tối thiểu 6 ký tự" required />
+        </label>
+        <label class="form-field">
+          <span>Nhập lại mật khẩu mới</span>
+          <input v-model="adminPasswordForm.confirmPassword" type="password" placeholder="Xác nhận mật khẩu mới" required />
+        </label>
+        <div class="form-actions" style="margin-top: 14px; display: flex; justify-content: flex-end; gap: 8px;">
+          <button type="button" class="overlay-button overlay-button-secondary" @click="adminPasswordModalOpen = false">Hủy</button>
+          <button type="submit" class="overlay-button overlay-button-primary" :disabled="adminChangingPassword">Lưu mật khẩu mới</button>
+        </div>
+      </form>
+    </Modal>
   </main>
 </template>
 
@@ -1892,46 +2890,51 @@
     width: 100%;
     min-width: 0;
     min-height: 100vh;
-    color: var(--text);
-    background: var(--bg-page);
+    color: #0F172A;
+    background: #F8FAFC;
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
   }
   .admin-shell,
   .admin-shell * { box-sizing: border-box; }
-  .admin-shell :focus-visible { outline: 2px solid var(--ds-primary); outline-offset: 2px; }
+  .admin-shell :focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
   .admin-sidebar {
     position: fixed;
     z-index: 30;
     inset: 0 auto 0 0;
     display: flex;
-    width: 264px;
+    width: 256px;
     flex-direction: column;
-    gap: 20px;
-    padding: 20px 16px;
-    border-right: 1px solid var(--ds-border);
-    background: var(--surface);
-    color: var(--text-secondary);
+    padding: 18px 12px;
+    border-right: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    color: #475569;
   }
   .admin-brand {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 2px 6px;
-    color: var(--text);
+    gap: 11px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    color: #0F172A;
     text-decoration: none;
+    border-radius: 8px;
+    transition: background 150ms ease;
+  }
+  .admin-brand:hover {
+    background: #F8FAFC;
   }
   .admin-brand-mark {
     display: grid;
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
     flex: 0 0 auto;
     place-items: center;
-    border-radius: 13px;
+    border-radius: 8px;
     color: #fff;
-    background: var(--brand-gradient);
-    box-shadow: 0 6px 16px rgba(14, 116, 144, .28);
+    background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
   }
   .admin-brand-copy {
     display: grid;
@@ -1939,261 +2942,324 @@
     gap: 1px;
   }
   .admin-brand-copy strong {
-    font-size: 16px;
+    font-size: 14.5px;
     font-weight: 700;
+    color: #0F172A;
+    letter-spacing: -0.02em;
     white-space: nowrap;
   }
   .admin-brand-copy em {
-    color: var(--ds-primary);
+    color: #2563EB;
     font-style: normal;
   }
   .admin-brand-copy small {
-    color: var(--text-overline);
-    font-size: 12px;
+    color: #64748B;
+    font-size: 11px;
     font-weight: 500;
   }
   .admin-workspace-label {
-    padding: 0 10px 8px;
-    color: var(--text-overline);
+    padding: 12px 10px 6px;
+    color: #94A3B8;
     font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .admin-nav {
-    display: grid;
-    gap: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
   }
   .admin-nav-link {
+    position: relative;
     display: flex;
-    min-height: 48px;
+    min-height: 40px;
     align-items: center;
-    gap: 12px;
-    padding: 6px 10px;
+    gap: 10px;
+    padding: 0 12px;
     border: 0;
-    border-radius: var(--radius-lg);
+    border-radius: 8px;
     background: transparent;
-    color: var(--text-secondary);
+    color: #475569;
     font: inherit;
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 500;
     text-align: left;
     cursor: pointer;
-    transition: background .15s ease, color .15s ease;
+    transition: all 140ms ease;
   }
   .admin-nav-icon {
     display: grid;
-    width: 34px;
-    height: 34px;
+    width: 20px;
+    height: 20px;
     flex: 0 0 auto;
     place-items: center;
-    border-radius: 10px;
-    transition: transform 150ms ease, color 150ms ease, background 150ms ease;
+    color: #64748B;
+    background: transparent !important;
+    border-radius: 0;
+    box-shadow: none !important;
+    transition: color 140ms ease;
   }
-  .nav-icon-overview { color: var(--blue-ink); background: var(--blue-soft); }
-  .nav-icon-accounts { color: var(--violet-ink); background: var(--violet-soft); }
-  .nav-icon-results { color: var(--rose-ink); background: var(--rose-soft); }
-  .nav-icon-programs { color: var(--amber-ink); background: var(--amber-soft); }
-  .nav-icon-exams { color: var(--rose-ink); background: var(--rose-soft); }
-  .nav-icon-knowledge { color: var(--teal-ink); background: var(--teal-soft); }
-  .admin-nav-link:hover { background: var(--surface-hover); color: var(--text); }
-  .admin-nav-link:hover .admin-nav-icon { transform: translateY(-1px) scale(1.05); }
-  .admin-nav-link.active { background: var(--primary-soft); color: var(--primary-ink); font-weight: 600; }
-  .admin-nav-link.active .admin-nav-icon { color: #fff; background: var(--ds-primary); box-shadow: 0 4px 10px rgba(15,118,110,.3); }
-  .admin-nav-label { min-width: 0; flex: 1; }
+  .admin-nav-link:hover {
+    background: #F8FAFC;
+    color: #0F172A;
+  }
+  .admin-nav-link:hover .admin-nav-icon {
+    color: #0F172A;
+    transform: none;
+  }
+  .admin-nav-link.active {
+    background: #EFF6FF;
+    color: #1D4ED8;
+    font-weight: 600;
+  }
+  .admin-nav-link.active .admin-nav-icon {
+    color: #2563EB;
+  }
+  .admin-nav-label {
+    min-width: 0;
+    flex: 1;
+  }
   .admin-nav-indicator {
-    width: 6px;
-    height: 6px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: var(--ds-primary);
+    display: none;
   }
   .admin-sidebar-bottom {
-    display: grid;
-    grid-template-columns: 8px minmax(0, 1fr);
+    display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     margin-top: auto;
-    padding: 14px;
-    border: 1px solid var(--primary-border);
-    border-radius: 14px;
-    color: var(--primary-ink);
-    background: var(--primary-tint);
-    font-size: 13px;
+    padding: 10px 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #F8FAFC;
+    color: #334155;
   }
   .admin-status-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
     border-radius: 50%;
-    background: var(--success-dot);
+    background: #10B981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
   }
-  .admin-sidebar-bottom div { display: grid; min-width: 0; gap: 2px; }
-  .admin-sidebar-bottom strong { font-size: 13px; font-weight: 600; }
-  .admin-sidebar-bottom small {
-    color: var(--text-muted-alt);
+  .admin-sidebar-bottom div {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+  }
+  .admin-sidebar-bottom strong {
     font-size: 12px;
+    font-weight: 600;
+    color: #1E293B;
+  }
+  .admin-sidebar-bottom small {
+    color: #64748B;
+    font-size: 11px;
   }
   .admin-workspace {
     min-width: 0;
-    width: calc(100% - 264px);
+    width: calc(100% - 256px);
     box-sizing: border-box;
-    margin-left: 264px;
+    margin-left: 256px;
+    background: #F8FAFC;
+    min-height: 100vh;
   }
   .admin-topbar {
     position: sticky;
     z-index: 20;
     top: 0;
     display: flex;
-    height: 68px;
+    height: 60px;
     box-sizing: border-box;
     align-items: center;
     gap: 16px;
-    padding: 0 clamp(16px, 3vw, 40px);
-    border-bottom: 1px solid var(--ds-border);
-    background: var(--surface);
+    padding: 0 32px;
+    border-bottom: 1px solid #E2E8F0;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(12px);
   }
   .admin-search {
     display: flex;
-    width: min(100%, 460px);
+    width: min(100%, 420px);
     min-width: 0;
-    height: 44px;
-    flex: 1 1 320px;
+    height: 38px;
+    flex: 1 1 300px;
     align-items: center;
-    gap: 10px;
-    padding: 0 14px;
-    border: 1px solid var(--border-control);
-    border-radius: var(--radius-lg);
-    color: var(--text-muted);
-    background: var(--surface-subtle);
+    gap: 9px;
+    padding: 0 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    color: #64748B;
+    background: #FFFFFF;
+    transition: all 0.15s ease;
   }
   .admin-search:focus-within {
-    border-color: var(--ds-primary);
-    box-shadow: 0 0 0 2px var(--primary-soft);
+    border-color: #0F766E;
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
   }
   .admin-search input {
     width: 100%;
     min-width: 0;
     border: 0;
     outline: 0;
-    color: var(--text);
+    color: #0F172A;
     font: inherit;
-    font-size: 14px;
+    font-size: 13.5px;
     background: transparent;
   }
   .admin-search input::placeholder {
-    color: var(--text-placeholder);
-    opacity: 1;
+    color: #94A3B8;
   }
   .admin-top-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
     margin-left: auto;
   }
   .admin-notification,
   .admin-menu-button {
     position: relative;
     display: grid;
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
     place-items: center;
-    border: 0;
-    border-radius: var(--radius-lg);
-    background: transparent;
-    color: var(--text-secondary);
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #64748B;
     cursor: pointer;
+    transition: all 0.15s ease;
   }
-  .admin-notification:hover { background: var(--surface-muted); }
+  .admin-notification:hover,
+  .admin-menu-button:hover {
+    background: #F8FAFC;
+    color: #0F172A;
+    border-color: #CBD5E1;
+  }
   .admin-notification i {
     position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 8px;
-    height: 8px;
+    top: 7px;
+    right: 7px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    border: 2px solid #fff;
-    background: var(--notify-dot);
+    border: 1.5px solid #FFFFFF;
+    background: #EF4444;
   }
   .admin-profile {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--text);
+    padding: 4px 10px 4px 5px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #0F172A;
     text-align: left;
     cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .admin-profile:hover {
+    background: #F8FAFC;
+    border-color: #CBD5E1;
   }
   .admin-profile > span {
     display: grid;
-    width: 38px;
-    height: 38px;
+    width: 28px;
+    height: 28px;
     place-items: center;
-    border-radius: 50%;
-    background: var(--brand-gradient);
-    color: #fff;
-    font-size: 14px;
+    border-radius: 6px;
+    background: #0F766E;
+    color: #FFFFFF;
+    font-size: 12px;
     font-weight: 700;
-    box-shadow: 0 0 0 3px var(--primary-soft);
   }
   .admin-profile div {
     display: grid;
-    gap: 2px;
+    gap: 1px;
+    line-height: 1.2;
   }
   .admin-profile strong {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
+    color: #0F172A;
   }
   .admin-profile small {
-    color: var(--text-muted);
-    font-size: 12px;
+    color: #64748B;
+    font-size: 11px;
   }
   .admin-profile > svg {
-    margin-left: 5px;
-    color: var(--text-muted);
+    margin-left: 4px;
+    color: #94A3B8;
+    transition: color 0.15s ease;
+  }
+  .admin-profile:hover > svg {
+    color: #0F766E;
+  }
+  .admin-menu-avatar {
+    background: linear-gradient(135deg, #0F766E, #0E7490) !important;
+  }
+  .badge-admin {
+    background: #E6F7F3 !important;
+    color: #0F766E !important;
+    border: 1px solid #C9ECE2 !important;
   }
   .admin-menu-button {
     display: none;
   }
   .admin-content {
     width: 100%;
-    max-width: none;
+    max-width: 1440px;
     min-width: 0;
     box-sizing: border-box;
     margin: 0 auto;
-    padding: 28px clamp(16px, 3vw, 40px) 56px;
+    padding: 24px 32px 56px;
   }
   .admin-content > *,
   .admin-content section,
   .admin-content form { min-width: 0; }
   .admin-page-heading,
   .admin-panel-heading { min-width: 0; }
-  .admin-panel-heading h2 { margin: 0; color: var(--text-strong); font-size: 17px; line-height: 24px; font-weight: 600; }
-  .admin-panel-heading p { margin: 2px 0 0; color: var(--text-muted); font-size: 13px; }
+  .admin-panel-heading h2 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 600; }
+  .admin-panel-heading p { margin: 2px 0 0; color: #64748B; font-size: 13px; }
   .admin-alert {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     padding: 10px 14px;
-    border: 1px solid #efc9c3;
-    border-radius: var(--radius-lg);
-    background: #fff7f6;
-    color: var(--danger);
-    font-size: 13px;
+    border: 1px solid #FECACA;
+    border-radius: 8px;
+    background: #FEF2F2;
+    color: #991B1B;
+    font-size: 13.5px;
+    box-shadow: 0 1px 2px rgba(239, 68, 68, 0.05);
+  }
+  .admin-alert-body {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .admin-alert-icon {
+    flex: 0 0 auto;
+    color: #DC2626;
   }
   .admin-alert button {
     display: grid;
-    width: 44px;
-    height: 44px;
+    width: 26px;
+    height: 26px;
     flex: 0 0 auto;
     place-items: center;
     border: 0;
-    border-radius: var(--radius-sm);
+    border-radius: 6px;
     background: transparent;
-    color: inherit;
+    color: #991B1B;
     cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .admin-alert button:hover {
+    background: rgba(185, 28, 28, 0.12);
   }
   .admin-page-heading {
     display: flex;
@@ -2202,25 +3268,33 @@
     gap: 16px;
     margin-bottom: 24px;
   }
-  .admin-kicker { margin: 0 0 6px; color: var(--text-overline); font-size: 11px; font-weight: 700; }
+  .admin-kicker {
+    margin: 0 0 4px;
+    color: #0F766E;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
   .admin-page-heading h1 {
     margin: 0;
-    color: var(--text);
-    font-size: 28px;
-    line-height: 36px;
+    color: #0F172A;
+    font-size: 24px;
+    line-height: 32px;
     font-weight: 700;
-    letter-spacing: 0;
+    letter-spacing: -0.02em;
   }
   .admin-page-heading > div > p:last-child {
-    margin: 6px 0 0;
+    margin: 4px 0 0;
     max-width: 680px;
-    color: var(--text-muted);
-    font-size: 14px;
+    color: #64748B;
+    font-size: 13.5px;
     line-height: 1.5;
   }
   .heading-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
   }
   .analytics-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
@@ -2304,36 +3378,44 @@
   .admin-primary-button,
   .admin-secondary-button {
     display: inline-flex;
-    min-height: 44px;
+    height: 38px;
+    box-sizing: border-box;
     align-items: center;
     justify-content: center;
     gap: 7px;
-    padding: 0 16px;
+    padding: 0 14px;
     border: 1px solid transparent;
-    border-radius: var(--radius-lg);
+    border-radius: 8px;
     font: inherit;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
   }
   .admin-primary-button {
-    background: var(--ds-primary);
-    color: #fff;
-    box-shadow: var(--shadow-primary-btn);
+    background: #0F766E;
+    color: #FFFFFF;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   }
-  .admin-primary-button:hover {
-    background: var(--primary-hover);
+  .admin-primary-button:hover:not(:disabled) {
+    background: #115E59;
   }
   .admin-primary-button:disabled {
-    opacity: 0.72;
+    opacity: 0.6;
     cursor: not-allowed;
   }
   .admin-secondary-button {
-    border-color: var(--border-control);
-    background: var(--surface);
-    color: var(--text-strong);
+    border-color: #E2E8F0;
+    background: #FFFFFF;
+    color: #334155;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   }
-  .admin-secondary-button:hover { background: var(--surface-hover); }
+  .admin-secondary-button:hover {
+    background: #F8FAFC;
+    border-color: #CBD5E1;
+    color: #0F172A;
+  }
   .admin-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
@@ -2343,43 +3425,37 @@
   .admin-stats article {
     display: flex;
     min-width: 0;
-    min-height: 132px;
+    min-height: 104px;
     align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 12px 14px;
-    padding: 18px 20px;
-    border: 1px solid var(--ds-border);
-    border-radius: var(--radius-2xl);
-    background: var(--surface);
-    box-shadow: var(--shadow-card);
-    transition: transform 150ms ease, box-shadow 150ms ease;
+    gap: 14px;
+    padding: 16px 18px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    background: #FFFFFF;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: all 0.15s ease;
   }
-  .admin-stats article:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .admin-stats article:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  }
   .admin-stat-icon {
     display: grid;
-    width: 44px;
-    height: 44px;
+    width: 38px;
+    height: 38px;
     flex: 0 0 auto;
     place-items: center;
-    border-radius: var(--radius-lg);
-    background: var(--blue);
-    color: #fff;
-    box-shadow: 0 6px 14px rgba(37,99,235,.25);
+    border-radius: 8px;
+    background: #F1F5F9;
+    color: #0F766E;
+    border: 1px solid #E2E8F0;
   }
-  .admin-stat-icon.coral {
-    background: var(--violet);
-    color: #fff;
-    box-shadow: 0 6px 14px rgba(124,58,237,.25);
-  }
-  .admin-stat-icon.violet {
-    background: var(--amber);
-    color: #fff;
-    box-shadow: 0 6px 14px rgba(217,119,6,.25);
-  }
+  .admin-stat-icon.coral,
+  .admin-stat-icon.violet,
   .admin-stat-icon.amber {
-    background: var(--rose);
-    color: #fff;
-    box-shadow: 0 6px 14px rgba(225,29,72,.25);
+    background: #F1F5F9;
+    color: #334155;
+    border: 1px solid #E2E8F0;
   }
   .admin-stats article > div {
     display: grid;
@@ -2388,14 +3464,14 @@
     flex: 1 1 120px;
   }
   .admin-stats small {
-    color: var(--text-muted-alt);
-    font-size: 13px;
-    font-weight: 600;
+    color: #64748B;
+    font-size: 12.5px;
+    font-weight: 500;
   }
   .admin-stats strong {
-    color: var(--text);
-    font-size: 28px;
-    line-height: 34px;
+    color: #0F172A;
+    font-size: 24px;
+    line-height: 30px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
   }
@@ -2404,15 +3480,16 @@
     display: flex;
     align-items: center;
     min-height: 24px;
-    margin-left: 58px;
-    color: var(--text-muted-alt);
+    margin-left: 52px;
+    color: #64748B;
     font-size: 12px;
   }
   .stat-link {
     gap: 4px;
     border: 0;
     background: none;
-    color: var(--ds-primary);
+    color: #0F766E;
+    font-weight: 500;
     cursor: pointer;
   }
   .admin-overview-grid {
@@ -2422,11 +3499,10 @@
   }
   .admin-panel {
     min-width: 0;
-    padding: 20px;
-    border: 1px solid var(--ds-border);
-    border-radius: var(--radius-3xl);
-    background: var(--surface);
-    box-shadow: var(--shadow-card);
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
   }
   .knowledge-layout {
     display: flex;
@@ -2437,11 +3513,11 @@
   .knowledge-layout > .knowledge-import { flex: 1.5 1 540px; }
   .knowledge-layout > .knowledge-library-column { flex: 1 1 360px; }
   .knowledge-page { display: grid; gap: 20px; }
-  .knowledge-page-heading { display: grid; gap: 6px; min-width: 0; }
-  .knowledge-breadcrumb { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 13px; }
-  .knowledge-breadcrumb strong { color: var(--ds-primary); font-weight: 600; }
-  .knowledge-page-heading h1 { margin: 0; color: var(--text); font-size: 28px; line-height: 36px; font-weight: 700; }
-  .knowledge-page-heading p { margin: 0; max-width: 680px; color: var(--text-muted); font-size: 14px; }
+  .knowledge-page-heading { display: grid; gap: 4px; min-width: 0; }
+  .knowledge-breadcrumb { display: flex; align-items: center; gap: 6px; color: #64748B; font-size: 13px; }
+  .knowledge-breadcrumb strong { color: #0F766E; font-weight: 600; }
+  .knowledge-page-heading h1 { margin: 0; color: #0F172A; font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -0.02em; }
+  .knowledge-page-heading p { margin: 0; max-width: 680px; color: #64748B; font-size: 13.5px; }
   .knowledge-summary {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
@@ -2450,132 +3526,388 @@
   .knowledge-summary article {
     display: flex;
     min-width: 0;
-    min-height: 112px;
+    min-height: 104px;
     align-items: flex-start;
     gap: 14px;
-    padding: 18px 20px;
-    border: 1px solid var(--ds-border);
-    border-radius: var(--radius-2xl);
-    background: var(--surface);
-    box-shadow: var(--shadow-card);
-    transition: transform 150ms ease, box-shadow 150ms ease;
+    padding: 16px 18px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    background: #FFFFFF;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: all 0.15s ease;
   }
-  .knowledge-summary article:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
-  .knowledge-stat-icon { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-lg); color: #fff !important; box-shadow: 0 6px 14px rgba(15, 23, 42, .12); }
+  .knowledge-summary article:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  }
+  .knowledge-stat-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    border: 1px solid #E2E8F0;
+    background: #F1F5F9;
+    color: #0F766E;
+  }
   .knowledge-stat > div { display: grid; min-width: 0; gap: 2px; }
-  .knowledge-stat > div > span { color: var(--text-muted-alt); font-size: 13px; font-weight: 600; }
-  .knowledge-stat strong { color: var(--text); font-size: 28px; line-height: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .knowledge-stat small { color: var(--text-muted-alt); font-size: 12px; }
-  .stat-blue { border-color: var(--blue-card-border) !important; background: var(--blue-card) !important; }
-  .stat-blue .knowledge-stat-icon { background: var(--blue); box-shadow: 0 6px 14px rgba(37,99,235,.25); }
-  .stat-teal { border-color: var(--teal-card-border) !important; background: var(--teal-card) !important; }
-  .stat-teal .knowledge-stat-icon { background: var(--teal); box-shadow: 0 6px 14px rgba(15,118,110,.25); }
-  .stat-amber { border-color: var(--amber-card-border) !important; background: var(--amber-card) !important; }
-  .stat-amber .knowledge-stat-icon { background: var(--amber); box-shadow: 0 6px 14px rgba(217,119,6,.25); }
-  .stat-violet { border-color: var(--violet-card-border) !important; background: var(--violet-card) !important; }
-  .stat-violet .knowledge-stat-icon { background: var(--violet); box-shadow: 0 6px 14px rgba(124,58,237,.25); }
-  .knowledge-card { min-width: 0; overflow: hidden; border: 1px solid var(--ds-border); border-radius: var(--radius-3xl); background: var(--surface); box-shadow: var(--shadow-card); }
-  .knowledge-card-heading { display: flex; min-height: 82px; align-items: center; gap: 14px; padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); }
-  .knowledge-heading-icon { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-lg); color: #fff; background: var(--brand-gradient); box-shadow: 0 6px 14px rgba(14,116,144,.2); }
-  .knowledge-card-heading h2 { margin: 0; color: var(--text); font-size: 17px; line-height: 24px; font-weight: 600; }
-  .knowledge-card-heading p { margin: 2px 0 0; color: var(--text-muted); font-size: 13px; }
+  .knowledge-stat > div > span { color: #64748B; font-size: 12.5px; font-weight: 500; }
+  .knowledge-stat strong { color: #0F172A; font-size: 24px; line-height: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .knowledge-stat small { color: #94A3B8; font-size: 11.5px; }
+  .stat-blue,
+  .stat-teal,
+  .stat-amber,
+  .stat-violet {
+    border-color: #E2E8F0 !important;
+    background: #FFFFFF !important;
+  }
+  .stat-blue .knowledge-stat-icon { background: #EFF6FF; color: #2563EB; border-color: #DBEAFE; }
+  .stat-teal .knowledge-stat-icon { background: #ECFDF5; color: #0F766E; border-color: #A7F3D0; }
+  .stat-amber .knowledge-stat-icon { background: #FFFBEB; color: #D97706; border-color: #FDE68A; }
+  .stat-violet .knowledge-stat-icon { background: #F5F3FF; color: #7C3AED; border-color: #DDD6FE; }
+  .knowledge-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+  }
+  .knowledge-card-heading {
+    display: flex;
+    min-height: 64px;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #F1F5F9;
+  }
+  .knowledge-heading-icon {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    color: #0F766E;
+    background: #ECFDF5;
+    border: 1px solid #A7F3D0;
+  }
+  .knowledge-card-heading h2 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 600; }
+  .knowledge-card-heading p { margin: 2px 0 0; color: #64748B; font-size: 12.5px; }
   .knowledge-import,
   .knowledge-list { min-width: 0; padding: 0; }
-  .knowledge-import { display: flex; flex-direction: column; gap: 20px; }
-  .knowledge-import > :not(.knowledge-card-heading):not(.knowledge-form-footer) { margin-right: 24px; margin-left: 24px; }
+  .knowledge-import { display: flex; flex-direction: column; gap: 16px; }
+  .knowledge-import > :not(.knowledge-card-heading):not(.knowledge-form-footer) { margin-right: 20px; margin-left: 20px; }
   .knowledge-import > .knowledge-card-heading { margin: 0; }
-  .knowledge-import .knowledge-dropzone { position: relative; display: flex; min-height: 180px; align-items: center; flex-direction: column; justify-content: center; gap: 8px; padding: 26px 20px; border: 1.5px dashed var(--primary-dashed); border-radius: var(--radius-2xl); color: var(--text-strong); background: var(--primary-tint); text-align: center; cursor: pointer; transition: border-color 150ms ease, background 150ms ease; }
-  .knowledge-import .knowledge-dropzone.is-dragging { border-color: var(--ds-primary); background: var(--primary-soft-2); }
+  .knowledge-import .knowledge-dropzone {
+    position: relative;
+    display: flex;
+    min-height: 150px;
+    align-items: center;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px 20px;
+    border: 1.5px dashed #CBD5E1;
+    border-radius: 10px;
+    color: #334155;
+    background: #F8FAFC;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-import .knowledge-dropzone:hover,
+  .knowledge-import .knowledge-dropzone.is-dragging {
+    border-color: #0F766E;
+    background: #F0FDF4;
+  }
   .knowledge-dropzone input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
-  .knowledge-upload-icon { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 50%; color: var(--ds-primary); background: #fff; box-shadow: 0 6px 16px rgba(15,118,110,.15); }
-  .knowledge-dropzone strong { font-size: 14px; font-weight: 600; }
-  .knowledge-dropzone small { color: var(--text-muted); font-size: 12px; }
-  .knowledge-field { display: grid; min-width: 0; gap: 6px; color: var(--text-strong); font-size: 13px; font-weight: 600; }
+  .knowledge-upload-icon {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border-radius: 10px;
+    color: #0F766E;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+  .knowledge-dropzone strong { font-size: 13.5px; font-weight: 600; color: #0F172A; }
+  .knowledge-dropzone small { color: #64748B; font-size: 12px; }
+  .knowledge-field { display: grid; min-width: 0; gap: 6px; color: #334155; font-size: 13px; font-weight: 600; }
   .knowledge-import .knowledge-field input,
-  .knowledge-import .knowledge-field select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 0 14px; border: 1px solid var(--border-control); border-radius: var(--radius-md); color: var(--text); background: var(--surface); font: inherit; font-size: 14px; }
+  .knowledge-import .knowledge-field select {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    color: #0F172A;
+    background: #FFFFFF;
+    font: inherit;
+    font-size: 13.5px;
+    transition: all 0.15s ease;
+  }
   .knowledge-import .knowledge-field input:focus-visible,
-  .knowledge-import .knowledge-field select:focus-visible { outline: 2px solid var(--ds-primary); outline-offset: 2px; }
-  .knowledge-field-error { color: var(--danger) !important; font-size: 12.5px !important; font-weight: 400 !important; }
-  .required-mark { color: var(--required); }
+  .knowledge-import .knowledge-field select:focus-visible {
+    border-color: #0F766E;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+  }
+  .knowledge-field-error { color: #DC2626 !important; font-size: 12px !important; font-weight: 400 !important; }
+  .required-mark { color: #DC2626; }
   .knowledge-upload-list { display: grid; gap: 8px; max-height: 320px; overflow-y: auto; }
-  .knowledge-upload-item { display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(180px, .85fr) 44px; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border-item); border-radius: var(--radius-xl); background: var(--surface); }
-  .queued-file-icon { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: var(--blue-ink); background: var(--blue-soft); }
-  .queued-file-info { display: grid; min-width: 0; gap: 3px; }
-  .queued-file-info strong { overflow-wrap: anywhere; color: var(--text); font-size: 14px; font-weight: 600; }
-  .queued-file-info small { color: var(--text-muted); font-size: 12px; }
+  .knowledge-upload-item {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) minmax(180px, .85fr) 36px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+  }
+  .queued-file-icon {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 8px;
+    color: #0F766E;
+    background: #ECFDF5;
+  }
+  .queued-file-info { display: grid; min-width: 0; gap: 2px; }
+  .queued-file-info strong { overflow-wrap: anywhere; color: #0F172A; font-size: 13px; font-weight: 600; }
+  .queued-file-info small { color: #64748B; font-size: 11.5px; }
   .knowledge-import .queued-title { font-size: 13px; }
-  .knowledge-import .queued-title input { min-height: 44px; font-size: 14px; }
-  .knowledge-form-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; padding: 14px 24px; border-top: 1px solid var(--border-subtle); background: var(--surface-footer); }
-  .knowledge-form-hint { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12.5px; }
+  .knowledge-import .queued-title input { height: 36px; font-size: 13px; }
+  .knowledge-form-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+    padding: 14px 20px;
+    border-top: 1px solid #F1F5F9;
+    background: #F8FAFC;
+  }
+  .knowledge-form-hint { display: inline-flex; align-items: center; gap: 8px; color: #64748B; font-size: 12px; }
   .knowledge-form-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
-  .knowledge-clear { display: inline-flex; min-height: 44px; align-items: center; padding: 0 16px; border: 1px solid var(--border-control); border-radius: var(--radius-lg); color: var(--text-strong); background: var(--surface); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
-  .knowledge-clear:hover { background: var(--surface-hover); }
-  .knowledge-submit { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 18px; border: 0; border-radius: var(--radius-lg); color: #fff; background: var(--ds-primary); font: inherit; font-size: 14px; font-weight: 600; box-shadow: var(--shadow-primary-btn); cursor: pointer; transition: background 150ms ease; }
-  .knowledge-submit:hover:not(:disabled) { background: var(--primary-hover); }
-  .knowledge-submit:disabled { cursor: not-allowed; opacity: .72; }
-  .knowledge-notice { display: flex; min-width: 0; align-items: center; gap: 10px; margin: 0 24px; padding: 10px 8px 10px 14px; border-radius: var(--radius-lg); color: var(--primary-ink); background: var(--primary-soft); font-size: 13.5px; }
+  .knowledge-clear {
+    display: inline-flex;
+    height: 36px;
+    align-items: center;
+    padding: 0 14px;
+    border: 1px solid #E2E8F0;
+    border-radius: 7px;
+    color: #334155;
+    background: #FFFFFF;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-clear:hover { background: #F1F5F9; border-color: #CBD5E1; color: #0F172A; }
+  .knowledge-submit {
+    display: inline-flex;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 7px;
+    color: #FFFFFF;
+    background: #0F766E;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .knowledge-submit:hover:not(:disabled) { background: #115E59; }
+  .knowledge-submit:disabled { cursor: not-allowed; opacity: .6; }
+  .knowledge-notice {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+    margin: 0 20px;
+    padding: 8px 12px;
+    border-radius: 7px;
+    color: #065F46;
+    background: #ECFDF5;
+    border: 1px solid #A7F3D0;
+    font-size: 13px;
+  }
   .knowledge-notice > span { flex: 1; min-width: 0; }
-  .knowledge-notice-close { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--primary-ink); background: transparent; cursor: pointer; }
-  .knowledge-notice-close:hover { background: rgba(15,118,110,.08); }
+  .knowledge-notice-close {
+    display: grid;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    color: #065F46;
+    background: transparent;
+    cursor: pointer;
+  }
+  .knowledge-notice-close:hover { background: rgba(6, 95, 70, 0.1); }
   .knowledge-library-column { display: grid; flex: 1 1 360px; gap: 20px; min-width: 0; }
   .knowledge-library-column .knowledge-card-heading { justify-content: space-between; }
   .library-heading > div { min-width: 0; }
-  .knowledge-total-badge { display: grid; min-width: 32px; height: 26px; padding: 1px 9px; place-items: center; border-radius: var(--radius-full); color: var(--primary-ink); background: var(--primary-soft); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .knowledge-library-tools { display: grid; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); }
-  .knowledge-search { display: flex; min-height: 44px; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: var(--radius-lg); color: var(--text-muted); background: var(--surface); }
-  .knowledge-search:focus-within { border-color: var(--ds-primary); box-shadow: 0 0 0 2px var(--primary-soft); }
-  .knowledge-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: 14px; }
-  .knowledge-search input::placeholder { color: var(--text-placeholder); opacity: 1; }
-  .knowledge-filter { display: flex; gap: 4px; padding: 4px; border-radius: var(--radius-lg); background: var(--surface-muted); }
-  .knowledge-filter button { display: inline-flex; min-width: 0; min-height: 40px; flex: 1; align-items: center; justify-content: center; gap: 6px; padding: 0 8px; border: 0; border-radius: 9px; color: var(--text-muted-alt); background: transparent; font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
-  .knowledge-filter button[aria-pressed='true'] { color: var(--text); background: #fff; box-shadow: var(--shadow-tab-active); }
-  .knowledge-filter button span { display: grid; min-width: 22px; height: 20px; padding: 1px 7px; place-items: center; border-radius: var(--radius-full); color: var(--text-secondary); background: #e3e8ef; font-size: 11px; font-variant-numeric: tabular-nums; }
-  .knowledge-filter button[aria-pressed='true'] span { color: var(--primary-ink); background: var(--primary-soft); }
-  .knowledge-document-list { display: grid; gap: 8px; margin: 0; padding: 16px 20px 20px; list-style: none; }
-  .knowledge-document { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border-item); border-radius: var(--radius-xl); background: var(--surface); transition: box-shadow 150ms ease, border-color 150ms ease; }
-  .knowledge-document:hover { border-color: #b9e4da; box-shadow: var(--shadow-row-hover); }
-  .knowledge-document:last-child { border-bottom: 1px solid var(--border-item); }
-  .knowledge-document-icon { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; color: var(--blue-ink); background: var(--blue-soft); font-size: 10.5px; font-weight: 700; }
-  .knowledge-document.is-inactive { background: var(--surface-subtle); }
-  .knowledge-document.is-inactive .knowledge-document-icon { color: var(--text-muted); background: var(--off-soft); }
-  .knowledge-document-info { display: grid; min-width: 0; gap: 3px; }
-  .knowledge-document-info > strong { min-width: 0; overflow-wrap: anywhere; color: var(--text); font-size: 14px; line-height: 20px; font-weight: 600; }
-  .knowledge-document.is-inactive .knowledge-document-info > strong { color: var(--text-muted-alt); }
-  .knowledge-file-name { overflow-wrap: anywhere; color: var(--text-muted); font-size: 12px; }
-  .knowledge-document-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; color: var(--text-muted); font-size: 12px; }
-  .knowledge-exam-tag { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-weight: 400; }
-  .knowledge-skill-field { display: grid; gap: 7px; }
-  .knowledge-skill-heading { display: flex; align-items: center; gap: 7px; color: var(--text-strong); font-size: 13px; font-weight: 600; }
-  .knowledge-skill-heading small { color: var(--text-muted); font-size: 12px; font-weight: 400; }
-  .knowledge-skill-choice { display: flex; flex-wrap: wrap; gap: 8px; }
-  .knowledge-skill-chip { display: inline-flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 14px; border: 1px solid var(--skill-border, var(--border-control)); border-radius: var(--radius-full); color: var(--text-strong); background: #fff; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; transition: color 150ms ease, background 150ms ease, border-color 150ms ease, box-shadow 150ms ease; }
-  .knowledge-skill-chip:hover { background: var(--skill-bg); }
-  .knowledge-skill-chip.selected { color: var(--skill-ink); border-color: var(--skill-ink); background: var(--skill-bg); box-shadow: 0 0 0 1px var(--skill-ink); }
-  .skill-auto { --skill-ink: var(--primary-ink); --skill-bg: var(--primary-soft); --skill-solid: var(--ds-primary); --skill-border: var(--border-control); }
-  .skill-blue { --skill-ink: var(--blue-ink); --skill-bg: var(--blue-soft); --skill-solid: var(--blue); --skill-border: var(--border-control); }
-  .skill-teal { --skill-ink: var(--teal-ink); --skill-bg: var(--teal-soft); --skill-solid: var(--teal); --skill-border: var(--border-control); }
-  .skill-violet { --skill-ink: var(--violet-ink); --skill-bg: var(--violet-soft); --skill-solid: var(--violet); --skill-border: var(--border-control); }
-  .skill-pink { --skill-ink: var(--rose-ink); --skill-bg: var(--rose-soft); --skill-solid: var(--rose); --skill-border: var(--border-control); }
-  .skill-amber { --skill-ink: var(--amber-ink); --skill-bg: var(--amber-soft); --skill-solid: var(--amber-ink); --skill-border: var(--border-control); }
-  .knowledge-skill-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--skill-solid, currentColor); }
-  .knowledge-skill-tag { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: var(--radius-full); color: var(--skill-ink); background: var(--skill-bg); font-size: 11.5px; font-weight: 600; }
-  .knowledge-document.is-inactive .knowledge-skill-tag { color: var(--text-muted-alt); background: var(--off-soft); }
+  .knowledge-total-badge {
+    display: grid;
+    min-width: 26px;
+    height: 22px;
+    padding: 0 7px;
+    place-items: center;
+    border-radius: 6px;
+    color: #0F766E;
+    background: #ECFDF5;
+    border: 1px solid #A7F3D0;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .knowledge-library-tools { display: grid; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #F1F5F9; }
+  .knowledge-search {
+    display: flex;
+    height: 36px;
+    align-items: center;
+    gap: 9px;
+    padding: 0 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 7px;
+    color: #64748B;
+    background: #FFFFFF;
+    transition: all 0.15s ease;
+  }
+  .knowledge-search:focus-within {
+    border-color: #0F766E;
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+  }
+  .knowledge-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: #0F172A; background: transparent; font: inherit; font-size: 13px; }
+  .knowledge-search input::placeholder { color: #94A3B8; }
+  .knowledge-filter { display: flex; gap: 3px; padding: 3px; border-radius: 7px; background: #F1F5F9; }
+  .knowledge-filter button {
+    display: inline-flex;
+    min-width: 0;
+    height: 32px;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    color: #64748B;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-filter button[aria-pressed='true'] { color: #0F172A; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+  .knowledge-filter button span { display: grid; min-width: 18px; height: 18px; padding: 0 5px; place-items: center; border-radius: 4px; color: #64748B; background: #E2E8F0; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .knowledge-filter button[aria-pressed='true'] span { color: #0F766E; background: #ECFDF5; }
+  .knowledge-document-list { display: grid; gap: 8px; margin: 0; padding: 14px 18px 18px; list-style: none; }
+  .knowledge-document {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+    transition: all 0.15s ease;
+  }
+  .knowledge-document:hover { border-color: #CBD5E1; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); }
+  .knowledge-document:last-child { border-bottom: 1px solid #E2E8F0; }
+  .knowledge-document-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 8px; color: #0F766E; background: #ECFDF5; font-size: 11px; font-weight: 700; }
+  .knowledge-document.is-inactive { background: #F8FAFC; }
+  .knowledge-document.is-inactive .knowledge-document-icon { color: #94A3B8; background: #F1F5F9; }
+  .knowledge-document-info { display: grid; min-width: 0; gap: 2px; }
+  .knowledge-document-info > strong { min-width: 0; overflow-wrap: anywhere; color: #0F172A; font-size: 13.5px; line-height: 19px; font-weight: 600; }
+  .knowledge-document.is-inactive .knowledge-document-info > strong { color: #94A3B8; }
+  .knowledge-file-name { overflow-wrap: anywhere; color: #64748B; font-size: 12px; }
+  .knowledge-document-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 3px; color: #64748B; font-size: 11.5px; }
+  .knowledge-exam-tag { display: inline-flex; align-items: center; gap: 5px; color: #64748B; font-weight: 400; }
+  .knowledge-skill-field { display: grid; gap: 6px; }
+  .knowledge-skill-heading { display: flex; align-items: center; gap: 7px; color: #334155; font-size: 13px; font-weight: 600; }
+  .knowledge-skill-heading small { color: #94A3B8; font-size: 12px; font-weight: 400; }
+  .knowledge-skill-choice { display: flex; flex-wrap: wrap; gap: 6px; }
+  .knowledge-skill-chip {
+    display: inline-flex;
+    height: 32px;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    color: #475569;
+    background: #FFFFFF;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-skill-chip:hover { background: #F8FAFC; border-color: #CBD5E1; color: #0F172A; }
+  .knowledge-skill-chip.selected { color: #0F766E; border-color: #0F766E; background: #ECFDF5; font-weight: 600; }
+  .knowledge-skill-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #0F766E; }
+  .knowledge-skill-tag { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 5px; color: #0F766E; background: #ECFDF5; font-size: 11px; font-weight: 500; }
+  .knowledge-document.is-inactive .knowledge-skill-tag { color: #94A3B8; background: #F1F5F9; }
   .knowledge-document-actions { display: flex; align-items: center; gap: 4px; }
-  .knowledge-switch { position: relative; display: grid; width: 48px; height: 40px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--radius-full); background: transparent; cursor: pointer; }
-  .knowledge-switch::before { position: absolute; width: 40px; height: 24px; border-radius: var(--radius-full); background: var(--off-track); content: ''; transition: background 150ms ease; }
-  .knowledge-switch[aria-checked='true']::before { background: var(--ds-primary); }
-  .knowledge-switch > span { position: absolute; top: 11px; left: 7px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.25); transition: transform 150ms ease; }
+  .knowledge-switch { position: relative; display: grid; width: 44px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+  .knowledge-switch::before { position: absolute; width: 36px; height: 20px; border-radius: 999px; background: #CBD5E1; content: ''; transition: background 0.15s ease; }
+  .knowledge-switch[aria-checked='true']::before { background: #0F766E; }
+  .knowledge-switch > span { position: absolute; top: 10px; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); transition: transform 0.15s ease; }
   .knowledge-switch[aria-checked='true'] > span { transform: translateX(16px); }
-  .knowledge-switch-label { color: var(--text-muted); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-  .knowledge-icon-button { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--radius-lg); color: var(--text-secondary); background: transparent; cursor: pointer; }
-  .knowledge-icon-button:hover { color: var(--ds-primary); background: var(--surface-hover); }
-  .knowledge-icon-button.danger:hover { color: var(--danger); background: #fff1f1; }
-  .knowledge-empty { display: flex; min-height: 190px; align-items: center; flex-direction: column; justify-content: center; gap: 8px; padding: 36px 20px; border: 1.5px dashed #9ed8cb; border-radius: var(--radius-2xl); color: var(--text-muted); background: var(--primary-tint); text-align: center; }
-  .knowledge-empty > span { display: grid; width: 60px; height: 60px; margin-bottom: 6px; place-items: center; border-radius: 18px; color: #fff; background: var(--brand-gradient); box-shadow: 0 8px 20px rgba(14,116,144,.25); }
-  .knowledge-empty strong { color: var(--text-strong); font-size: 15px; font-weight: 600; }
-  .knowledge-empty small { max-width: 320px; color: var(--text-muted); font-size: 13px; }
-  .knowledge-empty-link { margin-top: 6px; color: var(--ds-primary); font-size: 13.5px; font-weight: 600; text-underline-offset: 3px; }
-  .compact-empty { min-height: 115px; }
+  .knowledge-switch-label { color: #64748B; font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+  .knowledge-icon-button { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border: 1px solid #E2E8F0; border-radius: 6px; color: #64748B; background: #FFFFFF; cursor: pointer; transition: all 0.15s ease; }
+  .knowledge-icon-button:hover { color: #0F766E; background: #F8FAFC; border-color: #CBD5E1; }
+  .knowledge-icon-button.danger:hover { color: #DC2626; background: #FEF2F2; border-color: #FEE2E2; }
+  .knowledge-empty {
+    display: flex;
+    min-height: 180px;
+    align-items: center;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 20px;
+    border: 1.5px dashed #E2E8F0;
+    border-radius: 10px;
+    color: #64748B;
+    background: #F8FAFC;
+    text-align: center;
+  }
+  .knowledge-empty > span {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    margin-bottom: 4px;
+    place-items: center;
+    border-radius: 10px;
+    color: #0F766E;
+    background: #ECFDF5;
+    border: 1px solid #A7F3D0;
+  }
+  .knowledge-empty strong { color: #0F172A; font-size: 14px; font-weight: 600; }
+  .knowledge-empty small { max-width: 300px; color: #64748B; font-size: 12.5px; }
+  .knowledge-empty-link { margin-top: 4px; color: #0F766E; font-size: 13px; font-weight: 500; text-underline-offset: 3px; }
+  .compact-empty { min-height: 110px; }
   .admin-overlay-form { display: grid; gap: 20px; }
   .overlay-form-error { margin: 0; padding: 10px 14px; border: 1px solid #efc9c3; border-radius: var(--radius-lg); color: var(--danger); background: #fff7f6; font-size: 12.5px; }
   .admin-overlay-field { display: grid; min-width: 0; gap: 6px; color: var(--text-strong); font-size: 13px; font-weight: 600; }
@@ -2672,63 +4004,119 @@
     font-size: 12px;
   }
   .account-state {
-    flex: 0 0 auto;
-    padding: 4px 9px;
-    border-radius: var(--radius-full);
-    background: var(--primary-soft);
-    color: var(--primary-ink);
-    font-size: 11.5px;
-    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: #ECFDF5;
+    color: #065F46;
+    border: 1px solid #A7F3D0;
+    font-size: 12px;
+    font-weight: 500;
     white-space: nowrap;
   }
   .account-state.disabled {
-    background: var(--off-soft);
-    color: var(--text-muted-alt);
+    background: #F1F5F9;
+    color: #475569;
+    border-color: #E2E8F0;
   }
   .account-state.pending {
-    background: var(--amber-soft);
-    color: var(--amber-ink);
+    background: #FFFBEB;
+    color: #92400E;
+    border-color: #FDE68A;
   }
-  .account-plan { display: inline-flex; min-height: 28px; align-items: center; padding: 0 10px; border-radius: var(--radius-full); color: var(--text-secondary); background: var(--surface-muted); font-size: 11px; font-weight: 600; }
-  .account-plan.premium { color: var(--primary-ink); background: var(--primary-soft); }
+  .account-plan {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: #F1F5F9;
+    color: #475569;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .account-plan.premium {
+    color: #0F766E;
+    background: #ECFDF5;
+    border: 1px solid #A7F3D0;
+  }
   .admin-empty {
+    display: flex;
+    min-height: 220px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     padding: 36px 20px;
-    color: var(--text-muted);
-    font-size: 13px;
+    color: #64748B;
+    font-size: 13.5px;
     text-align: center;
+  }
+  .admin-empty-loading {
+    gap: 12px;
+  }
+  .empty-icon-wrap {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    margin-bottom: 2px;
+    place-items: center;
+    border-radius: 10px;
+    background: #F8FAFC;
+    color: #64748B;
+    border: 1px solid #E2E8F0;
+  }
+  .admin-empty strong {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #0F172A;
+  }
+  .admin-empty p {
+    margin: 0 0 10px;
+    max-width: 420px;
+    color: #64748B;
+    font-size: 13px;
+    line-height: 1.5;
   }
   .content-link {
     display: flex;
     width: 100%;
     align-items: center;
     gap: 12px;
-    min-height: 60px;
-    padding: 8px 4px;
+    min-height: 52px;
+    padding: 8px 12px;
     border: 0;
-    border-top: 1px solid var(--border-subtle);
-    background: var(--surface);
+    border-top: 1px solid #F1F5F9;
+    background: #FFFFFF;
     text-align: left;
     cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .content-link:hover {
+    background: #F8FAFC;
   }
   .content-link > span:nth-child(2) {
     display: grid;
     flex: 1;
-    gap: 3px;
+    gap: 2px;
   }
   .content-link strong {
-    color: var(--text-strong);
-    font-size: 14px;
+    color: #0F172A;
+    font-size: 13.5px;
     font-weight: 600;
   }
   .content-link small {
-    color: var(--text-muted);
+    color: #64748B;
     font-size: 12px;
   }
   .content-link > svg {
-    color: var(--text-muted);
+    color: #94A3B8;
   }
   .admin-table-panel {
-    padding: 20px;
+    padding: 0;
+    overflow: hidden;
   }
   .admin-table-wrap {
     width: 100%;
@@ -2740,128 +4128,152 @@
     width: 100%;
     min-width: 680px;
     border-collapse: collapse;
-    font-size: 14px;
+    font-size: 13.5px;
     text-align: left;
   }
   .admin-table th {
-    padding: 12px;
-    border-top: 1px solid var(--border-subtle);
-    border-bottom: 1px solid var(--ds-border);
-    color: var(--text-overline);
+    height: 38px;
+    padding: 8px 16px;
+    border-bottom: 1px solid #E2E8F0;
+    background: #F8FAFC;
+    color: #475569;
     font-size: 12px;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
     white-space: nowrap;
   }
   .admin-table td {
-    height: 56px;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
+    height: 50px;
+    padding: 8px 16px;
+    border-bottom: 1px solid #F1F5F9;
+    color: #334155;
     white-space: nowrap;
   }
   .admin-table tbody tr:last-child td {
     border-bottom: 0;
   }
-  .admin-table tbody tr:hover { background: var(--surface-subtle); }
+  .admin-table tbody tr:hover { background: #F8FAFC; }
   .table-account {
     display: flex;
     align-items: center;
     gap: 10px;
-    color: var(--text-strong);
+    color: #0F172A;
   }
   .table-account strong {
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 600;
   }
   .role-select {
-    min-width: 125px;
-    min-height: 44px;
-    padding: 0 12px;
-    border: 1px solid var(--border-control);
-    border-radius: var(--radius-md);
-    background: var(--surface);
-    color: var(--text-secondary);
+    min-width: 120px;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: #334155;
     font: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
   }
   .table-action {
-    min-height: 44px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: var(--radius-lg);
-    background: var(--primary-soft);
-    color: var(--primary-ink);
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: #334155;
     font: inherit;
-    font-size: 13px;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
+    transition: all 0.15s ease;
   }
   .table-action:hover {
-    background: var(--primary-soft-2);
+    background: #F1F5F9;
+    color: #0F172A;
+    border-color: #CBD5E1;
   }
   .table-action.danger {
-    background: #fff1f1;
-    color: var(--danger);
+    color: #DC2626;
+    border-color: #FEE2E2;
+    background: #FEF2F2;
+  }
+  .table-action.danger:hover {
+    background: #FEE2E2;
+    border-color: #FCA5A5;
   }
   .account-actions-cell { display: flex; align-items: center; gap: 6px; }
   .learner-report { display: grid; gap: 20px; min-width: 0; }
   .learner-report-toolbar {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: space-between;
     gap: 20px;
+    padding: 16px 20px;
   }
   .learner-report-toolbar h2,
-  .learner-skill-panel h2 { margin: 0; color: var(--text-strong); font-size: 17px; line-height: 24px; font-weight: 600; }
+  .learner-skill-panel h2 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 600; }
   .learner-report-toolbar p,
-  .learner-skill-panel > div:first-child p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
-  .learner-report-filters { display: flex; align-items: flex-end; gap: 12px; }
-  .learner-report-filters label { display: grid; gap: 6px; min-width: 190px; color: var(--text-strong); font-size: 13px; font-weight: 600; }
-  .learner-report-filters select { min-height: 44px; max-width: 260px; padding: 0 34px 0 12px; border: 1px solid var(--border-control); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; }
+  .learner-skill-panel > div:first-child p { margin: 2px 0 0; color: #64748B; font-size: 13px; }
+  .learner-report-filters { display: flex; align-items: center; gap: 10px; }
+  .learner-report-filters label { display: flex; align-items: center; gap: 6px; color: #475569; font-size: 13px; font-weight: 500; }
+  .learner-report-filters select { height: 34px; max-width: 220px; padding: 0 28px 0 10px; border: 1px solid #E2E8F0; border-radius: 6px; background: #FFFFFF; color: #0F172A; font: inherit; font-size: 13px; }
   .learner-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-  .learner-summary-card { display: grid; align-content: start; gap: 7px; min-width: 0; min-height: 128px; padding: 18px; border: 1px solid; border-radius: var(--radius-2xl); }
-  .learner-summary-card > span { color: var(--text-secondary); font-size: 13px; font-weight: 500; }
-  .learner-summary-card strong { color: var(--text); font-size: 28px; line-height: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .learner-summary-card small { color: var(--text-muted-alt); font-size: 12px; line-height: 18px; }
-  .learner-summary-card.blue { background: var(--blue-card); border-color: var(--blue-card-border); }
-  .learner-summary-card.teal { background: var(--teal-card); border-color: var(--teal-card-border); }
-  .learner-summary-card.violet { background: var(--violet-card); border-color: var(--violet-card-border); }
-  .learner-summary-card.amber { background: var(--amber-card); border-color: var(--amber-card-border); }
+  .learner-summary-card {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    min-width: 0;
+    min-height: 104px;
+    padding: 16px 18px;
+    border: 1px solid #E2E8F0 !important;
+    border-radius: 10px;
+    background: #FFFFFF !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .learner-summary-card > span { color: #64748B; font-size: 12.5px; font-weight: 500; }
+  .learner-summary-card strong { color: #0F172A; font-size: 24px; line-height: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .learner-summary-card small { color: #94A3B8; font-size: 11.5px; line-height: 16px; }
+  .learner-summary-card.blue,
+  .learner-summary-card.teal,
+  .learner-summary-card.violet,
+  .learner-summary-card.amber { background: #FFFFFF; border-color: #E2E8F0; }
   .learner-history-panel { min-width: 0; padding: 0; overflow: hidden; }
-  .learner-history-panel .admin-panel-heading { padding: 20px 24px; }
+  .learner-history-panel .admin-panel-heading { padding: 16px 20px; }
   .learner-history-table { min-width: 860px; }
-  .learner-history-table td strong { display: block; color: var(--text-strong); font-size: 13px; font-weight: 600; }
-  .table-secondary { display: block; margin-top: 3px; color: var(--text-muted); font-size: 12px; }
-  .attempt-state { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: var(--radius-full); background: var(--surface-muted); color: var(--text-secondary); font-size: 12px; font-weight: 600; }
-  .attempt-state.submitted { background: var(--primary-soft); color: var(--primary-ink); }
-  .attempt-state.graded { background: var(--primary-soft); color: var(--primary-ink); }
-  .attempt-state.in_progress { background: var(--amber-card); color: var(--amber-ink); }
-  .learner-skill-panel { display: grid; gap: 18px; }
-  .learner-trend-panel { display: grid; gap: 18px; }
-  .learner-trend-panel h2 { margin: 0; color: var(--text-strong); font-size: 17px; line-height: 24px; font-weight: 600; }
-  .learner-trend-panel > div:first-child p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
-  .learner-trend-chart { display: flex; min-height: 180px; align-items: flex-end; gap: clamp(10px, 2vw, 24px); overflow-x: auto; padding: 14px 10px 0; border-bottom: 1px solid var(--ds-border); }
-  .learner-trend-point { display: grid; min-width: 42px; height: 170px; flex: 1; grid-template-rows: 20px minmax(14px, 1fr) 24px; justify-items: center; align-items: end; gap: 5px; }
-  .learner-trend-point strong { color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .learner-trend-point i { width: min(34px, 70%); min-height: 10px; align-self: end; border-radius: var(--radius-sm) var(--radius-sm) 2px 2px; background: var(--brand-gradient); }
-  .learner-trend-point small { align-self: center; color: var(--text-muted); font-size: 11px; }
-  .skill-progress-list { display: grid; gap: 14px; }
-  .skill-progress-row { display: grid; grid-template-columns: minmax(100px, 180px) minmax(60px, 1fr) 48px; align-items: center; gap: 14px; color: var(--text-secondary); font-size: 13px; }
-  .skill-progress-row strong { color: var(--text-strong); font-variant-numeric: tabular-nums; text-align: right; }
-  .skill-progress-track { height: 9px; overflow: hidden; border-radius: var(--radius-full); background: var(--surface-muted); }
-  .skill-progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--brand-gradient); }
-  .learner-progress-empty { display: flex; align-items: center; gap: 10px; min-height: 68px; padding: 14px; border: 1px dashed var(--primary-dashed); border-radius: var(--radius-lg); background: var(--primary-tint); color: var(--text-muted); font-size: 13px; }
-  .learner-progress-empty svg { flex: 0 0 auto; color: var(--primary); }
-  .learner-report-error { padding: 12px 14px; border: 1px solid var(--rose-card-border); border-radius: var(--radius-md); background: var(--rose-card); color: var(--danger); font-size: 13px; }
-  .attempt-result-detail { display: grid; gap: 18px; }
-  .attempt-result-score { display: grid; gap: 5px; padding: 18px; border: 1px solid var(--teal-card-border); border-radius: var(--radius-xl); background: var(--teal-card); }
-  .attempt-result-score span { color: var(--text-muted-alt); font-size: 13px; }
-  .attempt-result-score strong { color: var(--text); font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; }
-  .attempt-result-score small { color: var(--primary-ink); font-size: 12px; }
-  .attempt-result-detail dl { display: grid; margin: 0; border: 1px solid var(--ds-border); border-radius: var(--radius-lg); overflow: hidden; }
-  .attempt-result-detail dl > div { display: flex; min-height: 50px; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 14px; border-bottom: 1px solid var(--border-subtle); }
+  .learner-history-table td strong { display: block; color: #0F172A; font-size: 13px; font-weight: 600; }
+  .table-secondary { display: block; margin-top: 2px; color: #64748B; font-size: 11.5px; }
+  .attempt-state { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; background: #F1F5F9; color: #475569; font-size: 12px; font-weight: 500; }
+  .attempt-state.submitted { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+  .attempt-state.graded { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+  .attempt-state.in_progress { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
+  .learner-skill-panel { display: grid; gap: 16px; padding: 18px 20px; }
+  .learner-trend-panel { display: grid; gap: 16px; padding: 18px 20px; }
+  .learner-trend-panel h2 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 600; }
+  .learner-trend-panel > div:first-child p { margin: 2px 0 0; color: #64748B; font-size: 13px; }
+  .learner-trend-chart { display: flex; min-height: 160px; align-items: flex-end; gap: clamp(10px, 2vw, 24px); overflow-x: auto; padding: 12px 8px 0; border-bottom: 1px solid #E2E8F0; }
+  .learner-trend-point { display: grid; min-width: 40px; height: 150px; flex: 1; grid-template-rows: 20px minmax(14px, 1fr) 24px; justify-items: center; align-items: end; gap: 4px; }
+  .learner-trend-point strong { color: #64748B; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .learner-trend-point i { width: min(32px, 70%); min-height: 8px; align-self: end; border-radius: 4px 4px 2px 2px; background: #0F766E; }
+  .learner-trend-point small { align-self: center; color: #94A3B8; font-size: 10.5px; }
+  .skill-progress-list { display: grid; gap: 12px; }
+  .skill-progress-row { display: grid; grid-template-columns: minmax(100px, 180px) minmax(60px, 1fr) 48px; align-items: center; gap: 14px; color: #475569; font-size: 13px; }
+  .skill-progress-row strong { color: #0F172A; font-variant-numeric: tabular-nums; text-align: right; }
+  .skill-progress-track { height: 8px; overflow: hidden; border-radius: 999px; background: #F1F5F9; }
+  .skill-progress-track i { display: block; height: 100%; border-radius: inherit; background: #0F766E; }
+  .learner-progress-empty { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 12px 14px; border: 1px dashed #E2E8F0; border-radius: 8px; background: #F8FAFC; color: #64748B; font-size: 13px; }
+  .learner-progress-empty svg { flex: 0 0 auto; color: #0F766E; }
+  .learner-report-error { padding: 10px 14px; border: 1px solid #FECACA; border-radius: 8px; background: #FEF2F2; color: #991B1B; font-size: 13px; }
+  .attempt-result-detail { display: grid; gap: 16px; }
+  .attempt-result-score { display: grid; gap: 4px; padding: 16px; border: 1px solid #A7F3D0; border-radius: 10px; background: #ECFDF5; }
+  .attempt-result-score span { color: #065F46; font-size: 12.5px; font-weight: 500; }
+  .attempt-result-score strong { color: #0F172A; font-size: 26px; line-height: 32px; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .attempt-result-score small { color: #0F766E; font-size: 12px; font-weight: 600; }
+  .attempt-result-detail dl { display: grid; margin: 0; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden; }
+  .attempt-result-detail dl > div { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 14px; border-bottom: 1px solid #F1F5F9; }
   .attempt-result-detail dl > div:last-child { border: 0; }
-  .attempt-result-detail dt { color: var(--text-muted); font-size: 13px; }
-  .attempt-result-detail dd { margin: 0; color: var(--text-strong); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .attempt-result-detail dt { color: #64748B; font-size: 13px; }
+  .attempt-result-detail dd { margin: 0; color: #0F172A; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .secondary-text {
     display: block;
     margin-top: 4px;
@@ -3010,6 +4422,503 @@
     }
     .form-row {
       grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* BILLING & SUBSCRIPTIONS STYLES */
+  .admin-billing-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .billing-hero-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 24px 28px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+  }
+  .billing-hero-content {
+    max-width: 680px;
+  }
+  .billing-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background: #EFF6FF;
+    color: #2563EB;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .billing-hero-content h2 {
+    margin: 0 0 6px;
+    color: #0F172A;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .billing-hero-content p {
+    margin: 0;
+    color: #64748B;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .billing-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .billing-stat-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    transition: transform 140ms ease, box-shadow 140ms ease;
+  }
+  .billing-stat-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+  }
+  .billing-stat-icon {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 10px;
+  }
+  .billing-stat-card.revenue .billing-stat-icon {
+    background: #ECFDF5;
+    color: #059669;
+  }
+  .billing-stat-card.success .billing-stat-icon {
+    background: #EFF6FF;
+    color: #2563EB;
+  }
+  .billing-stat-card.pending .billing-stat-icon {
+    background: #FFFBEB;
+    color: #D97706;
+  }
+  .billing-stat-card.premium .billing-stat-icon {
+    background: #FAF5FF;
+    color: #7C3AED;
+  }
+  .billing-stat-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .billing-stat-info span {
+    color: #64748B;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .billing-stat-info strong {
+    color: #0F172A;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .billing-stat-info small {
+    color: #94A3B8;
+    font-size: 11.5px;
+  }
+  .billing-plans-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+  }
+  .billing-plan-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 14px;
+    transition: all 140ms ease;
+  }
+  .billing-plan-card.premium {
+    border: 1.5px solid #C4B5FD;
+    background: linear-gradient(180deg, #FAF5FF 0%, #FFFFFF 100%);
+    box-shadow: 0 4px 20px rgba(124, 58, 237, 0.05);
+  }
+  .plan-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .plan-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    margin-bottom: 6px;
+    border-radius: 5px;
+    background: #F1F5F9;
+    color: #475569;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .plan-badge.premium-badge {
+    background: linear-gradient(135deg, #7C3AED, #4F46E5);
+    color: #FFFFFF;
+  }
+  .plan-card-header h3 {
+    margin: 0;
+    color: #0F172A;
+    font-size: 17px;
+    font-weight: 700;
+  }
+  .plan-price-tag {
+    text-align: right;
+  }
+  .plan-price-tag strong {
+    display: block;
+    color: #0F172A;
+    font-size: 22px;
+    font-weight: 800;
+  }
+  .plan-price-tag small {
+    color: #64748B;
+    font-size: 11.5px;
+  }
+  .plan-card-desc {
+    margin: 0;
+    color: #475569;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .plan-features-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .plan-features-list li {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #334155;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .plan-features-list li svg {
+    flex: 0 0 auto;
+    color: #10B981;
+  }
+  .plan-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 14px;
+    margin-top: auto;
+    border-top: 1px solid #E2E8F0;
+  }
+  .plan-user-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #475569;
+    font-size: 12.5px;
+  }
+  .plan-user-count strong {
+    color: #0F172A;
+    font-weight: 700;
+  }
+  .plan-upgrade-hint {
+    color: #6366F1;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .billing-table-panel {
+    background: #FFFFFF;
+  }
+  .billing-table-filters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .billing-search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 11px;
+    min-height: 36px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #64748B;
+  }
+  .billing-search-box input {
+    border: 0;
+    outline: 0;
+    font: inherit;
+    font-size: 13px;
+    color: #0F172A;
+    width: 200px;
+  }
+  .billing-select-filter {
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #334155;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .payment-id-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #F1F5F9;
+    color: #1E293B;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .provider-badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .provider-badge.stripe {
+    background: rgba(99, 91, 255, 0.1);
+    color: #635BFF;
+    border: 1px solid rgba(99, 91, 255, 0.2);
+  }
+  .provider-badge.paypal {
+    background: rgba(0, 121, 193, 0.1);
+    color: #0079C1;
+    border: 1px solid rgba(0, 121, 193, 0.2);
+  }
+  .payment-amount {
+    color: #0F172A;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .payment-status-pill {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .payment-status-pill.succeeded {
+    background: #DEF7EC;
+    color: #03543F;
+  }
+  .payment-status-pill.pending {
+    background: #FEF08A;
+    color: #713F12;
+  }
+  .payment-status-pill.failed,
+  .payment-status-pill.refunded {
+    background: #FDE8E8;
+    color: #9B1C1C;
+  }
+  .payment-time {
+    color: #64748B;
+    font-size: 12.5px;
+  }
+  .plan-select.plan-premium-selected {
+    border-color: #C4B5FD;
+    color: #6D28D9;
+    font-weight: 600;
+    background: #FAF5FF;
+  }
+
+  /* SUBTABS NAVIGATION */
+  .billing-tabs-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    background: #F1F5F9;
+    border-radius: 10px;
+    width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .billing-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #475569;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 140ms ease;
+    white-space: nowrap;
+  }
+  .billing-tab-btn:hover {
+    color: #0F172A;
+    background: rgba(255, 255, 255, 0.6);
+  }
+  .billing-tab-btn.active {
+    background: #FFFFFF;
+    color: #2563EB;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  }
+  .billing-tab-btn .tab-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 9999px;
+    background: #E2E8F0;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .billing-tab-btn.active .tab-badge {
+    background: #EFF6FF;
+    color: #2563EB;
+  }
+  .billing-tab-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* PLAN CARDS ENHANCEMENT */
+  .billing-plan-card.inactive {
+    opacity: 0.72;
+    background: #F8FAFC;
+    border-style: dashed;
+  }
+  .plan-quota-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .plan-quota-badge svg {
+    color: #2563EB;
+  }
+  .plan-status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #64748B;
+    font-size: 12px;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #94A3B8;
+  }
+  .status-dot.active {
+    background: #10B981;
+    box-shadow: 0 0 0 2px #DEF7EC;
+  }
+  .plan-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* USER BILLINGS TABLE */
+  .quota-progress-cell {
+    display: flex;
+    align-items: center;
+  }
+  .unlimited-quota {
+    display: inline-block;
+    color: #7C3AED;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .limited-quota {
+    color: #475569;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .order-count-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #F1F5F9;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .table-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* USER PAYMENTS DRAWER */
+  .user-payments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 0;
+  }
+  .user-payment-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 16px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    background: #FFFFFF;
+  }
+  .user-payment-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .user-payment-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  @media (max-width: 768px) {
+    .billing-hero-panel {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .billing-search-box input {
+      width: 100%;
+    }
+    .billing-tabs-nav {
+      width: 100%;
     }
   }
 </style>

@@ -28,7 +28,7 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 </script>
 
 <template>
-  <DropdownMenuRoot :open="open" @update:open="emit('update:open', $event)">
+  <DropdownMenuRoot v-bind="open !== undefined ? { open } : {}" @update:open="emit('update:open', $event)">
     <TooltipRoot v-if="triggerLabel" :delay-duration="400" ignore-non-keyboard-focus>
       <TooltipTrigger as-child>
         <DropdownMenuTrigger as-child><slot name="trigger" /></DropdownMenuTrigger>
@@ -45,5 +45,15 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 </template>
 
 <style scoped>
-.overlay-menu { z-index: 95; min-width: 200px; max-width: calc(100vw - 16px); padding: 6px; border: 1px solid var(--ds-border); border-radius: var(--radius-lg); color: var(--text); background: var(--surface); box-shadow: var(--popover-shadow); }
+.overlay-menu {
+  z-index: 9999;
+  min-width: 240px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  color: #0f172a;
+  background-color: #ffffff !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.14), 0 4px 10px -2px rgba(15, 23, 42, 0.08);
+}
 </style>

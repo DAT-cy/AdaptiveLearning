@@ -14,6 +14,17 @@ export const adminService = {
     data(Axios.put(`/api/v1/admin/users/${userId}/role`, { role })),
   updateUserStatus: (userId, enabled) =>
     data(Axios.patch(`/api/v1/admin/users/${userId}/status`, { enabled })),
+  updateUserPlan: (userId, plan) =>
+    data(Axios.put(`/api/v1/admin/users/${userId}/plan`, { plan })),
+  payments: () => data(Axios.get('/api/v1/admin/users/payments')),
+  plans: () => data(Axios.get('/api/v1/admin/plans')),
+  createPlan: (payload) => data(Axios.post('/api/v1/admin/plans', payload)),
+  updatePlan: (id, payload) => data(Axios.put(`/api/v1/admin/plans/${id}`, payload)),
+  togglePlan: (id) => data(Axios.patch(`/api/v1/admin/plans/${id}/toggle`)),
+  deletePlan: (id) => data(Axios.delete(`/api/v1/admin/plans/${id}`)),
+  userBillings: () => data(Axios.get('/api/v1/admin/billing/users')),
+  userPayments: (userId) => data(Axios.get(`/api/v1/admin/billing/users/${userId}/payments`)),
+  resetUserQuota: (userId) => data(Axios.post(`/api/v1/admin/billing/users/${userId}/reset-quota`)),
   certificates: () => data(Axios.get('/api/v1/certificates')),
   exams: () => data(Axios.get('/api/v1/exams')),
   examTemplates: () => data(Axios.get('/api/v1/exam-templates')),

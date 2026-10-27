@@ -706,8 +706,8 @@ async function publishExam() {
 .exam-builder-section-heading > div { min-width: 0; flex: 1; }
 .exam-builder-section-heading h3 { margin: 0; color: var(--text-strong); font-size: 17px; line-height: 24px; font-weight: 600; }
 .exam-builder-section-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
-.exam-builder-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(240px,100%),1fr)); gap: 16px; }
-.exam-builder label { display: grid; min-width: 0; gap: 6px; color: var(--text-strong); font-size: 13px; font-weight: 600; }
+.exam-builder-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(240px,100%),1fr)); gap: 16px; align-items: start; }
+.exam-builder label { display: flex; flex-direction: column; justify-content: flex-start; min-width: 0; gap: 6px; color: var(--text-strong); font-size: 13px; font-weight: 600; }
 .exam-builder input,.exam-builder select,.exam-builder textarea { width: 100%; min-width: 0; min-height: 44px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: var(--radius-md); color: var(--text); background: var(--surface); font: inherit; font-size: 14px; }
 .exam-builder textarea { min-height: 96px; padding: 12px 14px; line-height: 1.6; resize: vertical; }
 .exam-builder input:focus-visible,.exam-builder select:focus-visible,.exam-builder textarea:focus-visible { border-color: var(--ds-primary); outline: 2px solid var(--ds-primary); outline-offset: 2px; }
@@ -723,7 +723,7 @@ async function publishExam() {
 .exam-builder-part-actions button { display: grid; width: 40px; height: 40px; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--text-muted); background: transparent; cursor: pointer; }
 .exam-builder-part-actions button:hover:not(:disabled) { color: var(--ds-primary); background: var(--surface-hover); }
 .exam-builder-part-actions button:disabled { color: var(--off-track); cursor: not-allowed; }
-.exam-builder-part-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(180px,100%),1fr)); gap: 16px; padding: 16px; }
+.exam-builder-part-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(180px,100%),1fr)); gap: 16px; padding: 16px; align-items: start; }
 .preview-summary > p { margin: 0; color: var(--text-muted); font-size: 13px; }
 .preview-questions-section { padding-bottom: 16px; }
 .preview-search { position: relative; display: flex !important; width: min(280px,40%); min-height: 44px; align-items: center; gap: 8px !important; padding: 0 12px; border: 1px solid var(--border-control); border-radius: var(--radius-lg); color: var(--text-muted) !important; }

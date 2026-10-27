@@ -5,6 +5,7 @@
     <resultMap id="userResultMap" type="adaptivelearning.module.users.entity.User">
         <id property="userId" column="user_id"/>
         <result property="username" column="username"/>
+        <result property="fullName" column="full_name"/>
         <result property="password" column="password"/>
         <result property="enable" column="enable"/>
         <result property="emailVerified" column="email_verified"/>
@@ -21,6 +22,7 @@
         SELECT 
             user_id,
             username,
+            full_name,
             password,
             enable,
             email_verified,
@@ -37,7 +39,7 @@
     </select>
 
     <select id="findAllForAdmin" resultMap="userResultMap">
-        SELECT user_id, username, enable, email_verified, is_deleted, role, plan,
+        SELECT user_id, username, full_name, enable, email_verified, is_deleted, role, plan,
                premium_activated_at, free_exams_used, created_at, updated_at
         FROM tbl_users
         WHERE is_deleted = false
@@ -45,7 +47,7 @@
     </select>
 
     <select id="findById" resultMap="userResultMap">
-        SELECT user_id, username, password, enable, email_verified, is_deleted, role, plan,
+        SELECT user_id, username, full_name, password, enable, email_verified, is_deleted, role, plan,
                premium_activated_at, free_exams_used, created_at, updated_at
         FROM tbl_users
         WHERE user_id = #{userId}
@@ -60,6 +62,7 @@
 
     <insert id="insertUser" parameterType="adaptivelearning.module.users.entity.User">
         INSERT INTO tbl_users (username,
+                               full_name,
                                password,
                                enable,
                                email_verified,
@@ -73,6 +76,7 @@
                                updated_at,
                                updated_id)
         VALUES (#{username},
+                #{fullName},
                 #{password},
                #{enable},
                 #{emailVerified},
@@ -136,6 +140,13 @@
           AND email_verified = true
           AND is_deleted = false
           AND free_exams_used &lt; #{limit}
+    </update>
+
+    <update id="resetFreeExamQuota">
+        UPDATE tbl_users
+        SET free_exams_used = 0, updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND is_deleted = false
     </update>
 
     <update id="initializeLegacyFreeExamUsage">

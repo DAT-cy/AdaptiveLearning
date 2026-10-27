@@ -28,6 +28,7 @@ spring:
     open-in-view: false
 google:
   client-id: ${GOOGLE_CLIENT_ID:}
+  client-secret: ${GOOGLE_CLIENT_SECRET:}
 mybatis:
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.example.base_springboot.entity

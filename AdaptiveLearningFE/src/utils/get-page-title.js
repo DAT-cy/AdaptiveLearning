@@ -10,6 +10,6 @@ const title = settings.title || 'Học tập thích ứng'
  */
 
 export default function getPageTitle(pageTitle) {
-  if (pageTitle) return `${pageTitle}-${title}`
-  return `${title}`
+  if (pageTitle) return `${pageTitle} · ${title}`
+  return `${title} · Nền tảng học tập cá nhân hóa`
 }

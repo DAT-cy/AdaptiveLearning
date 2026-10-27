@@ -51,8 +51,8 @@ function onOpenAutoFocus(event: Event) {
 <template>
   <AlertDialogRoot :open="open" @update:open="(value) => !value && settle('cancel')">
     <AlertDialogPortal>
-      <AlertDialogOverlay force-mount class="overlay-backdrop overlay-confirm-backdrop" />
-      <AlertDialogContent force-mount class="overlay-confirm" @open-auto-focus="onOpenAutoFocus">
+      <AlertDialogOverlay class="overlay-backdrop overlay-confirm-backdrop" />
+      <AlertDialogContent class="overlay-confirm" @open-auto-focus="onOpenAutoFocus">
         <header class="overlay-confirm-header">
           <span class="overlay-icon-tile" :class="`is-${variant}`">
             <component :is="variant === 'danger' ? AlertTriangle : CircleHelp" :size="21" aria-hidden="true" />

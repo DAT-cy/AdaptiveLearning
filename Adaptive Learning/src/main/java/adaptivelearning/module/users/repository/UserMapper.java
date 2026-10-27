@@ -24,5 +24,6 @@ public interface UserMapper {
                    @Param("premiumActivatedAt") LocalDateTime premiumActivatedAt);
     int downgradePremiumAndSyncQuota(@Param("userId") Long userId, @Param("limit") int limit);
     int consumeFreeExamQuota(@Param("userId") Long userId, @Param("limit") int limit);
+    int resetFreeExamQuota(@Param("userId") Long userId);
     int initializeLegacyFreeExamUsage(@Param("limit") int limit);
 }

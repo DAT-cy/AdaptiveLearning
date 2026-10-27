@@ -35,6 +35,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import adaptivelearning.module.billing.entity.Payment;
+import adaptivelearning.module.billing.repository.PaymentRepository;
+import adaptivelearning.shared.enums.PaymentProvider;
+import adaptivelearning.shared.enums.PaymentStatus;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 @RestController
 @RequestMapping(ClientUtils.VERSION + "/admin/users")
 @Tag(name = "03. Users management")
@@ -46,6 +55,7 @@ public class AdminController {
     private final AttemptService attemptService;
     private final AnalyticsService analyticsService;
     private final BillingProperties billingProperties;
+    private final PaymentRepository paymentRepository;
 
     @GetMapping
     public DefaultRes<List<AccountSummary>> listUsers() {
@@ -105,6 +115,39 @@ public class AdminController {
         return ResponseEntity.ok(DefaultRes.res(HttpStatus.OK.value(), ResponseMessage.UPDATED));
     }
 
+    @PutMapping("/{userId}/plan")
+    public ResponseEntity<DefaultRes<Void>> updatePlan(
+            @PathVariable Long userId,
+            @Valid @RequestBody UpdatePlanRequest request) {
+        if (request.getPlan() == PlanType.PREMIUM) {
+            userMapper.updatePlan(userId, PlanType.PREMIUM, LocalDateTime.now());
+        } else {
+            userMapper.downgradePremiumAndSyncQuota(userId, billingProperties.freeExamLimit());
+        }
+        return ResponseEntity.ok(DefaultRes.res(HttpStatus.OK.value(), ResponseMessage.UPDATED));
+    }
+
+    @GetMapping("/payments")
+    public DefaultRes<List<AdminPaymentSummary>> listPayments() {
+        Map<Long, String> userMap = userMapper.findAllForAdmin().stream()
+                .collect(Collectors.toMap(User::getUserId, User::getUsername, (a, b) -> a));
+        List<AdminPaymentSummary> payments = paymentRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(p -> new AdminPaymentSummary(
+                        p.getPaymentId(),
+                        p.getUserId(),
+                        userMap.getOrDefault(p.getUserId(), "User #" + p.getUserId()),
+                        p.getProvider(),
+                        p.getProviderPaymentId(),
+                        p.getProviderTransactionId(),
+                        p.getAmount(),
+                        p.getCurrency(),
+                        p.getStatus(),
+                        p.getCreatedAt()
+                ))
+                .toList();
+        return DefaultRes.res(HttpStatus.OK.value(), ResponseMessage.GET_LIST, payments);
+    }
+
     private static AccountSummary toSummary(User user, int freeExamLimit) {
         return new AccountSummary(user.getUserId(), user.getUsername(), user.getRole(),
                 Boolean.TRUE.equals(user.getEnable()), user.isEmailVerified(),
@@ -113,6 +156,19 @@ public class AdminController {
 
     public record AccountSummary(Long userId, String username, Role role, boolean enabled,
                                  boolean emailVerified, PlanType plan, int freeExamsUsed, int freeExamLimit) {}
+
+    public record AdminPaymentSummary(
+            Long paymentId,
+            Long userId,
+            String username,
+            PaymentProvider provider,
+            String providerPaymentId,
+            String providerTransactionId,
+            BigDecimal amount,
+            String currency,
+            PaymentStatus status,
+            LocalDateTime createdAt
+    ) {}
 
     @Getter
     @Setter
@@ -141,5 +197,12 @@ public class AdminController {
     public static class UpdateStatusRequest {
         @NotNull
         private Boolean enabled;
+    }
+
+    @Getter
+    @Setter
+    public static class UpdatePlanRequest {
+        @NotNull
+        private PlanType plan;
     }
 }

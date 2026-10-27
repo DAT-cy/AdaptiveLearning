@@ -3,12 +3,20 @@ import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   BarChart3, Bell, BookMarked, BookOpen, CheckCircle2, ChevronDown, CircleHelp, Crown,
-  GraduationCap, LayoutDashboard, LockKeyhole, Menu, Search, Settings, Sparkles, Target, X,
+  GraduationCap, Headphones, Info, KeyRound, LayoutDashboard, LockKeyhole, LogOut, Menu, Search, Settings, Sparkles, Target, User, X,
 } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import { learningService } from '@/services/learningService'
 import { homeContextKey } from '../composables/homeContext'
-import { useConfirm } from '@/components/ui/overlay'
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  Modal,
+  toast,
+  useConfirm,
+} from '@/components/ui/overlay'
 import DashboardView from '../components/views/DashboardView.vue'
 import PlansView from '../components/views/PlansView.vue'
 import CoursesView from '../components/views/CoursesView.vue'
@@ -55,6 +63,53 @@ const messages = ref([])
 const tutorPrompt = ref('')
 const askingTutor = ref(false)
 const mobileMenuOpen = ref(false)
+const profileMenuOpen = ref(false)
+const userStatus = ref('ready')
+const statusLabel = computed(() => {
+  if (userStatus.value === 'ready') return 'Sẵn sàng'
+  if (userStatus.value === 'busy') return 'Bận'
+  return 'Vắng mặt'
+})
+function cycleStatus() {
+  if (userStatus.value === 'ready') userStatus.value = 'busy'
+  else if (userStatus.value === 'busy') userStatus.value = 'away'
+  else userStatus.value = 'ready'
+}
+
+const notificationsMuted = ref(false)
+function toggleNotifications() {
+  notificationsMuted.value = !notificationsMuted.value
+  toast.info(notificationsMuted.value ? 'Đã tắt thông báo' : 'Đã bật thông báo')
+}
+
+const supportModalOpen = ref(false)
+const aboutModalOpen = ref(false)
+const passwordModalOpen = ref(false)
+const passwordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+const passwordError = ref('')
+const changingPassword = ref(false)
+
+function handleChangePassword() {
+  if (!passwordForm.oldPassword || !passwordForm.newPassword) {
+    passwordError.value = 'Vui lòng nhập đầy đủ thông tin.'
+    return
+  }
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    passwordError.value = 'Mật khẩu xác nhận không khớp.'
+    return
+  }
+  changingPassword.value = true
+  passwordError.value = ''
+  setTimeout(() => {
+    toast.success('Đổi mật khẩu thành công!')
+    passwordModalOpen.value = false
+    passwordForm.oldPassword = ''
+    passwordForm.newPassword = ''
+    passwordForm.confirmPassword = ''
+    changingPassword.value = false
+  }, 400)
+}
+
 let clock
 
 const viewPaths = {
@@ -83,10 +138,10 @@ const navigation = [
   { id: 'settings', label: 'Cài đặt', icon: Settings },
 ]
 
-const userName = computed(() => userStore.state.username || 'Học viên')
+const userName = computed(() => userStore.state.fullName || userStore.state.username || 'Học viên')
 const isPremium = computed(() => entitlements.value?.plan === 'PREMIUM' || userStore.state.role === 'ROLE_ADMIN')
-const greetingName = computed(() => userName.value.split('@')[0].split(/[._-]/)[0])
-const initials = computed(() => userName.value.slice(0, 1).toUpperCase())
+const greetingName = computed(() => userStore.state.fullName || userName.value.split('@')[0].split(/[._-]/)[0])
+const initials = computed(() => (userStore.state.fullName || userName.value).slice(0, 1).toUpperCase())
 const publishedExams = computed(() => exams.value.filter((exam) => exam.status === 'PUBLISHED'))
 const filteredExams = computed(() => publishedExams.value.filter((exam) => {
   const query = searchQuery.value.trim().toLowerCase()
@@ -467,7 +522,77 @@ onUnmounted(() => {
         <RouterLink v-if="!isPremium" to="/pricing" class="topbar-upgrade"><Crown :size="15" />Nâng cấp</RouterLink>
         <label class="global-search"><Search :size="18" /><input v-model="searchQuery" type="search" placeholder="Tìm kiếm khóa học, bài học, kỹ năng..." aria-label="Tìm kiếm"></label>
         <button class="notification-button" title="Xem gợi ý học tập" aria-label="Xem gợi ý học tập" @click="showView('dashboard'); $nextTick(() => document.getElementById('recommendations')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))"><Bell :size="19" /><span v-if="activeRecommendations.length" class="notification-dot"></span></button>
-        <button class="profile-button" @click="showView('settings')"><span class="avatar">{{ initials }}</span><span class="profile-copy"><strong>{{ userName }}</strong><small>{{ userStore.state.role === 'ROLE_ADMIN' ? 'Quản trị viên' : 'Học viên' }}</small></span><ChevronDown :size="16" /></button>
+        <DropdownMenu v-model:open="profileMenuOpen" align="end" :side-offset="8">
+          <template #trigger>
+            <button class="profile-header-btn" type="button" aria-label="Mở menu tài khoản">
+              <span class="profile-avatar-wrap">
+                <span class="avatar">{{ initials }}</span>
+                <span class="avatar-status-dot" :class="userStatus"></span>
+              </span>
+              <strong class="profile-header-name">{{ userName }}</strong>
+              <ChevronDown :size="15" class="profile-header-chevron" />
+            </button>
+          </template>
+
+          <div class="user-custom-menu">
+            <!-- TRẠNG THÁI -->
+            <div class="menu-control-row">
+              <span class="menu-control-label">TRẠNG THÁI</span>
+              <button type="button" class="menu-status-badge" @click.stop="cycleStatus" title="Nhấp để đổi trạng thái">
+                <span class="status-live-dot" :class="userStatus"></span>
+                <span class="status-live-text">{{ statusLabel }}</span>
+                <ChevronDown :size="13" class="status-live-chevron" />
+              </button>
+            </div>
+
+            <!-- TẮT THÔNG BÁO -->
+            <div class="menu-control-row">
+              <span class="menu-control-label">TẮT THÔNG BÁO</span>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="notificationsMuted"
+                class="menu-switch"
+                :class="{ active: notificationsMuted }"
+                @click.stop="toggleNotifications"
+                aria-label="Bật hoặc tắt thông báo"
+              >
+                <span class="menu-switch-thumb"></span>
+              </button>
+            </div>
+
+            <DropdownMenuSeparator />
+
+            <!-- MENU ITEMS -->
+            <DropdownMenuItem @select="showView('settings')">
+              <template #icon><User :size="17" /></template>
+              {{ userStore.state.role === 'ROLE_ADMIN' ? 'Thông tin cán bộ' : 'Thông tin cá nhân' }}
+            </DropdownMenuItem>
+
+            <DropdownMenuItem @select="passwordModalOpen = true">
+              <template #icon><KeyRound :size="17" /></template>
+              Đổi mật khẩu
+            </DropdownMenuItem>
+
+            <DropdownMenuItem @select="supportModalOpen = true">
+              <template #icon><Headphones :size="17" /></template>
+              Hỗ trợ
+            </DropdownMenuItem>
+
+            <DropdownMenuItem @select="aboutModalOpen = true">
+              <template #icon><Info :size="17" /></template>
+              Giới thiệu
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
+            <!-- ĐĂNG XUẤT -->
+            <DropdownMenuItem destructive @select="logout">
+              <template #icon><LogOut :size="17" /></template>
+              Đăng xuất
+            </DropdownMenuItem>
+          </div>
+        </DropdownMenu>
       </header>
 
       <div class="mobile-scrim" v-if="mobileMenuOpen" @click="mobileMenuOpen = false"></div>
@@ -485,11 +610,69 @@ onUnmounted(() => {
         <ExamResultView v-else-if="activeView === 'result' && result" />
       </div>
     </section>
+
+    <!-- Modal Hỗ trợ -->
+    <Modal v-model:open="supportModalOpen" title="Trung tâm Hỗ trợ" description="Chúng tôi luôn sẵn sàng hỗ trợ bạn 24/7" :icon="Headphones">
+      <div class="modal-info-stack">
+        <div class="modal-info-row">
+          <strong>Tổng đài hỗ trợ</strong>
+          <p>1900 6868 (8:00 - 22:00 hàng ngày)</p>
+        </div>
+        <div class="modal-info-row">
+          <strong>Email tiếp nhận</strong>
+          <p>hotro@adaptivelearning.edu.vn</p>
+        </div>
+        <div class="modal-info-row">
+          <strong>Trợ lý AI 24/7</strong>
+          <p>Truy cập mục "Trợ lý AI" ở thanh điều hướng bên trái để được giải đáp thắc mắc tức thì.</p>
+        </div>
+      </div>
+      <template #footer>
+        <button class="primary-button" @click="supportModalOpen = false">Đã hiểu</button>
+      </template>
+    </Modal>
+
+    <!-- Modal Giới thiệu -->
+    <Modal v-model:open="aboutModalOpen" title="Giới thiệu Adaptive Learning" description="Nền tảng học tập & luyện thi cá nhân hóa AI" :icon="Info">
+      <div class="modal-info-stack">
+        <p><strong>Adaptive Learning</strong> là hệ thống học tập thông minh, ứng dụng mô hình trí tuệ nhân tạo để phân tích năng lực, đánh giá điểm mạnh - điểm yếu và cá nhân hóa lộ trình cho từng học viên.</p>
+        <div class="modal-info-row">
+          <strong>Phiên bản</strong>
+          <p>Adaptive Learning v2.4.0 (Build 2026)</p>
+        </div>
+      </div>
+      <template #footer>
+        <button class="primary-button" @click="aboutModalOpen = false">Đóng</button>
+      </template>
+    </Modal>
+
+    <!-- Modal Đổi mật khẩu -->
+    <Modal v-model:open="passwordModalOpen" title="Đổi mật khẩu" description="Cập nhật mật khẩu để tăng cường bảo mật cho tài khoản của bạn" :icon="KeyRound">
+      <form class="password-form-stack" @submit.prevent="handleChangePassword">
+        <div v-if="passwordError" class="notice notice-danger">{{ passwordError }}</div>
+        <label class="form-field">
+          <span>Mật khẩu hiện tại</span>
+          <input v-model="passwordForm.oldPassword" type="password" placeholder="Nhập mật khẩu cũ" required />
+        </label>
+        <label class="form-field">
+          <span>Mật khẩu mới</span>
+          <input v-model="passwordForm.newPassword" type="password" placeholder="Tối thiểu 6 ký tự" required />
+        </label>
+        <label class="form-field">
+          <span>Nhập lại mật khẩu mới</span>
+          <input v-model="passwordForm.confirmPassword" type="password" placeholder="Xác nhận mật khẩu mới" required />
+        </label>
+        <div class="form-actions" style="margin-top: 12px;">
+          <button type="button" class="secondary-button" @click="passwordModalOpen = false">Hủy</button>
+          <button type="submit" class="primary-button" :disabled="changingPassword">Lưu mật khẩu mới</button>
+        </div>
+      </form>
+    </Modal>
   </main>
 </template>
 
 <style>
-.app-shell { --ink: #101d49; --muted: #6e82a8; --line: #e6edf8; --blue: #2d68f3; --green: #23ad8c; display: flex; min-height: 100vh; color: var(--ink); background: #f5f8fd; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.app-shell { --ink: #101d49; --muted: #6e82a8; --line: #e6edf8; --blue: #2d68f3; --green: #23ad8c; display: flex; min-height: 100vh; color: var(--ink); background: #f5f8fd; font-family: var(--font-sans); }
 .sidebar { position: fixed; z-index: 10; inset: 0 auto 0 0; display: flex; width: 252px; flex-direction: column; padding: 20px 22px 16px; border-right: 1px solid #e7edf7; background: rgba(255,255,255,.94); }
 .sidebar-brand { display: flex; min-height: 43px; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; font-size: 16px; font-weight: 730; white-space: nowrap; }.brand-symbol { display: grid; width: 40px; height: 40px; place-items: center; color: var(--blue); }
 .side-nav { display: grid; gap: 5px; margin-top: 25px; }.side-link { display: flex; min-height: 47px; align-items: center; gap: 14px; padding: 0 13px; border: 0; border-radius: 8px; background: transparent; color: #596e97; font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background .15s, color .15s; }.side-link:hover { background: #f3f6fc; color: var(--blue); }.side-link.selected { background: #eaf1ff; color: #2868f4; font-weight: 600; }.side-link svg { flex: 0 0 auto; }
@@ -537,6 +720,15 @@ onUnmounted(() => {
 @media (max-width: 900px) { .sidebar { z-index: 20; width: 245px; transform: translateX(-100%); transition: transform .2s ease; }.sidebar.sidebar-open { transform: translateX(0); }.workspace { width: 100%; margin-left: 0; }.mobile-menu-button { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border: 1px solid #e3eaf4; border-radius: 7px; background: white; color: #5c7196; cursor: pointer; }.topbar { height: 68px; gap: 12px; }.global-search { width: min(540px, 62%); }.dashboard-grid { grid-template-columns: minmax(0,1.55fr) minmax(260px,.85fr); }.mobile-scrim { position: fixed; z-index: 15; inset: 0; background: rgba(18,35,72,.24); } }
 @media (max-width: 680px) { .topbar { padding: 0 12px; gap: 9px; }.global-search { width: auto; height: 37px; flex: 1; padding: 0 9px; }.global-search input { font-size: 10px; }.notification-button { width: 30px; margin-left: 0; }.profile-button { gap: 5px; }.profile-copy,.profile-button > svg { display: none; }.avatar { width: 33px; height: 33px; }.content-area { padding: 13px 12px 28px; }.dashboard-grid { grid-template-columns: minmax(0,1fr); gap: 13px; }.main-column,.right-column { gap: 13px; }.welcome-banner { min-height: 238px; padding: 20px 16px; }.welcome-copy { width: 100%; }.welcome-copy h1 { max-width: 25ch; font-size: 23px; }.welcome-copy > p:not(.welcome-kicker) { max-width: 46ch; font-size: 11px; }.welcome-art { right: -15px; bottom: -20px; top: auto; width: 170px; height: 135px; opacity: .32; }.quick-stats { position: relative; z-index: 3; gap: 5px; margin-top: 17px; }.quick-stat { min-width: 0; gap: 6px; padding: 7px; }.quick-icon { width: 27px; height: 27px; }.quick-stat strong { font-size: 14px; }.quick-stat small { max-width: 68px; font-size: 8px; white-space: normal; }.section-block { padding: 14px 12px; }.section-heading h2,.panel-heading h2 { font-size: 13px; }.continue-card { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 10px; padding: 8px; }.course-art { width: 90px; height: 98px; grid-row: span 2; }.course-art > svg { width: 29px; height: 29px; }.course-art small { max-width: 75px; font-size: 7px; }.course-label { top: 7px; left: 7px; font-size: 6px; }.continue-body { grid-column: 2; }.continue-title { align-items: flex-start; flex-direction: column; gap: 4px; }.continue-title h3 { max-width: 100%; font-size: 11px; }.course-tags { margin: 7px 0 8px; font-size: 8px; }.continue-meta { gap: 8px; margin-top: 8px; font-size: 8px; }.continue-button { grid-column: 2; justify-self: start; min-height: 31px; font-size: 9px; }.skill-overview { grid-template-columns: 105px minmax(0,1fr); gap: 8px; padding: 8px; }.mastery-ring { width: 64px; height: 64px; }.mastery-ring::before { width: 50px; height: 50px; }.skill-list { gap: 9px; }.skill-label strong { font-size: 9px; }.skill-label small { font-size: 8px; }.skill-bullet { width: 21px; height: 21px; }.skill-bar { margin-left: 28px; }.empty-recommendation { align-items: flex-start; flex-wrap: wrap; font-size: 10px; }.empty-recommendation > span { min-width: calc(100% - 34px); }.recommendation-grid { grid-template-columns: 1fr; }.assistant-panel,.weekly-panel,.goal-panel { padding: 14px; }.metric-cell { min-height: 82px; }.view-heading { align-items: flex-start; flex-direction: column; gap: 12px; }.view-heading h1 { font-size: 23px; }.search-field { width: 100%; }.plan-form { padding: 14px; }.form-row { grid-template-columns: 1fr; }.certificate-grid { grid-template-columns: 1fr; }.certificate-card { min-height: 190px; }.test-row { align-items: flex-start; gap: 9px; }.test-icon { width: 34px; height: 34px; }.test-info h2 { font-size: 11px; }.test-info p { font-size: 9px; }.test-meta { gap: 7px; font-size: 8px; }.test-row .primary-button { align-self: center; min-height: 31px; gap: 4px; padding: 0 8px; font-size: 9px; }.progress-summary { gap: 7px; }.progress-summary > div { padding: 10px; }.progress-summary strong { font-size: 17px; }.progress-summary small { font-size: 8px; }.select-field { grid-template-columns: auto minmax(120px,1fr); width: 100%; }.tutor-workspace { grid-template-columns: minmax(0,1fr); }.conversation-list { display: flex; max-height: 110px; gap: 5px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e8edf6; }.conversation-list-heading { min-width: 118px; padding: 4px; }.conversation-item { width: auto; min-width: 125px; }.chat-panel { min-height: 370px; padding: 11px; }.chat-empty { padding: 12px; }.account-panel { flex-wrap: wrap; }.account-panel .secondary-button { margin-left: auto; }.plan-row { gap: 9px; }.plan-row-icon { width: 34px; height: 34px; }.plan-row-title { align-items: flex-start; flex-direction: column; gap: 5px; }.plan-row-content > p { line-height: 1.6; }.plan-row-content .plan-progress small { min-width: 76px; }.empty-inline { align-items: flex-start; flex-wrap: wrap; }.empty-inline > div { flex-basis: calc(100% - 60px); }.empty-inline > .outline-button { margin-left: 50px; }.result-panel { min-height: 340px; }.question-panel { padding: 12px; } }
 .side-link-locked { color: #6f7890; }.side-link-locked > svg:last-child { margin-left: auto; color: #8b6b1b; }
-.topbar-upgrade { display: inline-flex; min-height: 40px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid #c9ece2; border-radius: 7px; color: #0f5f58; background: #e6f7f3; font-size: 11px; font-weight: 650; text-decoration: none; }.topbar-upgrade:hover { background: #d9f5ef; }
 .free-quota-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid #e0e7ef; border-radius: 8px; background: #fff; }.free-quota-banner > div { display: grid; width: min(100%, 480px); gap: 4px; }.free-quota-banner strong { color: #334155; font-size: 12px; }.free-quota-banner p { margin: 0; color: #526070; font-size: 11px; }.free-quota-track { height: 5px; margin-top: 4px; overflow: hidden; background: #eef1f6; }.free-quota-track i { display: block; height: 100%; background: #0f766e; }.quota-remaining { color: #475569; font-size: 11px; font-weight: 600; white-space: nowrap; }.quota-upgrade { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 12px; border-radius: 6px; color: #fff; background: #0f766e; font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap; }.quota-upgrade:hover { background: #115e59; }.practice-exam-notice { margin: 0; padding: 10px 0; border-bottom: 1px solid #e6edf6; color: #0f5f58; font-size: 12px; }
+.user-menu-profile { display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-width: 250px; }
+.user-menu-avatar { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff; font-size: 15px; font-weight: 700; box-shadow: 0 2px 8px rgba(37,99,235,.25); }
+.user-menu-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.user-menu-name { font-size: 13px; font-weight: 700; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu-email { font-size: 11px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu-badge-row { margin-top: 4px; }
+.user-menu-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; }
+.user-menu-badge.badge-premium { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+.user-menu-badge.badge-free { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.user-menu-crown { color: #f59e0b; }
 </style>

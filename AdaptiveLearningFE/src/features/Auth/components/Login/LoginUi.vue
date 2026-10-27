@@ -32,14 +32,20 @@ function renderGoogleButton() {
     callback: ({ credential }) => {
       if (credential) emit('google-sign-in', credential)
     },
+    error_callback: (err) => {
+      console.warn('Google GSI error:', err)
+      if (err?.type === 'popup_closed_by_user') return
+      googleStatus.value = 'Chưa thể xác thực qua Google. Vui lòng kiểm tra Authorized JavaScript Origins trong Google Cloud Console.'
+    },
   })
+  const buttonWidth = Math.max(260, Math.min(googleButton.value.clientWidth || 360, 400))
   window.google.accounts.id.renderButton(googleButton.value, {
     type: 'standard',
     theme: 'outline',
     size: 'large',
     text: 'continue_with',
     shape: 'rectangular',
-    width: Math.min(googleButton.value.clientWidth, 400),
+    width: buttonWidth,
     logo_alignment: 'left',
   })
 }
@@ -159,7 +165,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.login-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(470px, .98fr); min-height: 100vh; overflow: hidden; color: #101d49; background: #f4f8fe; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.login-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(470px, .98fr); min-height: 100vh; overflow: hidden; color: #101d49; background: #f4f8fe; font-family: var(--font-sans); }
 .intro-panel { position: relative; display: flex; min-height: 100vh; flex-direction: column; padding: 42px max(46px, calc((100vw - 1360px) / 2)); padding-right: 40px; overflow: hidden; background: radial-gradient(ellipse at 5% 88%, rgba(102, 170, 255, .22), transparent 36%), radial-gradient(ellipse at 73% 70%, rgba(189, 215, 255, .4), transparent 37%), linear-gradient(137deg, #edf6ff 2%, #f7faff 58%, #e9f2ff 100%); }
 .intro-panel::before { position: absolute; right: -18%; bottom: -37%; width: 88%; height: 74%; border-radius: 50%; background: linear-gradient(145deg, rgba(255,255,255,.05), rgba(165,199,255,.38)); content: ''; transform: rotate(-22deg); }
 .intro-panel::after { position: absolute; right: 0; bottom: 0; left: 0; height: 20%; background: linear-gradient(0deg, rgba(194,220,255,.24), transparent); content: ''; pointer-events: none; }

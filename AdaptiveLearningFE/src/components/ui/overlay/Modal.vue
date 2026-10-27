@@ -111,9 +111,8 @@ defineExpose({ requestClose })
 <template>
   <DialogRoot :open="open" @update:open="onRootOpenChange">
     <DialogPortal>
-      <DialogOverlay force-mount class="overlay-backdrop" />
+      <DialogOverlay class="overlay-backdrop" />
       <DialogContent
-        force-mount
         :id="contentId"
         class="overlay-modal"
         :class="[`size-${size}`, `is-${variant}`]"
@@ -152,6 +151,7 @@ defineExpose({ requestClose })
 
 <style scoped>
 .overlay-backdrop { position: fixed; z-index: 90; inset: 0; background: var(--overlay-scrim); backdrop-filter: blur(4px); animation: overlay-fade-in 150ms ease both; }
+.overlay-backdrop[data-state='closed'] { animation: overlay-fade-out 120ms ease both; visibility: hidden; transition: visibility 120ms linear 120ms; pointer-events: none; }
 .overlay-modal[data-state='closed'] { animation: modal-exit 120ms ease both; visibility: hidden; transition: visibility 120ms linear 120ms; pointer-events: none; }
 .overlay-modal { position: fixed; z-index: 91; top: 50%; left: 50%; display: flex; width: min(var(--modal-width, 560px), calc(100vw - 32px)); max-height: calc(100vh - 48px); flex-direction: column; overflow: hidden; border: 1px solid var(--ds-border); border-radius: var(--radius-3xl); outline: none; background: var(--surface); box-shadow: var(--overlay-shadow); transform: translate(-50%, -50%); animation: modal-enter 180ms cubic-bezier(.16,1,.3,1) both; }
 .overlay-modal.size-sm { --modal-width: 400px; }

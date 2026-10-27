@@ -106,8 +106,8 @@ defineExpose({ requestClose })
 <template>
   <DrawerRoot :open="open" swipe-direction="right" @update:open="onOpenChange">
     <DrawerPortal>
-      <DrawerOverlay force-mount class="overlay-backdrop drawer-backdrop" />
-      <DrawerContent force-mount class="overlay-drawer" :class="[`size-${size}`, `is-${variant}`]">
+      <DrawerOverlay class="overlay-backdrop drawer-backdrop" />
+      <DrawerContent class="overlay-drawer" :class="[`size-${size}`, `is-${variant}`]">
         <header class="overlay-header">
           <span class="overlay-icon-tile" :class="`is-${variant}`">
             <component :is="icon || (variant === 'danger' ? CircleAlert : ShieldCheck)" :size="21" aria-hidden="true" />

@@ -55,7 +55,7 @@ services:
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
       JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deploy-123456}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-775450545173-dg1fks5jjs667s0ek3d2lj4s5sf07si2.apps.googleusercontent.com}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-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}
       AI_API_KEY: ${GEMINI_API_KEY:-${AI_API_KEY:-}}
       BKT_URL: http://pybkt:8001
       MAIL_HOST: ${MAIL_HOST:-}
@@ -98,7 +98,7 @@ services:
       - "3000:3000"
     environment:
       VITE_API_KEY: http://localhost:9090
-      VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-775450545173-dg1fks5jjs667s0ek3d2lj4s5sf07si2.apps.googleusercontent.com}
       VITE_BASE_URL: /
     volumes:
       - ../AdaptiveLearningFE:/app

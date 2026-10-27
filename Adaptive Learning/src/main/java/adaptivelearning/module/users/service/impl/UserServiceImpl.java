@@ -67,9 +67,13 @@ public class UserServiceImpl implements UserService {
             User user = (User) authentication.getPrincipal();
 
             String jwtToken = jwtService.generateToken(user);
+            String effectiveName = user.getFullName() != null && !user.getFullName().isBlank()
+                    ? user.getFullName()
+                    : user.getUsername().split("@")[0];
 
             return LoginResponse.builder()
                     .username(user.getUsername())
+                    .fullName(effectiveName)
                     .token(jwtToken)
                     .role(user.getRole())
                     .build();
@@ -89,6 +93,11 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             user = new User();
             user.setUsername(googleProfile.getEmail());
+            String gName = googleProfile.getName();
+            if (gName == null || gName.isBlank()) {
+                gName = googleProfile.getEmail().split("@")[0];
+            }
+            user.setFullName(gName.trim());
             user.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
             user.setRole(Role.ROLE_USER);
             user.setEnable(true);
@@ -109,8 +118,13 @@ public class UserServiceImpl implements UserService {
             throw new CommonException(ErrorCode.ACCOUNT_DEACTIVATE);
         }
 
+        String effectiveName = user.getFullName() != null && !user.getFullName().isBlank()
+                ? user.getFullName()
+                : user.getUsername().split("@")[0];
+
         return LoginResponse.builder()
                 .username(user.getUsername())
+                .fullName(effectiveName)
                 .token(jwtService.generateToken(user))
                 .role(user.getRole())
                 .build();
@@ -150,16 +164,25 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
         }
+        String effectiveName = user.getFullName() != null && !user.getFullName().isBlank()
+                ? user.getFullName()
+                : user.getUsername().split("@")[0];
+
         return ProfileUser.builder()
                 .role(user.getRole())
                 .username(user.getUsername())
+                .fullName(effectiveName)
                 .build();
-
     }
 
     private User saveUser(SignUpRequest request, String email) {
         User user = new User();
         user.setUsername(email);
+        String name = request.getFullName();
+        if (name == null || name.isBlank()) {
+            name = email.split("@")[0];
+        }
+        user.setFullName(name.trim());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(Role.ROLE_USER);
         user.setEnable(true);
