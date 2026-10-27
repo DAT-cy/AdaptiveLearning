@@ -68,6 +68,120 @@
   }
 }
 
+html, body, #app {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+}
+
+html { scrollbar-gutter: stable; }
+
+body {
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ds-primary);
+  outline-offset: 2px;
+}
+
+:root {
+  --bg-page: #F5F7FB;
+  --surface: #FFFFFF;
+  --surface-subtle: #F8FAFC;
+  --surface-footer: #FAFBFD;
+  --surface-hover: #F4F6FA;
+  --surface-muted: #F1F4F9;
+  --ds-border: #E6EAF2;
+  --border-subtle: #EEF1F6;
+  --border-item: #E9EDF3;
+  --border-control: #8391A5;
+  --text: #0F172A;
+  --text-strong: #1E293B;
+  --text-secondary: #334155;
+  --text-muted: #526070;
+  --text-muted-alt: #475569;
+  --text-overline: #64748B;
+  --text-placeholder: #66717F;
+  --ds-primary: #0F766E;
+  --primary-hover: #115E59;
+  --primary-ink: #0F5F58;
+  --primary-soft: #E6F7F3;
+  --primary-soft-2: #D9F5EF;
+  --primary-tint: #F2FBF9;
+  --primary-border: #C9ECE2;
+  --primary-dashed: #2A9D8F;
+  --brand-gradient: linear-gradient(135deg, #0F766E 0%, #0E7490 100%);
+  --blue: #2563EB;
+  --blue-ink: #1D4ED8;
+  --blue-soft: #E0EDFF;
+  --blue-card: #EEF4FF;
+  --blue-card-border: #D6E4FD;
+  --teal: #0F766E;
+  --teal-ink: #0F5F58;
+  --teal-soft: #D9F5EF;
+  --teal-card: #E9F8F4;
+  --teal-card-border: #C9ECE2;
+  --violet: #7C3AED;
+  --violet-ink: #6D28D9;
+  --violet-soft: #EFE9FF;
+  --violet-card: #F3EEFF;
+  --violet-card-border: #E2D6FD;
+  --amber: #D97706;
+  --amber-ink: #B45309;
+  --amber-soft: #FFF1DB;
+  --amber-card: #FFF5E6;
+  --amber-card-border: #F9E0B8;
+  --rose: #E11D48;
+  --rose-ink: #BE123C;
+  --rose-soft: #FFE4EC;
+  --rose-card: #FFF1F4;
+  --rose-card-border: #FBD0DC;
+  --success-dot: #10B981;
+  --danger: #B42318;
+  --danger-hover: #912018;
+  --required: #E11D48;
+  --notify-dot: #F43F5E;
+  --off-track: #8391A5;
+  --off-soft: #EEF1F5;
+  --overlay-scrim: rgba(15,23,42,.45);
+  --overlay-shadow: 0 24px 64px rgba(15,23,42,.18), 0 2px 6px rgba(15,23,42,.06);
+  --popover-shadow: 0 12px 32px rgba(15,23,42,.12);
+  --tooltip-surface: #0F172A;
+  --drawer-handle: #CBD3DD;
+  --shadow-toast: var(--shadow-hover);
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-3xl: 18px;
+  --radius-full: 999px;
+  --shadow-card: 0 1px 2px rgba(15,23,42,.04);
+  --shadow-hover: 0 10px 24px rgba(15,23,42,.07);
+  --shadow-row-hover: 0 4px 14px rgba(15,23,42,.06);
+  --shadow-primary-btn: 0 6px 16px rgba(15,118,110,.28);
+  --font-sans: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 /* Themes */
 
 .theme-green {

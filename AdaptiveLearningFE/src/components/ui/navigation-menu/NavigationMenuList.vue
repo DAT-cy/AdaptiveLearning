@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { NavigationMenuList, useForwardProps } from "radix-vue";
+import { NavigationMenuList, useForwardProps } from "reka-ui";
 import { cn } from "@/lib/utils";
 
 const props = defineProps({

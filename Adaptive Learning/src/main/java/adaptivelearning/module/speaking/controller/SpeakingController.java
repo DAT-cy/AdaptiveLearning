@@ -7,6 +7,7 @@ import adaptivelearning.module.speaking.dto.request.SpeakingEvaluationRequest;
 import adaptivelearning.module.speaking.dto.request.SpeakingSubmissionRequest;
 import adaptivelearning.module.speaking.dto.response.SpeakingEvaluationResponse;
 import adaptivelearning.module.speaking.dto.response.SpeakingSubmissionResponse;
+import adaptivelearning.module.billing.service.EntitlementService;
 import adaptivelearning.module.speaking.service.SpeakingService;
 import adaptivelearning.utils.ClientUtils;
 import adaptivelearning.utils.SecurityUtils;
@@ -33,12 +34,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class SpeakingController {
 
     private final SpeakingService service;
+    private final EntitlementService entitlementService;
+
+    private Long premiumUser() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        entitlementService.requireSkill(userId, "SPEAKING", "Speaking");
+        return userId;
+    }
 
     @PostMapping("/submissions")
     @Operation(summary = "Submit a speaking response (MVP: text transcript)")
     public ResponseEntity<DefaultRes<SpeakingSubmissionResponse>> submit(
             @Valid @RequestBody SpeakingSubmissionRequest request) {
-        SpeakingSubmissionResponse data = service.submit(SecurityUtils.getCurrentUserId(), request);
+        SpeakingSubmissionResponse data = service.submit(premiumUser(), request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(DefaultRes.res(201, "Created", data));
     }
@@ -46,7 +54,7 @@ public class SpeakingController {
     @GetMapping("/submissions/{id}")
     @Operation(summary = "Get a speaking submission by id")
     public ResponseEntity<DefaultRes<SpeakingSubmissionResponse>> getSubmission(@PathVariable Long id) {
-        SpeakingSubmissionResponse data = service.getSubmission(SecurityUtils.getCurrentUserId(), id);
+        SpeakingSubmissionResponse data = service.getSubmission(premiumUser(), id);
         return ResponseEntity.ok(DefaultRes.res(200, "Success", data));
     }
 
@@ -55,7 +63,7 @@ public class SpeakingController {
     public ResponseEntity<DefaultRes<List<SpeakingSubmissionResponse>>> listByAttempt(
             @PathVariable Long attemptId) {
         List<SpeakingSubmissionResponse> data = service.listByAttempt(
-                SecurityUtils.getCurrentUserId(), attemptId);
+                premiumUser(), attemptId);
         return ResponseEntity.ok(DefaultRes.res(200, "Success", data));
     }
 
@@ -64,13 +72,14 @@ public class SpeakingController {
     public ResponseEntity<DefaultRes<SpeakingEvaluationResponse>> evaluate(
             @Valid @RequestBody SpeakingEvaluationRequest request) {
         SpeakingEvaluationResponse data = service.evaluate(
-                SecurityUtils.getCurrentUserId(), request.getSubmissionId(), request.getRubricId());
+                premiumUser(), request.getSubmissionId(), request.getRubricId());
         return ResponseEntity.ok(DefaultRes.res(200, "Success", data));
     }
 
     @GetMapping("/evaluations/{id}")
     @Operation(summary = "Get an evaluation by id")
     public ResponseEntity<DefaultRes<SpeakingEvaluationResponse>> getEvaluation(@PathVariable Long id) {
+        premiumUser();
         SpeakingEvaluationResponse data = service.listEvaluations(id).stream()
                 .findFirst()
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
@@ -81,6 +90,7 @@ public class SpeakingController {
     @Operation(summary = "List evaluations for a submission")
     public ResponseEntity<DefaultRes<List<SpeakingEvaluationResponse>>> listEvaluations(
             @PathVariable Long submissionId) {
+        premiumUser();
         List<SpeakingEvaluationResponse> data = service.listEvaluations(submissionId);
         return ResponseEntity.ok(DefaultRes.res(200, "Success", data));
     }

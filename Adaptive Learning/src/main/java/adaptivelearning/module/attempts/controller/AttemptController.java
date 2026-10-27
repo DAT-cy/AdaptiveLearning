@@ -5,6 +5,7 @@ import adaptivelearning.config.response.DefaultRes;
 import adaptivelearning.config.response.ErrorCode;
 import adaptivelearning.config.response.ResponseMessage;
 import adaptivelearning.config.response.StatusCode;
+import adaptivelearning.module.billing.service.EntitlementService;
 import adaptivelearning.module.adaptive.service.AdaptiveUpdateDispatcher;
 import adaptivelearning.module.attempts.dto.request.SaveAnswerRequest;
 import adaptivelearning.module.attempts.dto.request.StartAttemptRequest;
@@ -41,6 +42,7 @@ public class AttemptController {
 
     private final AttemptService attemptService;
     private final AdaptiveUpdateDispatcher adaptiveUpdateDispatcher;
+    private final EntitlementService entitlementService;
 
     @PostMapping("/start")
     @Operation(summary = "Start an exam attempt for the authenticated user")

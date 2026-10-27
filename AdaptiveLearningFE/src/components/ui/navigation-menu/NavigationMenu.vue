@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { NavigationMenuRoot, useForwardPropsEmits } from "radix-vue";
+import { NavigationMenuRoot, useForwardPropsEmits } from "reka-ui";
 import NavigationMenuViewport from "./NavigationMenuViewport.vue";
 import { cn } from "@/lib/utils";
 

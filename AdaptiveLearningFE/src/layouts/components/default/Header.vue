@@ -65,7 +65,7 @@ const components = [
                   <NavigationMenuLink as-child>
                     <a class="flex flex-col justify-end w-full h-full p-6 no-underline rounded-md outline-none select-none bg-gradient-to-b from-muted/50 to-muted focus:shadow-md"
                       href="/">
-                      <img src="https://www.radix-vue.com/logo.svg" class="w-6 h-6">
+                      <img src="https://www.reka-ui.com/logo.svg" class="w-6 h-6">
                       <div class="mt-4 mb-2 text-lg font-medium">
                         shadcn/ui
                       </div>

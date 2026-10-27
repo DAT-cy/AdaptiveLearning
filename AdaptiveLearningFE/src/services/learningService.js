@@ -5,6 +5,7 @@ const data = (request) => request.then((response) => response.data)
 export const learningService = {
   certificates: () => data(Axios.get('/api/v1/certificates')),
   examTemplates: () => data(Axios.get('/api/v1/exam-templates')),
+  entitlements: () => data(Axios.get('/api/v1/me/entitlements')),
   generateExamFromTemplate: (templateId, payload) =>
     data(Axios.post(`/api/v1/exam-templates/${templateId}/generate`, payload)),
   exams: () => data(Axios.get('/api/v1/exams')),

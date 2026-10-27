@@ -6,6 +6,21 @@ adaptive:
     base-url: ${BKT_URL:http://localhost:8001}
 
 spring:
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS_ENABLE:true}
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/adaptivelearning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
@@ -33,4 +48,7 @@ gemini:
   api-key: AIzaSyACEdChYoUwlA3HSVUyLFPMLgSYyKZCoW0
   model: gemini-2.5-flash
   base-url: https://generativelanguage.googleapis.com/v1beta
+
+google:
+  client-id: ${GOOGLE_CLIENT_ID:}
 

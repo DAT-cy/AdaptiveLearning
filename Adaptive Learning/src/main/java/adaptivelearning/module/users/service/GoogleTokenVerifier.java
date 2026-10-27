@@ -51,6 +51,10 @@ public class GoogleTokenVerifier {
         }
     }
 
+    public String getClientId() {
+        return clientId;
+    }
+
     @Getter
     public static class GoogleProfile {
         private final String subject;

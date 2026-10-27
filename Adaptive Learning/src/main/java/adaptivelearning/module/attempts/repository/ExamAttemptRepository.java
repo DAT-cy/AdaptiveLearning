@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 import java.util.Optional;
 import java.util.Collection;
+import java.time.LocalDateTime;
 
 public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> {
 
@@ -19,4 +20,9 @@ public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> 
     List<ExamAttempt> findByStatusIn(Collection<AttemptStatus> statuses);
 
     List<ExamAttempt> findByUserIdOrderByStartedAtDesc(Long userId);
+
+    boolean existsByUserIdAndExamIdAndSubmittedAtIsNotNull(Long userId, Long examId);
+
+    List<ExamAttempt> findByStartedAtGreaterThanEqualAndStartedAtLessThan(
+            LocalDateTime from, LocalDateTime until);
 }

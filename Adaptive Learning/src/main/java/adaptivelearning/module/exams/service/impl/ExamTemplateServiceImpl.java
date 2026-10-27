@@ -13,6 +13,7 @@ import adaptivelearning.module.exams.repository.ExamQuestionRepository;
 import adaptivelearning.module.exams.repository.ExamRepository;
 import adaptivelearning.module.exams.repository.ExamTemplateRepository;
 import adaptivelearning.module.exams.service.ExamTemplateService;
+import adaptivelearning.module.billing.service.EntitlementService;
 import adaptivelearning.module.questions.entity.Question;
 import adaptivelearning.module.questions.repository.QuestionRepository;
 import adaptivelearning.module.topics.repository.TopicRepository;
@@ -44,6 +45,7 @@ public class ExamTemplateServiceImpl implements ExamTemplateService {
     private final QuestionRepository questions;
     private final TopicRepository topics;
     private final ObjectMapper mapper;
+    private final EntitlementService entitlementService;
 
     @Override
     @Transactional(readOnly = true)
@@ -129,6 +131,7 @@ public class ExamTemplateServiceImpl implements ExamTemplateService {
         var topic = topics.findById(template.getTopicId())
                 .filter(value -> value.isActive() && template.getCertificateId().equals(value.getCertificateId()))
                 .orElseThrow(() -> new IllegalArgumentException("Template topic is inactive or belongs to another certificate."));
+        if (userId != null) entitlementService.requireSkill(userId, topic.getCode(), topic.getName());
         validateTargetRange(topic, template.getTargetScoreMin(), template.getTargetScoreMax());
 
         Set<Long> selectedIds = new HashSet<>();
@@ -214,6 +217,7 @@ public class ExamTemplateServiceImpl implements ExamTemplateService {
                 "scoreUnit", topic.getScoreUnit(),
                 "targetMin", template.getTargetScoreMin(),
                 "targetMax", template.getTargetScoreMax()));
+        if (userId != null) entitlementService.consumeExamQuota(userId);
         Exam exam = exams.save(Exam.builder()
                 .certificateId(template.getCertificateId())
                 .ownerUserId(userId)

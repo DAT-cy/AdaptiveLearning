@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { ToastClose } from "radix-vue";
+import { ToastClose } from "reka-ui";
 import { X } from "lucide-vue-next";
 import { cn } from "@/lib/utils";
 

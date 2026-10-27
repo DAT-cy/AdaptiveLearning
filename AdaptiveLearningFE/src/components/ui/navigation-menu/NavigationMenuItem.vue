@@ -1,5 +1,5 @@
 <script setup>
-import { NavigationMenuItem } from "radix-vue";
+import { NavigationMenuItem } from "reka-ui";
 
 const props = defineProps({
   value: { type: String, required: false },

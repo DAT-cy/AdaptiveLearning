@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { SplitterGroup, useForwardPropsEmits } from "radix-vue";
+import { SplitterGroup, useForwardPropsEmits } from "reka-ui";
 import { cn } from "@/lib/utils";
 
 const props = defineProps({

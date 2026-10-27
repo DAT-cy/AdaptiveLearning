@@ -27,6 +27,16 @@ export const useUserStore = defineStore('user', () => {
     state.role = profile.role || ''
   }
 
+  async function loginWithGoogle(idToken) {
+    const response = await userService.loginWithGoogle({ idToken })
+    const profile = response?.data
+    if (!profile?.token) throw new Error('Backend không trả về JWT token.')
+    setToken(profile.token)
+    state.accessToken = profile.token
+    state.username = profile.username || ''
+    state.role = profile.role || ''
+  }
+
   async function getInfo() {
     const response = await userService.getInfo()
     const profile = response?.data
@@ -46,6 +56,6 @@ export const useUserStore = defineStore('user', () => {
 
   return {
     state, getterAccessToken, getterUserName, getterAvatar, getterPermissions,
-    login, getInfo, logout, resetToken,
+    login, loginWithGoogle, getInfo, logout, resetToken,
   }
 })

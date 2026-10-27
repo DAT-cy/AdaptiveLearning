@@ -1,6 +1,7 @@
 package adaptivelearning.module.rag.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.Builder;
 import lombok.Value;
 
@@ -11,6 +12,7 @@ public class KnowledgeDocumentDetailResponse {
     String title;
     String fileName;
     String content;
+    List<String> chunks;
     Long certificateId;
     Long topicId;
     int chunkCount;

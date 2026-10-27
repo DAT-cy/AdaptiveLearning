@@ -4,7 +4,11 @@ const data = (request) =>
   request.then((response) => response.data?.data ?? response.data)
 
 export const adminService = {
+  analytics: (filters = {}) => data(Axios.get('/api/v1/admin/users/analytics', filters)),
   users: () => data(Axios.get('/api/v1/admin/users')),
+  userAttempts: (userId) => data(Axios.get(`/api/v1/admin/users/${userId}/attempts`)),
+  userProgress: (userId, certificateId) => data(Axios.get(`/api/v1/admin/users/${userId}/progress`, { certificateId })),
+  attemptResult: (attemptId) => data(Axios.get(`/api/v1/attempts/${attemptId}/result`)),
   createUser: (payload) => data(Axios.post('/api/v1/admin/users', payload)),
   updateUserRole: (userId, role) =>
     data(Axios.put(`/api/v1/admin/users/${userId}/role`, { role })),
@@ -23,11 +27,20 @@ export const adminService = {
   knowledgeDocuments: () => data(Axios.get('/api/v1/admin/knowledge-base')),
   knowledgeDocument: (id) =>
     data(Axios.get(`/api/v1/admin/knowledge-base/${id}`)),
+  updateKnowledgeDocument: (id, payload) =>
+    data(Axios.put(`/api/v1/admin/knowledge-base/${id}`, payload)),
   setKnowledgeDocumentActive: (id, active) =>
     data(Axios.patch(`/api/v1/admin/knowledge-base/${id}/active`, { active })),
   uploadKnowledgeDocument: (payload) =>
     data(
       Axios.post('/api/v1/admin/knowledge-base', payload, { timeout: 30000 })
+    ),
+  uploadKnowledgePdf: (formData) =>
+    data(
+      Axios.post('/api/v1/admin/knowledge-base/pdf', formData, {
+        timeout: 120000,
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
     ),
   deleteKnowledgeDocument: (id) =>
     data(Axios.delete(`/api/v1/admin/knowledge-base/${id}`)),

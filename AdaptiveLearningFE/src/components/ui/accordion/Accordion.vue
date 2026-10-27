@@ -1,5 +1,5 @@
 <script setup>
-import { AccordionRoot, useForwardPropsEmits } from "radix-vue";
+import { AccordionRoot, useForwardPropsEmits } from "reka-ui";
 
 const props = defineProps({
   collapsible: { type: Boolean, required: false },

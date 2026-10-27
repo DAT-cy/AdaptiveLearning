@@ -1,0 +1,11 @@
+version: 1
+id: b3632a6b-201d-4da5-bfe2-5a3f5f2ea114
+name: paypal-billing
+slug: paypal-billing
+protocol: http
+port: 4500
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

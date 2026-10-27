@@ -1,0 +1,11 @@
+version: 1
+id: 3c02e207-9bd0-4d7f-9e37-a949ea5c2168
+name: stripe-billing
+slug: stripe-billing
+protocol: http
+port: 4500
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

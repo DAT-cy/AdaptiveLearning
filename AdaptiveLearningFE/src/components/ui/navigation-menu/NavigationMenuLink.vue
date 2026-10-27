@@ -1,5 +1,5 @@
 <script setup>
-import { NavigationMenuLink, useForwardPropsEmits } from "radix-vue";
+import { NavigationMenuLink, useForwardPropsEmits } from "reka-ui";
 
 const props = defineProps({
   active: { type: Boolean, required: false },

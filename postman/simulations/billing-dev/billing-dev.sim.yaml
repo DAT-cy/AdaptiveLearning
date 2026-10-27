@@ -1,0 +1,14 @@
+simulation: billing-dev
+routing: path
+mocks:
+  - name: Stripe Checkout
+    routeKey: stripe
+    origin:
+      - api.stripe.com
+    path: postman/mocks/stripe-billing
+  - name: PayPal Orders and Webhooks
+    routeKey: paypal
+    origin:
+      - api-m.sandbox.paypal.com
+      - api-m.paypal.com
+    path: postman/mocks/paypal-billing

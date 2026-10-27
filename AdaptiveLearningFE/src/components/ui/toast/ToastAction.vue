@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { ToastAction } from "radix-vue";
+import { ToastAction } from "reka-ui";
 import { cn } from "@/lib/utils";
 
 const props = defineProps({

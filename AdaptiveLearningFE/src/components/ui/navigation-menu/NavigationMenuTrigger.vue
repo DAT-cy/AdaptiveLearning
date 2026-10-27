@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { NavigationMenuTrigger, useForwardProps } from "radix-vue";
+import { NavigationMenuTrigger, useForwardProps } from "reka-ui";
 import { ChevronDown } from "lucide-vue-next";
 import { navigationMenuTriggerStyle } from ".";
 import { cn } from "@/lib/utils";

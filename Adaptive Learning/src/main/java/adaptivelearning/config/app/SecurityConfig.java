@@ -39,6 +39,8 @@ public class SecurityConfig {
             "/api-docs/**",
             "/v3/api-docs/**",
             "/api/v1/public/**",
+            "/api/webhooks/**",
+            "/api/v1/payments/paypal/return",
     };
 
     @Bean
@@ -86,4 +88,4 @@ public class SecurityConfig {
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
-} 
+}

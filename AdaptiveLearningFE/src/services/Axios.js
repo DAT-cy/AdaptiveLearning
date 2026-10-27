@@ -4,10 +4,9 @@ import { isArray } from '@/utils/validate'
 import { isLoading } from '@/hooks/isLoading'
 import router from "@/router";
 import { settings } from '@/config/settings'
-import { useToast } from '@/components/ui/toast/use-toast'
+import { toast } from '@/components/ui/overlay'
 import { useUserStore } from '@/stores/user'
 
-const { toast } = useToast()
 const { baseURL, contentType, apiLoading, debounce, invalidCode, loginInterception, noPermissionCode, requestTimeout, successCode } = settings
 let axiosInstance = null;
 
@@ -25,11 +24,7 @@ const statusMessages = {
 }
 
 function showError(description) {
-  toast({
-    title: 'Đã xảy ra lỗi',
-    description,
-    variant: 'destructive',
-  })
+  toast.error('Đã xảy ra lỗi', { description })
 }
 
 function getStatusMessage(code) {
@@ -88,6 +83,10 @@ function getInstance() {
       pendingRequests--; // Giảm biến đếm khi nhận được phản hồi từ API
       isLoading.value = pendingRequests > 0
       const { data, config } = response
+      if (['PREMIUM_REQUIRED', 'FREE_LIMIT_REACHED'].includes(data?.responseCode)) {
+        router.push({ path: '/pricing', query: { reason: data.responseCode } })
+        return Promise.reject(new Error(data.responseCode))
+      }
       // PATCH: ACCEPT EITHER .code OR .statusCode from backend
       const code = data.code !== undefined ? data.code : data.statusCode
       const codeVerificationArray = isArray(successCode) ? [...successCode] : [...[successCode]]
@@ -110,7 +109,12 @@ function getInstance() {
       const { response, message } = error
       if (response && response.data) {
         const { status } = response
-        handleCode(status)
+        const responseCode = response.data?.responseCode
+        if (['PREMIUM_REQUIRED', 'FREE_LIMIT_REACHED'].includes(responseCode)) {
+          router.push({ path: '/pricing', query: { reason: responseCode } })
+        } else {
+          handleCode(status)
+        }
         return Promise.reject(error)
       } else {
         const timedOut = error.code === 'ECONNABORTED' || message?.toLowerCase().includes('timeout')

@@ -2,6 +2,7 @@ package adaptivelearning.module.attempts.service.impl;
 
 import adaptivelearning.config.response.CommonException;
 import adaptivelearning.config.response.ErrorCode;
+import adaptivelearning.module.billing.service.EntitlementService;
 import adaptivelearning.module.attempts.dto.request.SaveAnswerRequest;
 import adaptivelearning.module.attempts.dto.request.SubmitAttemptRequest;
 import adaptivelearning.module.attempts.dto.request.ViolationRequest;
@@ -52,6 +53,7 @@ public class AttemptServiceImpl implements AttemptService {
     private final ExamQuestionRepository examQuestionRepository;
     private final QuestionRepository questionRepository;
     private final ObjectMapper objectMapper;
+    private final EntitlementService entitlementService;
 
     @Override
     public AttemptResponse startAttempt(Long userId, Long examId) {
@@ -63,8 +65,11 @@ public class AttemptServiceImpl implements AttemptService {
         if (exam.getOwnerUserId() != null && !exam.getOwnerUserId().equals(userId)) {
             throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
         }
-        if (exam.getOwnerUserId() != null && !exam.getOwnerUserId().equals(userId)) {
-            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        entitlementService.requireTopicAccess(userId, exam.getTopicId());
+        if (Objects.equals(exam.getOwnerUserId(), userId)
+                && !entitlementService.hasPremiumAccess(userId)
+                && attemptRepository.existsByUserIdAndExamIdAndSubmittedAtIsNotNull(userId, examId)) {
+            throw new CommonException(ErrorCode.FREE_LIMIT_REACHED);
         }
         attemptRepository.findByUserIdAndExamId(userId, examId).ifPresent(existing -> {
             if (existing.getStatus() == AttemptStatus.IN_PROGRESS) {

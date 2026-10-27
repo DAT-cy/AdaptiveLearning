@@ -7,7 +7,11 @@
         <result property="username" column="username"/>
         <result property="password" column="password"/>
         <result property="enable" column="enable"/>
+        <result property="emailVerified" column="email_verified"/>
         <result property="isDeleted" column="is_deleted"/>
+        <result property="plan" column="plan"/>
+        <result property="premiumActivatedAt" column="premium_activated_at"/>
+        <result property="freeExamsUsed" column="free_exams_used"/>
         <result property="role" column="role"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
@@ -19,20 +23,33 @@
             username,
             password,
             enable,
+            email_verified,
             is_deleted,
+            plan,
+            premium_activated_at,
+            free_exams_used,
             role,
             created_at,
             updated_at
         FROM tbl_users
-        WHERE username = #{username}
+        WHERE LOWER(username) = LOWER(#{username})
         AND is_deleted = false
     </select>
 
     <select id="findAllForAdmin" resultMap="userResultMap">
-        SELECT user_id, username, enable, is_deleted, role, created_at, updated_at
+        SELECT user_id, username, enable, email_verified, is_deleted, role, plan,
+               premium_activated_at, free_exams_used, created_at, updated_at
         FROM tbl_users
         WHERE is_deleted = false
         ORDER BY user_id DESC
+    </select>
+
+    <select id="findById" resultMap="userResultMap">
+        SELECT user_id, username, password, enable, email_verified, is_deleted, role, plan,
+               premium_activated_at, free_exams_used, created_at, updated_at
+        FROM tbl_users
+        WHERE user_id = #{userId}
+          AND is_deleted = false
     </select>
 
     <select id="countAdminUsers" resultType="int">
@@ -45,7 +62,11 @@
         INSERT INTO tbl_users (username,
                                password,
                                enable,
+                               email_verified,
                                is_deleted,
+                               plan,
+                               premium_activated_at,
+                               free_exams_used,
                                role,
                                created_at,
                                created_id,
@@ -54,7 +75,11 @@
         VALUES (#{username},
                 #{password},
                #{enable},
+                #{emailVerified},
                 #{isDeleted},
+                #{plan},
+                #{premiumActivatedAt},
+                #{freeExamsUsed},
                 #{role},
                 NOW(),
                 #{username},
@@ -74,6 +99,53 @@
         SET enable = #{enabled}, updated_at = NOW()
         WHERE user_id = #{userId}
           AND is_deleted = false
+    </update>
+
+    <update id="updateEmailVerified">
+        UPDATE tbl_users
+        SET email_verified = #{verified}, updated_at = NOW()
+        WHERE LOWER(username) = LOWER(#{username})
+          AND is_deleted = false
+    </update>
+
+    <update id="updatePlan">
+        UPDATE tbl_users
+        SET plan = #{plan}, premium_activated_at = #{premiumActivatedAt}, updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND is_deleted = false
+    </update>
+
+    <update id="downgradePremiumAndSyncQuota">
+        UPDATE tbl_users u
+        SET u.plan = 'FREE',
+            u.premium_activated_at = NULL,
+            u.free_exams_used = GREATEST(u.free_exams_used, LEAST(#{limit}, (
+                SELECT COUNT(*) FROM exams e WHERE e.owner_user_id = u.user_id
+            ))),
+            u.updated_at = NOW()
+        WHERE u.user_id = #{userId}
+          AND u.is_deleted = false
+    </update>
+
+    <update id="consumeFreeExamQuota">
+        UPDATE tbl_users
+        SET free_exams_used = free_exams_used + 1, updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND plan = 'FREE'
+          AND enable = true
+          AND email_verified = true
+          AND is_deleted = false
+          AND free_exams_used &lt; #{limit}
+    </update>
+
+    <update id="initializeLegacyFreeExamUsage">
+        UPDATE tbl_users u
+        SET u.free_exams_used = LEAST(#{limit}, (
+            SELECT COUNT(*) FROM exams e WHERE e.owner_user_id = u.user_id
+        ))
+        WHERE u.plan = 'FREE'
+          AND u.free_exams_used = 0
+          AND EXISTS (SELECT 1 FROM exams e WHERE e.owner_user_id = u.user_id)
     </update>
 
 </mapper>

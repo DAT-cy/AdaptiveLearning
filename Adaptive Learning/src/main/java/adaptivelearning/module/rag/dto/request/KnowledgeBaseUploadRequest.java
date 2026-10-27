@@ -18,7 +18,6 @@ public class KnowledgeBaseUploadRequest {
     @NotNull
     private Long certificateId;
 
-    @NotNull
     private Long topicId;
 
     @NotBlank

@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { SplitterResizeHandle, useForwardPropsEmits } from "radix-vue";
+import { SplitterResizeHandle, useForwardPropsEmits } from "reka-ui";
 import { GripVertical } from "lucide-vue-next";
 import { cn } from "@/lib/utils";
 

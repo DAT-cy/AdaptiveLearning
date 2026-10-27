@@ -1,7 +1,8 @@
 <script setup>
 import { useRoute } from "vue-router"
 import { KeepAlive, computed } from "vue"
-import Toaster from '@/components/ui/toast/Toaster.vue'
+import { ConfirmProvider, Toaster } from '@/components/ui/overlay'
+import { TooltipProvider } from 'reka-ui'
 import { settings } from "./config/settings";
 import Loading from '@/components/Loading.vue'
 
@@ -13,11 +14,15 @@ const layout = computed(
 </script>
 
 <template>
-  <component :is="layout">
-    <KeepAlive :max="keepAliveMaxNum">
-      <router-view />
-    </KeepAlive>
-  </component>
-  <Toaster />
-  <Loading />
+  <ConfirmProvider>
+    <TooltipProvider :delay-duration="400" :skip-delay-duration="300">
+      <component :is="layout">
+        <KeepAlive :max="keepAliveMaxNum">
+          <router-view />
+        </KeepAlive>
+      </component>
+      <Toaster />
+      <Loading />
+    </TooltipProvider>
+  </ConfirmProvider>
 </template>

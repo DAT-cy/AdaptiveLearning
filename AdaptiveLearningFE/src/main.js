@@ -1,4 +1,5 @@
 import '@/assets/index.css'
+import '@/components/ui/overlay/overlays.css'
 import '@/config/permission' // permission control
 
 import App from './App.vue'

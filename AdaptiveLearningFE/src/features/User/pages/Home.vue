@@ -1,13 +1,14 @@
 <script setup>
 import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
-  BarChart3, Bell, BookMarked, BookOpen, CheckCircle2, ChevronDown, CircleHelp,
-  GraduationCap, LayoutDashboard, Menu, Search, Settings, Sparkles, Target, X,
+  BarChart3, Bell, BookMarked, BookOpen, CheckCircle2, ChevronDown, CircleHelp, Crown,
+  GraduationCap, LayoutDashboard, LockKeyhole, Menu, Search, Settings, Sparkles, Target, X,
 } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import { learningService } from '@/services/learningService'
 import { homeContextKey } from '../composables/homeContext'
+import { useConfirm } from '@/components/ui/overlay'
 import DashboardView from '../components/views/DashboardView.vue'
 import PlansView from '../components/views/PlansView.vue'
 import CoursesView from '../components/views/CoursesView.vue'
@@ -21,9 +22,14 @@ import ExamResultView from '../components/views/ExamResultView.vue'
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const { confirm } = useConfirm()
 const activeView = ref(route.meta.view || 'dashboard')
 const searchQuery = ref('')
 const exams = ref([])
+const examTemplates = ref([])
+const entitlements = ref(null)
+const creatingExamTemplateId = ref(null)
+const practiceExamNotice = ref('')
 const history = ref([])
 const recommendations = ref([])
 const certificates = ref([])
@@ -78,6 +84,7 @@ const navigation = [
 ]
 
 const userName = computed(() => userStore.state.username || 'Học viên')
+const isPremium = computed(() => entitlements.value?.plan === 'PREMIUM' || userStore.state.role === 'ROLE_ADMIN')
 const greetingName = computed(() => userName.value.split('@')[0].split(/[._-]/)[0])
 const initials = computed(() => userName.value.slice(0, 1).toUpperCase())
 const publishedExams = computed(() => exams.value.filter((exam) => exam.status === 'PUBLISHED'))
@@ -129,7 +136,8 @@ const masterySkills = computed(() => {
 const formattedTimeLeft = computed(() => `${Math.floor(secondsLeft.value / 60).toString().padStart(2, '0')}:${(secondsLeft.value % 60).toString().padStart(2, '0')}`)
 
 provide(homeContextKey, reactive({
-  activeView, searchQuery, exams, history, recommendations, certificates, plans,
+  activeView, searchQuery, exams, examTemplates, entitlements, creatingExamTemplateId, practiceExamNotice, isPremium,
+  history, recommendations, certificates, plans,
   progress, loading, pageError, selectedCertificateId, showPlanForm, creatingPlan,
   planForm, attempt, attemptQuestions, answers, result, secondsLeft, submitting,
   saveState, conversations, currentConversation, messages, tutorPrompt, askingTutor,
@@ -138,7 +146,7 @@ provide(homeContextKey, reactive({
   averageScorePercent, doneCount, completedPlanRatio, greeting, selectedCertificate,
   masterySkills, formattedTimeLeft,
   showView, loadProgress, formatDate, recommendationTitle, certificateProgress,
-  markRecommendationStarted, createPlan, selectConversation, askTutor, startExam,
+  markRecommendationStarted, createPlan, selectConversation, askTutor, startExam, createPracticeExam,
   parseOptions, saveAnswer, leaveAttempt, submitExam, logout, localizeStatus,
 }))
 
@@ -168,6 +176,11 @@ function localizeStatus(status) {
 }
 
 function showView(view) {
+  if (view === 'tutor' && !isPremium.value) {
+    mobileMenuOpen.value = false
+    router.push('/pricing')
+    return
+  }
   mobileMenuOpen.value = false
   pageError.value = ''
   if (viewPaths[view]) {
@@ -184,9 +197,9 @@ async function loadDashboard() {
   pageError.value = ''
   const results = await Promise.allSettled([
     learningService.exams(), learningService.history(), learningService.recommendations(),
-    learningService.certificates(), learningService.plans(),
+    learningService.certificates(), learningService.plans(), learningService.examTemplates(), learningService.entitlements(),
   ])
-  const [examResult, historyResult, recommendationResult, certificateResult, plansResult] = results
+  const [examResult, historyResult, recommendationResult, certificateResult, plansResult, templateResult, entitlementResult] = results
   if (examResult.status === 'fulfilled') exams.value = asList(examResult.value)
   if (historyResult.status === 'fulfilled') history.value = asList(historyResult.value)
   if (recommendationResult.status === 'fulfilled') recommendations.value = asList(recommendationResult.value)
@@ -195,11 +208,36 @@ async function loadDashboard() {
     if (!selectedCertificateId.value && certificates.value.length) selectedCertificateId.value = String(certificates.value[0].certificateId)
   }
   if (plansResult.status === 'fulfilled') plans.value = asList(plansResult.value)
+  if (templateResult.status === 'fulfilled') examTemplates.value = asList(templateResult.value)
+  if (entitlementResult.status === 'fulfilled') entitlements.value = entitlementResult.value
   if (results.every((item) => item.status === 'rejected')) {
     pageError.value = 'Không kết nối được backend. Hãy kiểm tra backend và cơ sở dữ liệu rồi tải lại.'
   }
   loading.value = false
   if (selectedCertificateId.value) loadProgress()
+}
+
+async function createPracticeExam(template) {
+  if (creatingExamTemplateId.value) return
+  creatingExamTemplateId.value = template.templateId
+  practiceExamNotice.value = ''
+  pageError.value = ''
+  try {
+    await learningService.generateExamFromTemplate(template.templateId, {
+      sectionDifficulties: (template.sections || []).map(() => 'MEDIUM'),
+    })
+    practiceExamNotice.value = 'Đã tạo đề luyện tập.'
+    await loadDashboard()
+  } catch (error) {
+    const responseCode = error?.response?.data?.responseCode
+    if (responseCode === 'FREE_LIMIT_REACHED' || responseCode === 'PREMIUM_REQUIRED') {
+      router.push('/pricing')
+    } else {
+      pageError.value = error?.response?.data?.responseMessage || 'Không thể tạo đề luyện tập. Hãy thử lại.'
+    }
+  } finally {
+    creatingExamTemplateId.value = null
+  }
 }
 
 async function loadProgress() {
@@ -383,8 +421,18 @@ async function submitExam() {
   } finally { submitting.value = false }
 }
 
-function leaveAttempt() {
-  if (attempt.value && !window.confirm('Rời bài thi? Lượt thi hiện tại vẫn được lưu.')) return
+async function leaveAttempt() {
+  if (submitting.value) return
+  if (attempt.value) {
+    const shouldLeave = await confirm({
+      title: 'Rời bài thi?',
+      description: 'Lượt thi hiện tại vẫn được lưu.',
+      confirmText: 'Rời bài thi',
+      cancelText: 'Tiếp tục làm bài',
+      variant: 'default',
+    })
+    if (!shouldLeave) return
+  }
   clearInterval(clock)
   attempt.value = null
   activeView.value = 'tests'
@@ -407,7 +455,7 @@ onUnmounted(() => {
     <aside class="sidebar" :class="{ 'sidebar-open': mobileMenuOpen }">
       <a class="sidebar-brand" href="/home"><span class="brand-symbol"><GraduationCap :size="28" /></span><span>Adaptive Learning</span></a>
       <nav class="side-nav" aria-label="Điều hướng chính">
-        <button v-for="item in navigation" :key="item.id" :class="['side-link', { selected: activeView === item.id || (item.id === 'tests' && ['taking', 'result'].includes(activeView)) }]" @click="showView(item.id)"><component :is="item.icon" :size="19" :stroke-width="1.9" /><span>{{ item.label }}</span></button>
+        <button v-for="item in navigation" :key="item.id" :class="['side-link', { selected: activeView === item.id || (item.id === 'tests' && ['taking', 'result'].includes(activeView)), 'side-link-locked': item.id === 'tutor' && !isPremium }]" :aria-label="item.id === 'tutor' && !isPremium ? 'Trợ lý AI, yêu cầu Premium' : item.label" @click="showView(item.id)"><component :is="item.icon" :size="19" :stroke-width="1.9" /><span>{{ item.label }}</span><LockKeyhole v-if="item.id === 'tutor' && !isPremium" :size="14" /></button>
       </nav>
       <div class="sidebar-quote"><span class="quote-icon"><Target :size="22" /></span><strong>Học hôm nay,<br>kiến tạo tương lai</strong><p>“Mỗi bước nhỏ đều là một tiến bộ lớn.”</p><div class="quote-mountain"><span></span><i></i><b>⚑</b></div></div>
       <div class="sidebar-bottom"><span class="connection-dot"></span><span>Adaptive Learning</span><span class="version">Học tập cá nhân hóa</span></div>
@@ -416,6 +464,7 @@ onUnmounted(() => {
     <section class="workspace">
       <header class="topbar">
         <button class="mobile-menu-button" :aria-label="mobileMenuOpen ? 'Đóng menu' : 'Mở menu'" @click="mobileMenuOpen = !mobileMenuOpen"><X v-if="mobileMenuOpen" :size="20" /><Menu v-else :size="20" /></button>
+        <RouterLink v-if="!isPremium" to="/pricing" class="topbar-upgrade"><Crown :size="15" />Nâng cấp</RouterLink>
         <label class="global-search"><Search :size="18" /><input v-model="searchQuery" type="search" placeholder="Tìm kiếm khóa học, bài học, kỹ năng..." aria-label="Tìm kiếm"></label>
         <button class="notification-button" title="Xem gợi ý học tập" aria-label="Xem gợi ý học tập" @click="showView('dashboard'); $nextTick(() => document.getElementById('recommendations')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))"><Bell :size="19" /><span v-if="activeRecommendations.length" class="notification-dot"></span></button>
         <button class="profile-button" @click="showView('settings')"><span class="avatar">{{ initials }}</span><span class="profile-copy"><strong>{{ userName }}</strong><small>{{ userStore.state.role === 'ROLE_ADMIN' ? 'Quản trị viên' : 'Học viên' }}</small></span><ChevronDown :size="16" /></button>
@@ -487,4 +536,7 @@ onUnmounted(() => {
 @media (max-width: 1200px) { .sidebar { width: 220px; padding-right: 17px; padding-left: 17px; }.workspace { width: calc(100% - 220px); margin-left: 220px; }.dashboard-grid { grid-template-columns: minmax(0,1.5fr) minmax(270px,.9fr); gap: 13px; }.welcome-art { width: 30%; opacity: .86; }.welcome-copy { width: 74%; }.continue-card { gap: 11px; }.course-art { width: 148px; }.recommendation-grid { grid-template-columns: 1fr; }.recommendation-card { align-items: center; }.recommendation-copy p { min-height: 0; }.sidebar-quote { min-height: 190px; } }
 @media (max-width: 900px) { .sidebar { z-index: 20; width: 245px; transform: translateX(-100%); transition: transform .2s ease; }.sidebar.sidebar-open { transform: translateX(0); }.workspace { width: 100%; margin-left: 0; }.mobile-menu-button { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border: 1px solid #e3eaf4; border-radius: 7px; background: white; color: #5c7196; cursor: pointer; }.topbar { height: 68px; gap: 12px; }.global-search { width: min(540px, 62%); }.dashboard-grid { grid-template-columns: minmax(0,1.55fr) minmax(260px,.85fr); }.mobile-scrim { position: fixed; z-index: 15; inset: 0; background: rgba(18,35,72,.24); } }
 @media (max-width: 680px) { .topbar { padding: 0 12px; gap: 9px; }.global-search { width: auto; height: 37px; flex: 1; padding: 0 9px; }.global-search input { font-size: 10px; }.notification-button { width: 30px; margin-left: 0; }.profile-button { gap: 5px; }.profile-copy,.profile-button > svg { display: none; }.avatar { width: 33px; height: 33px; }.content-area { padding: 13px 12px 28px; }.dashboard-grid { grid-template-columns: minmax(0,1fr); gap: 13px; }.main-column,.right-column { gap: 13px; }.welcome-banner { min-height: 238px; padding: 20px 16px; }.welcome-copy { width: 100%; }.welcome-copy h1 { max-width: 25ch; font-size: 23px; }.welcome-copy > p:not(.welcome-kicker) { max-width: 46ch; font-size: 11px; }.welcome-art { right: -15px; bottom: -20px; top: auto; width: 170px; height: 135px; opacity: .32; }.quick-stats { position: relative; z-index: 3; gap: 5px; margin-top: 17px; }.quick-stat { min-width: 0; gap: 6px; padding: 7px; }.quick-icon { width: 27px; height: 27px; }.quick-stat strong { font-size: 14px; }.quick-stat small { max-width: 68px; font-size: 8px; white-space: normal; }.section-block { padding: 14px 12px; }.section-heading h2,.panel-heading h2 { font-size: 13px; }.continue-card { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 10px; padding: 8px; }.course-art { width: 90px; height: 98px; grid-row: span 2; }.course-art > svg { width: 29px; height: 29px; }.course-art small { max-width: 75px; font-size: 7px; }.course-label { top: 7px; left: 7px; font-size: 6px; }.continue-body { grid-column: 2; }.continue-title { align-items: flex-start; flex-direction: column; gap: 4px; }.continue-title h3 { max-width: 100%; font-size: 11px; }.course-tags { margin: 7px 0 8px; font-size: 8px; }.continue-meta { gap: 8px; margin-top: 8px; font-size: 8px; }.continue-button { grid-column: 2; justify-self: start; min-height: 31px; font-size: 9px; }.skill-overview { grid-template-columns: 105px minmax(0,1fr); gap: 8px; padding: 8px; }.mastery-ring { width: 64px; height: 64px; }.mastery-ring::before { width: 50px; height: 50px; }.skill-list { gap: 9px; }.skill-label strong { font-size: 9px; }.skill-label small { font-size: 8px; }.skill-bullet { width: 21px; height: 21px; }.skill-bar { margin-left: 28px; }.empty-recommendation { align-items: flex-start; flex-wrap: wrap; font-size: 10px; }.empty-recommendation > span { min-width: calc(100% - 34px); }.recommendation-grid { grid-template-columns: 1fr; }.assistant-panel,.weekly-panel,.goal-panel { padding: 14px; }.metric-cell { min-height: 82px; }.view-heading { align-items: flex-start; flex-direction: column; gap: 12px; }.view-heading h1 { font-size: 23px; }.search-field { width: 100%; }.plan-form { padding: 14px; }.form-row { grid-template-columns: 1fr; }.certificate-grid { grid-template-columns: 1fr; }.certificate-card { min-height: 190px; }.test-row { align-items: flex-start; gap: 9px; }.test-icon { width: 34px; height: 34px; }.test-info h2 { font-size: 11px; }.test-info p { font-size: 9px; }.test-meta { gap: 7px; font-size: 8px; }.test-row .primary-button { align-self: center; min-height: 31px; gap: 4px; padding: 0 8px; font-size: 9px; }.progress-summary { gap: 7px; }.progress-summary > div { padding: 10px; }.progress-summary strong { font-size: 17px; }.progress-summary small { font-size: 8px; }.select-field { grid-template-columns: auto minmax(120px,1fr); width: 100%; }.tutor-workspace { grid-template-columns: minmax(0,1fr); }.conversation-list { display: flex; max-height: 110px; gap: 5px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e8edf6; }.conversation-list-heading { min-width: 118px; padding: 4px; }.conversation-item { width: auto; min-width: 125px; }.chat-panel { min-height: 370px; padding: 11px; }.chat-empty { padding: 12px; }.account-panel { flex-wrap: wrap; }.account-panel .secondary-button { margin-left: auto; }.plan-row { gap: 9px; }.plan-row-icon { width: 34px; height: 34px; }.plan-row-title { align-items: flex-start; flex-direction: column; gap: 5px; }.plan-row-content > p { line-height: 1.6; }.plan-row-content .plan-progress small { min-width: 76px; }.empty-inline { align-items: flex-start; flex-wrap: wrap; }.empty-inline > div { flex-basis: calc(100% - 60px); }.empty-inline > .outline-button { margin-left: 50px; }.result-panel { min-height: 340px; }.question-panel { padding: 12px; } }
+.side-link-locked { color: #6f7890; }.side-link-locked > svg:last-child { margin-left: auto; color: #8b6b1b; }
+.topbar-upgrade { display: inline-flex; min-height: 40px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid #c9ece2; border-radius: 7px; color: #0f5f58; background: #e6f7f3; font-size: 11px; font-weight: 650; text-decoration: none; }.topbar-upgrade:hover { background: #d9f5ef; }
+.free-quota-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid #e0e7ef; border-radius: 8px; background: #fff; }.free-quota-banner > div { display: grid; width: min(100%, 480px); gap: 4px; }.free-quota-banner strong { color: #334155; font-size: 12px; }.free-quota-banner p { margin: 0; color: #526070; font-size: 11px; }.free-quota-track { height: 5px; margin-top: 4px; overflow: hidden; background: #eef1f6; }.free-quota-track i { display: block; height: 100%; background: #0f766e; }.quota-remaining { color: #475569; font-size: 11px; font-weight: 600; white-space: nowrap; }.quota-upgrade { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 12px; border-radius: 6px; color: #fff; background: #0f766e; font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap; }.quota-upgrade:hover { background: #115e59; }.practice-exam-notice { margin: 0; padding: 10px 0; border-bottom: 1px solid #e6edf6; color: #0f5f58; font-size: 12px; }
 </style>

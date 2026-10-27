@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { TabsContent } from "radix-vue";
+import { TabsContent } from "reka-ui";
 import { cn } from "@/lib/utils";
 
 const props = defineProps({

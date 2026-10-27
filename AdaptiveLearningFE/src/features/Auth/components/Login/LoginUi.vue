@@ -1,13 +1,17 @@
 <script setup>
-import { ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { ArrowRight, BarChart3, BookOpen, Brain, Check, Eye, EyeOff, GraduationCap, LockKeyhole, Target, UserRound } from 'lucide-vue-next'
 import { FormControl, FormField, FormItem, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { userService } from '@/services/userService'
 
 const props = defineProps({ schema: { type: null, required: true } })
-const emit = defineEmits(['submit'])
+const emit = defineEmits(['submit', 'google-sign-in'])
 const showPassword = ref(false)
+const googleButton = ref(null)
+const googleClientId = ref('')
+const googleStatus = ref('')
 const remember = ref(localStorage.getItem('adaptive-learning-remember') === 'true')
 const { handleSubmit } = useForm({
   validationSchema: props.schema,
@@ -19,6 +23,56 @@ const onSubmit = handleSubmit((values) => {
   if (remember.value) localStorage.setItem('adaptive-learning-username', values.username)
   else localStorage.removeItem('adaptive-learning-username')
   emit('submit', values)
+})
+
+function renderGoogleButton() {
+  if (!window.google?.accounts?.id || !googleButton.value) return
+  window.google.accounts.id.initialize({
+    client_id: googleClientId.value,
+    callback: ({ credential }) => {
+      if (credential) emit('google-sign-in', credential)
+    },
+  })
+  window.google.accounts.id.renderButton(googleButton.value, {
+    type: 'standard',
+    theme: 'outline',
+    size: 'large',
+    text: 'continue_with',
+    shape: 'rectangular',
+    width: Math.min(googleButton.value.clientWidth, 400),
+    logo_alignment: 'left',
+  })
+}
+
+onMounted(async () => {
+  try {
+    const config = await userService.googleConfig()
+    googleClientId.value = String(config?.clientId || '').trim()
+  } catch {
+    googleClientId.value = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() || ''
+  }
+
+  if (!googleClientId.value) {
+    googleStatus.value = 'Cần cấu hình Google OAuth Client ID để bật đăng nhập.'
+    return
+  }
+
+  await nextTick()
+
+  if (window.google?.accounts?.id) {
+    renderGoogleButton()
+    return
+  }
+
+  const script = document.createElement('script')
+  script.src = 'https://accounts.google.com/gsi/client'
+  script.async = true
+  script.defer = true
+  script.onload = renderGoogleButton
+  script.onerror = () => {
+    googleStatus.value = 'Không tải được dịch vụ đăng nhập Google.'
+  }
+  document.head.appendChild(script)
 })
 </script>
 
@@ -89,7 +143,15 @@ const onSubmit = handleSubmit((values) => {
           <button class="submit-button" type="submit">Đăng nhập <ArrowRight :size="19" /></button>
         </form>
 
-        <p class="signup-prompt">Chưa có tài khoản? <span>Liên hệ quản trị viên để được cấp tài khoản</span></p>
+        <div class="login-divider"><span>hoặc</span></div>
+        <div v-if="googleClientId" ref="googleButton" class="google-button-container"></div>
+        <button v-else class="google-fallback-button" type="button" disabled>
+          <span class="google-mark">G</span>
+          Đăng nhập với Google
+        </button>
+        <p v-if="googleStatus" class="google-status" role="status">{{ googleStatus }}</p>
+
+        <p class="signup-prompt">Chưa có tài khoản? <RouterLink to="/register">Đăng ký</RouterLink></p>
       </div>
       <p class="secure-note"><LockKeyhole :size="13" /> Kết nối được bảo vệ an toàn</p>
     </section>
@@ -112,4 +174,7 @@ const onSubmit = handleSubmit((values) => {
 @media (max-width: 980px) { .login-page { grid-template-columns: minmax(0, .9fr) minmax(420px, 1.1fr); }.intro-panel { padding-left: 32px; padding-right: 24px; }.intro-copy { margin-top: 62px; }.intro-copy h1 { font-size: 33px; }.benefit { padding: 0 10px; gap: 7px; font-size: 11px; }.benefit-icon { width: 34px; height: 34px; }.form-panel { padding: 32px 26px; }.login-card { padding: 34px 30px; } }
 @media (max-width: 720px) { :global(html), :global(body), :global(#app) { width: 100%; min-width: 0; overflow-x: hidden; }.login-page { display: block; width: 100%; min-width: 0; overflow: hidden; background: #f2f7ff; }.intro-panel { width: 100%; min-width: 0; min-height: 0; box-sizing: border-box; padding: 20px 23px 28px; }.brand-lockup { font-size: 19px; }.brand-icon { width: 40px; height: 38px; }.intro-copy { width: 100%; min-width: 0; margin-top: 35px; }.intro-kicker { margin-bottom: 9px; font-size: 10px; }.intro-copy h1 { font-size: 29px; overflow-wrap: anywhere; }.desktop-break { display: none; }.intro-description { max-width: 55ch; margin-top: 11px; font-size: 14px; line-height: 1.6; }.benefit-list { width: 100%; min-width: 0; margin-top: 20px; }.benefit { min-width: 0; flex: 1; padding: 0 8px; font-size: 10px; }.benefit:first-child { padding-left: 0; }.benefit-icon { width: 30px; height: 30px; }.study-visual { display: none; }.form-panel { width: 100%; min-width: 0; min-height: 0; box-sizing: border-box; padding: 27px 16px 32px; background: #f2f7ff; }.login-card { width: 100%; max-width: 450px; min-width: 0; box-sizing: border-box; padding: 28px 23px 25px; border-radius: 12px; }.card-brand-icon { margin-bottom: 6px; }.login-card h2 { font-size: 23px; }.card-subtitle { margin: 8px 0 23px; font-size: 12px; }.field-wrap { height: 51px; }.submit-button { height: 51px; }.secure-note { margin-top: 13px; } }
 @media (max-width: 360px) { .intro-panel { padding-right: 16px; padding-left: 16px; }.intro-copy h1 { font-size: 26px; }.benefit { gap: 5px; padding-right: 6px; padding-left: 6px; font-size: 9px; }.benefit-icon { width: 27px; height: 27px; }.login-card { padding-right: 17px; padding-left: 17px; } }
+.login-divider { display: flex; align-items: center; gap: 12px; margin: 20px 0 14px; color: #8a9bb4; font-size: 11px; }.login-divider::before,.login-divider::after { height: 1px; flex: 1; background: #e4ebf5; content: ''; }.google-button-container { display: flex; min-height: 42px; justify-content: center; }.google-fallback-button { display: flex; width: 100%; height: 44px; align-items: center; justify-content: center; gap: 11px; border: 1px solid #d7e0ec; border-radius: 6px; background: #fff; color: #52627b; font: inherit; font-size: 13px; font-weight: 550; }.google-fallback-button:disabled { cursor: not-allowed; opacity: .82; }.google-mark { font-size: 17px; font-weight: 750; color: #4285f4; }.google-status { margin: 8px 0 0; color: #7b8ca6; font-size: 11px; line-height: 1.5; }
+.signup-prompt a { margin-left: 4px; color: #2869f4; font-weight: 600; text-decoration: none; }
+.signup-prompt a:hover { text-decoration: underline; }
 </style>

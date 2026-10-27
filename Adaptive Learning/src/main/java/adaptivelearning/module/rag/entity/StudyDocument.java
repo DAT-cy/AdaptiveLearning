@@ -22,6 +22,8 @@ public class StudyDocument extends BaseEntity {
     private boolean active = true;
     @NotBlank @Size(max = 200) @Column(nullable = false, length = 200) private String title;
     private String fileName; private String storagePath; private String mimeType;
+    @Column(name = "source_content", columnDefinition = "LONGTEXT")
+    private String sourceContent;
     @Enumerated(EnumType.STRING) @Builder.Default @Column(nullable = false) private DocumentStatus status = DocumentStatus.UPLOADED;
     @Builder.Default @Column(name = "chunk_count") private int chunkCount = 0;
     @Column(name = "doc_created_at", nullable = false) @Builder.Default private LocalDateTime docCreatedAt = LocalDateTime.now();
