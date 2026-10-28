@@ -64,4 +64,13 @@ public class PaymentController {
         }
     }
 
+    @PostMapping("/sandbox/complete")
+    public ResponseEntity<DefaultRes<PaymentStatusResponse>> completeSandbox(
+            @RequestBody java.util.Map<String, Object> body) {
+        Long paymentId = Long.valueOf(body.get("paymentId").toString());
+        boolean success = body.get("success") == null || Boolean.parseBoolean(body.get("success").toString());
+        Long id = paymentService.completeSandboxPayment(paymentId, SecurityUtils.getCurrentUserId(), success);
+        return ResponseEntity.ok(DefaultRes.res(200, "Sandbox payment completed",
+                paymentService.getPayment(id, SecurityUtils.getCurrentUserId())));
+    }
 }

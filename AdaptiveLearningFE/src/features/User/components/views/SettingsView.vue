@@ -1,6 +1,7 @@
 <script setup>
-import { computed, inject, reactive, ref } from 'vue'
+import { computed, inject, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { fixVietnameseMojibake } from '@/utils/mojibake'
 import {
   AlertCircle,
   AlertTriangle,
@@ -99,8 +100,18 @@ function removeAvatar() {
 
 // Form thông tin cá nhân
 const profileForm = reactive({
-  fullName: home.userStore?.state?.fullName || localStorage.getItem('adaptive-learning-fullname') || '',
+  fullName: fixVietnameseMojibake(home.userStore?.state?.fullName || localStorage.getItem('adaptive-learning-fullname') || ''),
 })
+
+watch(
+  () => home.userStore?.state?.fullName,
+  (val) => {
+    if (val) {
+      profileForm.fullName = fixVietnameseMojibake(val)
+    }
+  },
+  { immediate: true }
+)
 
 const profileErrors = reactive({
   fullName: '',
@@ -134,7 +145,8 @@ function saveProfile() {
   profileSavedSuccess.value = false
 
   setTimeout(() => {
-    const trimmed = profileForm.fullName.trim()
+    const trimmed = fixVietnameseMojibake(profileForm.fullName.trim())
+    profileForm.fullName = trimmed
     if (home.userStore?.state) {
       home.userStore.state.fullName = trimmed
     }

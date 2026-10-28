@@ -5135,21 +5135,23 @@
     <Modal v-model:open="adminPasswordModalOpen" title="Đổi mật khẩu" description="Cập nhật mật khẩu để bảo vệ tài khoản quản trị của bạn" :icon="KeyRound">
       <form class="password-form-stack" @submit.prevent="handleAdminChangePassword">
         <div v-if="adminPasswordError" class="notice notice-danger">{{ adminPasswordError }}</div>
-        <label class="form-field">
-          <span>Mật khẩu hiện tại</span>
+        <div class="password-form-group">
+          <label>Mật khẩu hiện tại</label>
           <input v-model="adminPasswordForm.oldPassword" type="password" placeholder="Nhập mật khẩu cũ" required />
-        </label>
-        <label class="form-field">
-          <span>Mật khẩu mới</span>
+        </div>
+        <div class="password-form-group">
+          <label>Mật khẩu mới</label>
           <input v-model="adminPasswordForm.newPassword" type="password" placeholder="Tối thiểu 6 ký tự" required />
-        </label>
-        <label class="form-field">
-          <span>Nhập lại mật khẩu mới</span>
+        </div>
+        <div class="password-form-group">
+          <label>Nhập lại mật khẩu mới</label>
           <input v-model="adminPasswordForm.confirmPassword" type="password" placeholder="Xác nhận mật khẩu mới" required />
-        </label>
+        </div>
         <div class="form-actions" style="margin-top: 14px; display: flex; justify-content: flex-end; gap: 8px;">
           <button type="button" class="overlay-button overlay-button-secondary" @click="adminPasswordModalOpen = false">Hủy</button>
-          <button type="submit" class="overlay-button overlay-button-primary" :disabled="adminChangingPassword">Lưu mật khẩu mới</button>
+          <button type="submit" class="overlay-button overlay-button-primary" :disabled="adminChangingPassword">
+            {{ adminChangingPassword ? 'Đang lưu...' : 'Lưu mật khẩu mới' }}
+          </button>
         </div>
       </form>
     </Modal>

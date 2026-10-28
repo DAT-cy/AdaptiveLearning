@@ -9,6 +9,6 @@ import lombok.Setter;
 @Setter
 public class PaymentCheckoutRequest {
     @NotBlank
-    @Pattern(regexp = "(?i)stripe|paypal")
+    @Pattern(regexp = "(?i)stripe|paypal|sandbox")
     private String provider;
 }

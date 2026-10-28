@@ -68,7 +68,8 @@
   - Xem lịch sử giao dịch thanh toán chi tiết của từng học viên.
 - [x] **Cổng thanh toán & Simulation:**
   - Hỗ trợ mô hình xử lý Stripe và PayPal (idempotency, webhook verification).
-  - Tích hợp mock simulation server trên Postman để kiểm thử môi trường dev local.
+  - Tích hợp cổng thanh toán Sandbox Simulation trực tiếp trên web (`/payment/sandbox`): mô phỏng quét VietQR / thẻ thử nghiệm, cho phép test end-to-end luồng checkout, xác nhận giao dịch thành công/hủy và tự động kích hoạt gói Premium ngay lập tức trên môi trường local.
+  - Cấu hình giá mặc định `PREMIUM_PRICE=199000 VND` để tính năng thanh toán luôn sẵn sàng hoạt động mà không bị treo ở trạng thái bảo trì khi chưa cấu hình Stripe/PayPal live key.
 
 ### 3.4. Phân hệ Ngân hàng Câu hỏi & Tạo Đề (Exam & Question Bank)
 - [x] **Quản lý Chứng chỉ & Topic:** Cấu hình kỳ thi (IELTS, TOEIC, THPT), phân cấp cây kỹ năng (Listening, Reading, Writing, Speaking) và chủ đề.

@@ -72,7 +72,15 @@ const comparisonFeatures = [
   { name: 'Thời hạn gói học', free: 'Miễn phí trọn đời', premium: 'Thanh toán 1 lần · Vĩnh viễn', note: 'Không thu phí gia hạn định kỳ' },
 ]
 
-const availableMethods = computed(() => entitlements.value?.paymentMethods || [])
+const availableMethods = computed(() => {
+  const methods = entitlements.value?.paymentMethods || []
+  return methods.map((m) => String(m).toUpperCase())
+})
+
+function hasMethod(name) {
+  const norm = String(name).toUpperCase()
+  return availableMethods.value.includes(norm)
+}
 
 function money(value, currency) {
   if (value == null || !currency) return 'Chưa cấu hình giá'
@@ -363,9 +371,27 @@ onMounted(load)
               <div v-else class="payment-buttons-stack">
                 <p class="payment-choose-label">Chọn cổng thanh toán bảo mật:</p>
 
+                <!-- Nút Sandbox (Thanh toán Thử nghiệm) -->
+                <button
+                  v-if="hasMethod('SANDBOX') || (!hasMethod('STRIPE') && !hasMethod('PAYPAL'))"
+                  type="button"
+                  class="checkout-btn sandbox-btn"
+                  :disabled="!!checkoutProvider"
+                  @click="checkout('sandbox')"
+                >
+                  <LoaderCircle v-if="checkoutProvider === 'sandbox'" class="spinner-icon" :size="18" />
+                  <template v-else>
+                    <span class="provider-mark sandbox-logo">
+                      <Sparkles :size="15" />
+                    </span>
+                    <span class="provider-label">Thanh toán Thử nghiệm (Môi trường Sandbox)</span>
+                    <ArrowRight :size="16" class="ml-auto" />
+                  </template>
+                </button>
+
                 <!-- Nút Stripe -->
                 <button
-                  v-if="availableMethods.includes('STRIPE')"
+                  v-if="hasMethod('STRIPE')"
                   type="button"
                   class="checkout-btn stripe-btn"
                   :disabled="!!checkoutProvider"
@@ -381,7 +407,7 @@ onMounted(load)
 
                 <!-- Nút PayPal -->
                 <button
-                  v-if="availableMethods.includes('PAYPAL')"
+                  v-if="hasMethod('PAYPAL')"
                   type="button"
                   class="checkout-btn paypal-btn"
                   :disabled="!!checkoutProvider"
@@ -1069,6 +1095,15 @@ onMounted(load)
 .checkout-btn:disabled {
   opacity: 0.65;
   cursor: wait;
+}
+
+.sandbox-btn {
+  background: #2563EB;
+  border-color: #1D4ED8;
+}
+
+.sandbox-btn:hover:not(:disabled) {
+  background: #1D4ED8;
 }
 
 .stripe-btn {

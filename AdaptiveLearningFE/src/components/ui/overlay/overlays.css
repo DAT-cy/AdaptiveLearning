@@ -439,3 +439,68 @@ body:has(.overlay-confirm[data-state='open']) .overlay-backdrop:not(.overlay-con
   @keyframes toast-enter { from { opacity: 0; } to { opacity: 1; } }
   @keyframes toast-exit { from { opacity: 1; } to { opacity: 0; } }
 }
+
+/* Password Modal & Overlay Form Stack */
+.password-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+.password-form-stack .form-field,
+.password-form-stack .password-form-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+}
+
+.password-form-stack .form-field span,
+.password-form-stack .password-form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  text-align: left;
+}
+
+.password-form-stack .form-field input,
+.password-form-stack .password-form-group input {
+  display: block;
+  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: #0f172a;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  outline: none;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.password-form-stack .form-field input:focus,
+.password-form-stack .password-form-group input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.password-form-stack .form-field input::placeholder,
+.password-form-stack .password-form-group input::placeholder {
+  color: #94a3b8;
+}
+
+.password-form-stack .notice,
+.password-form-stack .notice-danger {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  background-color: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  margin-bottom: 2px;
+}

@@ -122,6 +122,27 @@ public class PaymentService {
         return payment.getPaymentId();
     }
 
+    @Transactional
+    public Long completeSandboxPayment(Long paymentId, Long userId, boolean success) {
+        Payment payment = paymentRepository.findByPaymentIdAndUserId(paymentId, userId)
+                .orElseThrow(() -> new CommonException(ErrorCode.PAYMENT_NOT_FOUND));
+        if (payment.getProvider() != PaymentProvider.SANDBOX) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        if (payment.getStatus() != PaymentStatus.PENDING) {
+            return payment.getPaymentId();
+        }
+        if (!success) {
+            payment.setStatus(PaymentStatus.FAILED);
+            paymentRepository.save(payment);
+            return payment.getPaymentId();
+        }
+        NormalizedPaymentEvent event = strategyRegistry.get(PaymentProvider.SANDBOX)
+                .confirmReturn(payment, payment.getProviderPaymentId());
+        handleVerifiedEvent(event);
+        return payment.getPaymentId();
+    }
+
     public String paymentReturnUrl(Long paymentId) {
         return billingProperties.appUrl() + "/payment/success?paymentId=" + paymentId;
     }

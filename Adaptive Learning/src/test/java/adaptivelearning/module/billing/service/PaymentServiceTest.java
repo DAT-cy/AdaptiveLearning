@@ -146,4 +146,53 @@ class PaymentServiceTest {
         assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
         verify(entitlements).revokePremium(7L);
     }
+
+    @Test
+    void sandboxSuccessGrantsPremiumAndSavesPayment() {
+        Payment sandboxPayment = new Payment();
+        sandboxPayment.setPaymentId(99L);
+        sandboxPayment.setUserId(7L);
+        sandboxPayment.setProvider(PaymentProvider.SANDBOX);
+        sandboxPayment.setProviderPaymentId("sbx_99");
+        sandboxPayment.setAmount(new BigDecimal("120000"));
+        sandboxPayment.setCurrency("VND");
+        sandboxPayment.setStatus(PaymentStatus.PENDING);
+
+        when(payments.findByPaymentIdAndUserId(99L, 7L)).thenReturn(Optional.of(sandboxPayment));
+        when(payments.findById(99L)).thenReturn(Optional.of(sandboxPayment));
+
+        PaymentStrategy sandboxStrategy = mock(PaymentStrategy.class);
+        when(sandboxStrategy.provider()).thenReturn(PaymentProvider.SANDBOX);
+        NormalizedPaymentEvent sbxEvent = new NormalizedPaymentEvent(
+                PaymentProvider.SANDBOX, "sbx_evt_99", "sbx_99", "sbx_tx_99", 99L,
+                PaymentEventStatus.SUCCEEDED, new BigDecimal("120000"), "VND", "{}");
+        when(sandboxStrategy.confirmReturn(sandboxPayment, "sbx_99")).thenReturn(sbxEvent);
+
+        PaymentStrategyRegistry reg = (PaymentStrategyRegistry) ReflectionTestUtils.getField(service, "strategyRegistry");
+        when(reg.get(PaymentProvider.SANDBOX)).thenReturn(sandboxStrategy);
+
+        Long result = service.completeSandboxPayment(99L, 7L, true);
+
+        assertEquals(99L, result);
+        assertEquals(PaymentStatus.SUCCEEDED, sandboxPayment.getStatus());
+        verify(entitlements).grantPremium(7L);
+        verify(notifications).createPaymentSucceeded(sandboxPayment);
+    }
+
+    @Test
+    void sandboxCancelMarksFailed() {
+        Payment sandboxPayment = new Payment();
+        sandboxPayment.setPaymentId(99L);
+        sandboxPayment.setUserId(7L);
+        sandboxPayment.setProvider(PaymentProvider.SANDBOX);
+        sandboxPayment.setStatus(PaymentStatus.PENDING);
+
+        when(payments.findByPaymentIdAndUserId(99L, 7L)).thenReturn(Optional.of(sandboxPayment));
+
+        Long result = service.completeSandboxPayment(99L, 7L, false);
+
+        assertEquals(99L, result);
+        assertEquals(PaymentStatus.FAILED, sandboxPayment.getStatus());
+        verify(entitlements, never()).grantPremium(7L);
+    }
 }

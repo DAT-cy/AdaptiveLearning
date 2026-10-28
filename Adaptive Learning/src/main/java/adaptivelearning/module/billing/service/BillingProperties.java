@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class BillingProperties {
-    @Value("${PREMIUM_PRICE:}")
+    @Value("${PREMIUM_PRICE:199000}")
     private String premiumPriceValue;
 
     @Value("${billing.premium-currency:VND}")
@@ -24,10 +24,10 @@ public class BillingProperties {
     private String apiUrlValue;
 
     public BigDecimal premiumPrice() {
-        if (premiumPriceValue == null || premiumPriceValue.isBlank()) return null;
+        String raw = (premiumPriceValue == null || premiumPriceValue.isBlank()) ? "199000" : premiumPriceValue.trim();
         if (!"VND".equals(premiumCurrency())) return null;
         try {
-            BigDecimal price = new BigDecimal(premiumPriceValue.trim()).setScale(0, RoundingMode.UNNECESSARY);
+            BigDecimal price = new BigDecimal(raw).setScale(0, RoundingMode.UNNECESSARY);
             return price.signum() > 0 ? price : null;
         } catch (RuntimeException exception) {
             return null;

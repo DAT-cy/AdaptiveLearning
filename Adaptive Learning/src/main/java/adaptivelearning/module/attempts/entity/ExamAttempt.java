@@ -20,7 +20,11 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "exam_attempts")
+@Table(name = "exam_attempts", indexes = {
+        @jakarta.persistence.Index(name = "idx_attempt_started_at", columnList = "started_at"),
+        @jakarta.persistence.Index(name = "idx_attempt_exam_started", columnList = "exam_id,started_at"),
+        @jakarta.persistence.Index(name = "idx_attempt_user_started", columnList = "user_id,started_at")
+})
 @Data
 @Builder
 @NoArgsConstructor

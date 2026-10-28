@@ -7,4 +7,6 @@ export const paymentService = {
   checkout: (provider) => data(Axios.post('/api/v1/payments/checkout', { provider })),
   status: (paymentId) => data(Axios.get(`/api/v1/payments/${paymentId}`)),
   history: () => data(Axios.get('/api/v1/payments/history')),
+  completeSandbox: (paymentId, success = true) =>
+    data(Axios.post('/api/v1/payments/sandbox/complete', { paymentId, success })),
 }

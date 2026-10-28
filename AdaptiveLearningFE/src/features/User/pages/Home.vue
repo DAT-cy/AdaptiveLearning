@@ -6,6 +6,7 @@ import {
   GraduationCap, Headphones, Info, KeyRound, LayoutDashboard, LockKeyhole, LogOut, Menu, Search, Settings, Sparkles, Target, User, X,
 } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
+import { fixVietnameseMojibake } from '@/utils/mojibake'
 import { learningService } from '@/services/learningService'
 import { notificationService } from '@/services/notificationService'
 import { homeContextKey } from '../composables/homeContext'
@@ -221,10 +222,10 @@ const navigation = [
   { id: 'settings', label: 'Cài đặt', icon: Settings },
 ]
 
-const userName = computed(() => userStore.state.fullName || userStore.state.username || 'Học viên')
+const userName = computed(() => fixVietnameseMojibake(userStore.state.fullName || userStore.state.username || 'Học viên'))
 const isPremium = computed(() => entitlements.value?.plan === 'PREMIUM' || userStore.state.role === 'ROLE_ADMIN')
-const greetingName = computed(() => userStore.state.fullName || userName.value.split('@')[0].split(/[._-]/)[0])
-const initials = computed(() => (userStore.state.fullName || userName.value).slice(0, 1).toUpperCase())
+const greetingName = computed(() => fixVietnameseMojibake(userStore.state.fullName || userName.value.split('@')[0].split(/[._-]/)[0]))
+const initials = computed(() => (userName.value || 'H').slice(0, 1).toUpperCase())
 const publishedExams = computed(() => exams.value.filter((exam) => exam.status === 'PUBLISHED'))
 const filteredExams = computed(() => publishedExams.value.filter((exam) => {
   const query = searchQuery.value.trim().toLowerCase()

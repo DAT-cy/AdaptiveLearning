@@ -2,6 +2,7 @@ import { computed, reactive } from 'vue'
 import { defineStore } from 'pinia'
 import { removeToken, setToken, getToken } from '@/utils/auth'
 import { userService } from '@/services/userService.js'
+import { fixVietnameseMojibake } from '@/utils/mojibake'
 
 function normalizeRole(role) {
   if (!role) return ''
@@ -11,17 +12,22 @@ function normalizeRole(role) {
 }
 
 export const useUserStore = defineStore('user', () => {
+  const initialFullName = fixVietnameseMojibake(localStorage.getItem('adaptive-learning-fullname') || '')
+  if (initialFullName && initialFullName !== localStorage.getItem('adaptive-learning-fullname')) {
+    localStorage.setItem('adaptive-learning-fullname', initialFullName)
+  }
+
   const state = reactive({
     accessToken: getToken(),
     username: '',
-    fullName: localStorage.getItem('adaptive-learning-fullname') || '',
+    fullName: initialFullName,
     role: normalizeRole(localStorage.getItem('adaptive-learning-role') || ''),
     avatar: '',
     permissions: [],
   })
 
   const getterAccessToken = computed(() => state.accessToken)
-  const getterUserName = computed(() => state.fullName || state.username)
+  const getterUserName = computed(() => fixVietnameseMojibake(state.fullName || state.username))
   const getterAvatar = computed(() => state.avatar)
   const getterPermissions = computed(() => state.permissions)
 
@@ -31,7 +37,7 @@ export const useUserStore = defineStore('user', () => {
     setToken(profile.token)
     state.accessToken = profile.token
     state.username = profile.username || username
-    state.fullName = profile.fullName || profile.username?.split('@')[0] || ''
+    state.fullName = fixVietnameseMojibake(profile.fullName || profile.username?.split('@')[0] || '')
     state.role = normalizeRole(profile.role)
     localStorage.setItem('adaptive-learning-fullname', state.fullName)
     localStorage.setItem('adaptive-learning-role', state.role)
@@ -43,7 +49,7 @@ export const useUserStore = defineStore('user', () => {
     setToken(profile.token)
     state.accessToken = profile.token
     state.username = profile.username || ''
-    state.fullName = profile.fullName || profile.username?.split('@')[0] || ''
+    state.fullName = fixVietnameseMojibake(profile.fullName || profile.username?.split('@')[0] || '')
     state.role = normalizeRole(profile.role)
     localStorage.setItem('adaptive-learning-fullname', state.fullName)
     localStorage.setItem('adaptive-learning-role', state.role)
@@ -53,7 +59,7 @@ export const useUserStore = defineStore('user', () => {
     const profile = await userService.getInfo()
     if (!profile?.username) throw new Error('Không xác minh được tài khoản. Vui lòng đăng nhập lại.')
     state.username = profile.username
-    state.fullName = profile.fullName || profile.username?.split('@')[0] || ''
+    state.fullName = fixVietnameseMojibake(profile.fullName || profile.username?.split('@')[0] || '')
     state.role = normalizeRole(profile.role)
     localStorage.setItem('adaptive-learning-fullname', state.fullName)
     localStorage.setItem('adaptive-learning-role', state.role)
