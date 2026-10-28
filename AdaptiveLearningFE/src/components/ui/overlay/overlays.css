@@ -291,8 +291,8 @@ body:has(.overlay-confirm[data-state='open']) .overlay-backdrop:not(.overlay-con
 }
 
 .overlay-menu .admin-menu-avatar {
-  background: linear-gradient(135deg, #0f766e, #0e7490) !important;
-  box-shadow: 0 3px 8px rgba(15, 118, 110, 0.25) !important;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9) !important;
+  box-shadow: 0 3px 8px rgba(124, 58, 237, 0.25) !important;
 }
 
 .overlay-menu .user-menu-info {
@@ -347,9 +347,9 @@ body:has(.overlay-confirm[data-state='open']) .overlay-backdrop:not(.overlay-con
 }
 
 .overlay-menu .badge-admin {
-  background: #e6f7f3;
-  color: #0f766e;
-  border: 1px solid #c9ece2;
+  background: #f5f3ff;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
 }
 
 .overlay-menu-item {

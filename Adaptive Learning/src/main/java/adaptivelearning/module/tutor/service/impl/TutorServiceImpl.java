@@ -1,22 +1,161 @@
 package adaptivelearning.module.tutor.service.impl;
 
-import adaptivelearning.config.response.*; import adaptivelearning.module.ai.gateway.AiProvider;
-import adaptivelearning.module.tutor.dto.request.*; import adaptivelearning.module.tutor.dto.response.*;
-import adaptivelearning.module.tutor.entity.*; import adaptivelearning.module.tutor.repository.*; import adaptivelearning.module.tutor.service.TutorService; import adaptivelearning.shared.enums.TutorRole;
-import java.time.*; import java.util.*; import java.util.stream.Collectors; import lombok.RequiredArgsConstructor; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional;
+import adaptivelearning.config.response.CommonException;
+import adaptivelearning.config.response.ErrorCode;
+import adaptivelearning.module.ai.gateway.AiProvider;
+import adaptivelearning.module.tutor.dto.request.AskTutorRequest;
+import adaptivelearning.module.tutor.dto.request.CreateConversationRequest;
+import adaptivelearning.module.tutor.dto.response.ConversationResponse;
+import adaptivelearning.module.tutor.dto.response.MessageResponse;
+import adaptivelearning.module.tutor.entity.TutorConversation;
+import adaptivelearning.module.tutor.entity.TutorMessage;
+import adaptivelearning.module.tutor.repository.ConversationRepository;
+import adaptivelearning.module.tutor.repository.MessageRepository;
+import adaptivelearning.module.tutor.service.TutorService;
+import adaptivelearning.shared.enums.TutorRole;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.ZoneId;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-@Service @RequiredArgsConstructor @Transactional
+@Service
+@RequiredArgsConstructor
+@Transactional
+@Slf4j
 public class TutorServiceImpl implements TutorService {
-    private static final String MODEL = "gpt-4o-mini"; private final ConversationRepository conversations; private final MessageRepository messages; private final AiProvider ai;
-    public ConversationResponse createConversation(Long u, CreateConversationRequest r) { TutorConversation c=new TutorConversation(); c.setUserId(u); c.setCertificateId(r.getCertificateId()); c.setTitle(r.getTitle()==null?"Tutor conversation":r.getTitle()); return map(conversations.save(c)); }
-    @Transactional(readOnly=true) public List<ConversationResponse> getConversations(Long u){ return conversations.findByUserIdOrderByCreatedAtDesc(u).stream().map(this::map).toList(); }
-    @Transactional(readOnly=true) public List<MessageResponse> getMessages(Long u,Long id){ owner(u,id); return messages.findByConversationIdOrderByCreatedAtAsc(id).stream().map(this::map).toList(); }
-    public MessageResponse ask(Long u,Long id,AskTutorRequest r){ TutorConversation c=owner(u,id); if(!c.isActive()) throw new CommonException(ErrorCode.BAD_REQUEST); TutorMessage user=new TutorMessage(); user.setConversationId(id); user.setRole(TutorRole.USER); user.setContent(r.getContent()); user.setTokenCount(r.getContent().length()); messages.save(user); if(r.getContextJson()!=null)c.setContextJson(r.getContextJson());
-        List<TutorMessage> history=messages.findByConversationIdOrderByCreatedAtAsc(id); int start=Math.max(0,history.size()-10); StringBuilder prompt=new StringBuilder("Provide a grounded, helpful tutoring answer. Use only supplied context and conversation; do not invent facts. Return a JSON object with fields answer (string) and citations (array of objects with source and quote).\n"); for(int i=start;i<history.size();i++) prompt.append(history.get(i).getRole()).append(": ").append(history.get(i).getContent()).append("\n");
-        try { String raw=ai.chatCompletionSync("You are a careful educational tutor.",prompt.toString(),MODEL,1200); if(raw==null||raw.isBlank()) throw new RuntimeException(); TutorMessage out=new TutorMessage(); out.setConversationId(id); out.setRole(TutorRole.ASSISTANT); out.setContent(raw); out.setModel(MODEL); out.setTokenCount(raw.length()); return map(messages.save(out)); } catch(Exception e){ throw new CommonException(ErrorCode.BAD_REQUEST); }
+
+    private static final String MODEL = "gpt-4o-mini";
+    private final ConversationRepository conversations;
+    private final MessageRepository messages;
+    private final AiProvider aiProvider;
+    private final ObjectMapper objectMapper;
+
+    @Override
+    public ConversationResponse createConversation(Long userId, CreateConversationRequest request) {
+        TutorConversation conversation = new TutorConversation();
+        conversation.setUserId(userId);
+        conversation.setCertificateId(request.getCertificateId());
+        conversation.setTitle(request.getTitle() == null || request.getTitle().isBlank()
+                ? "Tutor conversation" : request.getTitle().trim());
+        return toConversation(conversations.save(conversation));
     }
-    public void archive(Long u,Long id){ TutorConversation c=owner(u,id); c.setActive(false); conversations.save(c); }
-    private TutorConversation owner(Long u,Long id){ return conversations.findByIdAndUserId(id,u).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); }
-    private ConversationResponse map(TutorConversation c){ return ConversationResponse.builder().id(c.getId()).userId(c.getUserId()).certificateId(c.getCertificateId()).title(c.getTitle()).isActive(c.isActive()).createdAt(c.getCreatedAt()==null?null:c.getCreatedAt().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime()).messageCount(messages.countByConversationId(c.getId())).build(); }
-    private MessageResponse map(TutorMessage m){ return MessageResponse.builder().id(m.getId()).conversationId(m.getConversationId()).role(m.getRole()).content(m.getContent()).citationsJson(m.getCitationsJson()).model(m.getModel()).tokenCount(m.getTokenCount()).createdAt(m.getCreatedAt()).build(); }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ConversationResponse> getConversations(Long userId) {
+        return conversations.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(this::toConversation).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MessageResponse> getMessages(Long userId, Long conversationId) {
+        requireOwner(userId, conversationId);
+        return messages.findByConversationIdOrderByCreatedAtAsc(conversationId).stream()
+                .map(this::toMessage).toList();
+    }
+
+    @Override
+    public MessageResponse ask(Long userId, Long conversationId, AskTutorRequest request) {
+        TutorConversation conversation = requireOwner(userId, conversationId);
+        if (!conversation.isActive()) throw new CommonException(ErrorCode.BAD_REQUEST);
+        validateContext(request.getContextJson());
+
+        TutorMessage userMessage = new TutorMessage();
+        userMessage.setConversationId(conversationId);
+        userMessage.setRole(TutorRole.USER);
+        userMessage.setContent(request.getContent().trim());
+        userMessage.setTokenCount(request.getContent().trim().length());
+        messages.save(userMessage);
+        if (request.getContextJson() != null && !request.getContextJson().isBlank()) {
+            conversation.setContextJson(request.getContextJson());
+        }
+
+        List<TutorMessage> history = messages.findByConversationIdOrderByCreatedAtAsc(conversationId);
+        int start = Math.max(0, history.size() - 10);
+        StringBuilder prompt = new StringBuilder("Use only the supplied context and conversation; do not invent facts. "
+                + "Return a JSON object with answer (string) and citations (array of {source, quote}).\n");
+        if (conversation.getContextJson() != null && !conversation.getContextJson().isBlank()) {
+            prompt.append("SUPPLIED_CONTEXT_JSON:\n").append(conversation.getContextJson()).append("\n");
+        }
+        for (int index = start; index < history.size(); index++) {
+            prompt.append(history.get(index).getRole()).append(": ")
+                    .append(history.get(index).getContent()).append("\n");
+        }
+
+        final String raw;
+        try {
+            raw = aiProvider.chatCompletionSync("You are a careful educational tutor.",
+                    prompt.toString(), MODEL, 1200);
+        } catch (RuntimeException exception) {
+            log.warn("Tutor provider failed for conversation {} with {}",
+                    conversationId, exception.getClass().getSimpleName());
+            throw new CommonException(ErrorCode.AI_PROVIDER_UNAVAILABLE);
+        }
+        JsonNode response = parseResponse(raw);
+
+        TutorMessage assistantMessage = new TutorMessage();
+        assistantMessage.setConversationId(conversationId);
+        assistantMessage.setRole(TutorRole.ASSISTANT);
+        assistantMessage.setContent(response.path("answer").asText());
+        assistantMessage.setCitationsJson(response.path("citations").toString());
+        assistantMessage.setModel(MODEL);
+        assistantMessage.setTokenCount(assistantMessage.getContent().length());
+        return toMessage(messages.save(assistantMessage));
+    }
+
+    @Override
+    public void archive(Long userId, Long conversationId) {
+        TutorConversation conversation = requireOwner(userId, conversationId);
+        conversation.setActive(false);
+        conversations.save(conversation);
+    }
+
+    private TutorConversation requireOwner(Long userId, Long conversationId) {
+        return conversations.findByIdAndUserId(conversationId, userId)
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+    }
+
+    private void validateContext(String contextJson) {
+        if (contextJson == null || contextJson.isBlank()) return;
+        try {
+            objectMapper.readTree(contextJson);
+        } catch (Exception exception) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private JsonNode parseResponse(String raw) {
+        try {
+            JsonNode response = objectMapper.readTree(raw);
+            if (!response.isObject() || !response.path("answer").isTextual()
+                    || response.path("answer").asText().isBlank()
+                    || !response.path("citations").isArray()) {
+                throw new IllegalArgumentException("Invalid tutor response");
+            }
+            return response;
+        } catch (Exception exception) {
+            throw new CommonException(ErrorCode.AI_PROVIDER_INVALID_RESPONSE);
+        }
+    }
+
+    private ConversationResponse toConversation(TutorConversation conversation) {
+        return ConversationResponse.builder().id(conversation.getId()).userId(conversation.getUserId())
+                .certificateId(conversation.getCertificateId()).title(conversation.getTitle())
+                .isActive(conversation.isActive())
+                .createdAt(conversation.getCreatedAt() == null ? null
+                        : conversation.getCreatedAt().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime())
+                .messageCount(messages.countByConversationId(conversation.getId())).build();
+    }
+
+    private MessageResponse toMessage(TutorMessage message) {
+        return MessageResponse.builder().id(message.getId()).conversationId(message.getConversationId())
+                .role(message.getRole()).content(message.getContent()).citationsJson(message.getCitationsJson())
+                .model(message.getModel()).tokenCount(message.getTokenCount())
+                .createdAt(message.getCreatedAt()).build();
+    }
 }

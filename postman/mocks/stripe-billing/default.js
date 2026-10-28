@@ -9,10 +9,16 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/v1/checkout/sessions") {
     const form = new URLSearchParams((await bodyPromise).toString());
     const id = `cs_test_${Date.now()}`;
-    const session = { id, paymentId: form.get("metadata[paymentId]"), status: "open" };
+    const session = {
+      id,
+      paymentId: form.get("metadata[paymentId]"),
+      currency: form.get("line_items[0][price_data][currency]"),
+      amount: form.get("line_items[0][price_data][unit_amount]"),
+      status: "open",
+    };
     await pm.state.set(`stripe.session.${id}`, session);
     res.writeHead(200, JSON_HEADER);
-    return res.end(JSON.stringify({ id, url: `https://checkout.stripe.mock/${id}`, mode: "payment" }));
+    return res.end(JSON.stringify({ id, url: `https://checkout.stripe.mock/${id}`, mode: "payment", currency: session.currency, amount: session.amount }));
   }
 
   res.writeHead(501, JSON_HEADER);

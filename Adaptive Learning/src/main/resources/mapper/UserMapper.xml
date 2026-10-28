@@ -38,6 +38,15 @@
         AND is_deleted = false
     </select>
 
+    <select id="findByUsernameForUpdate" resultMap="userResultMap">
+        SELECT user_id, username, full_name, password, enable, email_verified, is_deleted, plan,
+               premium_activated_at, free_exams_used, role, created_at, updated_at
+        FROM tbl_users
+        WHERE LOWER(username) = LOWER(#{username})
+          AND is_deleted = false
+        FOR UPDATE
+    </select>
+
     <select id="findAllForAdmin" resultMap="userResultMap">
         SELECT user_id, username, full_name, enable, email_verified, is_deleted, role, plan,
                premium_activated_at, free_exams_used, created_at, updated_at
@@ -57,7 +66,8 @@
     <select id="countAdminUsers" resultType="int">
         SELECT COUNT(*)
         FROM tbl_users
-        WHERE username = 'admin'
+        WHERE role = 'ROLE_ADMIN'
+          AND is_deleted = false
     </select>
 
     <insert id="insertUser" parameterType="adaptivelearning.module.users.entity.User">
@@ -89,6 +99,15 @@
                 #{username},
                 NOW(),
                 #{username})
+    </insert>
+
+    <insert id="insertUnverifiedUserIfAbsent" parameterType="adaptivelearning.module.users.entity.User">
+        INSERT IGNORE INTO tbl_users (username, full_name, password, enable, email_verified, is_deleted,
+                                      plan, premium_activated_at, free_exams_used, role,
+                                      created_at, created_id, updated_at, updated_id)
+        VALUES (#{user.username}, #{user.fullName}, #{user.password}, #{user.enable}, #{user.emailVerified}, #{user.isDeleted},
+                #{user.plan}, #{user.premiumActivatedAt}, #{user.freeExamsUsed}, #{user.role}, NOW(),
+                #{user.username}, NOW(), #{user.username})
     </insert>
 
     <update id="updateRole">

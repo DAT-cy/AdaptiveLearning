@@ -80,9 +80,7 @@ public class SpeakingController {
     @Operation(summary = "Get an evaluation by id")
     public ResponseEntity<DefaultRes<SpeakingEvaluationResponse>> getEvaluation(@PathVariable Long id) {
         premiumUser();
-        SpeakingEvaluationResponse data = service.listEvaluations(id).stream()
-                .findFirst()
-                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        SpeakingEvaluationResponse data = service.getEvaluation(SecurityUtils.getCurrentUserId(), id);
         return ResponseEntity.ok(DefaultRes.res(200, "Success", data));
     }
 
@@ -91,7 +89,7 @@ public class SpeakingController {
     public ResponseEntity<DefaultRes<List<SpeakingEvaluationResponse>>> listEvaluations(
             @PathVariable Long submissionId) {
         premiumUser();
-        List<SpeakingEvaluationResponse> data = service.listEvaluations(submissionId);
+        List<SpeakingEvaluationResponse> data = service.listEvaluations(SecurityUtils.getCurrentUserId(), submissionId);
         return ResponseEntity.ok(DefaultRes.res(200, "Success", data));
     }
 }

@@ -23,7 +23,7 @@ services:
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in the environment or .env}
       MYSQL_DATABASE: adaptivelearning
       TZ: Asia/Ho_Chi_Minh
     command:
@@ -52,24 +52,30 @@ services:
       SPRING_PROFILES_ACTIVE: local
       DB_URL: jdbc:mysql://mysql:3306/adaptivelearning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       DB_USERNAME: root
-      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
-      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deploy-123456}
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in the environment or .env}
+      JWT_SECRET: ${JWT_SECRET:?Set a unique JWT_SECRET with at least 32 characters}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-775450545173-dg1fks5jjs667s0ek3d2lj4s5sf07si2.apps.googleusercontent.com}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-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}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       AI_API_KEY: ${GEMINI_API_KEY:-${AI_API_KEY:-}}
       BKT_URL: http://pybkt:8001
-      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
       MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-true}
       MAIL_SMTP_STARTTLS_ENABLE: ${MAIL_SMTP_STARTTLS_ENABLE:-true}
+      MAIL_SMTP_CONNECTION_TIMEOUT: ${MAIL_SMTP_CONNECTION_TIMEOUT:-5000}
+      MAIL_SMTP_READ_TIMEOUT: ${MAIL_SMTP_READ_TIMEOUT:-5000}
+      MAIL_SMTP_WRITE_TIMEOUT: ${MAIL_SMTP_WRITE_TIMEOUT:-5000}
       APP_URL: ${APP_URL:-http://localhost:3000}
       API_URL: ${API_URL:-http://localhost:9090}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       FREE_EXAM_LIMIT: ${FREE_EXAM_LIMIT:-5}
       PREMIUM_PRICE: ${PREMIUM_PRICE:-}
-      PREMIUM_CURRENCY: ${PREMIUM_CURRENCY:-USD}
+      PREMIUM_CURRENCY: ${PREMIUM_CURRENCY:-VND}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_API_BASE_URL: ${STRIPE_API_BASE_URL:-https://api.stripe.com}
@@ -78,6 +84,10 @@ services:
       PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID:-}
       PAYPAL_MODE: ${PAYPAL_MODE:-sandbox}
       PAYPAL_API_BASE_URL: ${PAYPAL_API_BASE_URL:-}
+      CLOUDINARY_ENABLED: ${CLOUDINARY_ENABLED:-false}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-doan}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - .:/workspace
@@ -97,6 +107,7 @@ services:
     ports:
       - "3000:3000"
     environment:
+      VITE_API_BASE_URL: http://localhost:9090
       VITE_API_KEY: http://localhost:9090
       VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-775450545173-dg1fks5jjs667s0ek3d2lj4s5sf07si2.apps.googleusercontent.com}
       VITE_BASE_URL: /

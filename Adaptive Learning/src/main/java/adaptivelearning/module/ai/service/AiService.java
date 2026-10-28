@@ -9,12 +9,12 @@ import java.util.List;
 
 public interface AiService {
     AiEvaluationResponse gradeWriting(AiGradeRequest request);
-    AiEvaluationResponse getEvaluation(Long evaluationId);
-    List<AiEvaluationResponse> getEvaluationByAttempt(Long attemptId);
+    AiEvaluationResponse getEvaluation(Long evaluationId, Long userId, boolean admin);
+    List<AiEvaluationResponse> getEvaluationByAttempt(Long attemptId, Long userId, boolean admin);
     RubricResponse createRubric(RubricRequest request);
     RubricResponse updateRubric(Long rubricId, RubricRequest request);
     List<RubricResponse> getRubricsByCertificate(Long certificateId);
-    AiJobResponse submitGradeJob(AiGradeRequest request);
+    AiJobResponse submitGradeJob(AiGradeRequest request, Long userId, boolean admin);
     void processPendingJobs();
     AiJobResponse retryJob(Long jobId);
     List<AiJobResponse> getJobs();

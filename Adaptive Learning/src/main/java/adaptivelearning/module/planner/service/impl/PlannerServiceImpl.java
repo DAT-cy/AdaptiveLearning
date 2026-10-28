@@ -1,18 +1,42 @@
 package adaptivelearning.module.planner.service.impl;
 
-import adaptivelearning.config.response.*; import adaptivelearning.module.planner.dto.request.*; import adaptivelearning.module.planner.dto.response.*; import adaptivelearning.module.planner.entity.*; import adaptivelearning.module.planner.repository.*; import adaptivelearning.module.planner.service.PlannerService; import adaptivelearning.shared.enums.*; import com.fasterxml.jackson.core.JsonProcessingException; import com.fasterxml.jackson.databind.ObjectMapper; import lombok.RequiredArgsConstructor; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional; import java.time.LocalDate; import java.util.*; import java.util.stream.Collectors;
+import adaptivelearning.config.response.*; import adaptivelearning.module.certificates.repository.CertificateRepository; import adaptivelearning.module.planner.dto.request.*; import adaptivelearning.module.planner.dto.response.*; import adaptivelearning.module.planner.entity.*; import adaptivelearning.module.planner.repository.*; import adaptivelearning.module.planner.service.PlannerService; import adaptivelearning.shared.enums.*; import com.fasterxml.jackson.databind.ObjectMapper; import lombok.RequiredArgsConstructor; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional; import java.time.LocalDate; import java.util.*;
 
 @Service @Transactional @RequiredArgsConstructor
 public class PlannerServiceImpl implements PlannerService {
-    private final StudyPlanRepository plans; private final PlanTaskRepository tasks; private final ObjectMapper mapper = new ObjectMapper();
-    public StudyPlanResponse createPlan(Long uid, CreatePlanRequest r){ StudyPlan p=plans.save(StudyPlan.builder().userId(uid).certificateId(r.getCertificateId()).targetScore(r.getTargetScore()).examDate(r.getExamDate()).hoursPerWeek(r.getHoursPerWeek()).title(r.getTitle()).build()); generateDefaultTasks(p.getPlanId()); return to(p); }
+    private final StudyPlanRepository plans; private final PlanTaskRepository tasks; private final CertificateRepository certificates; private final ObjectMapper mapper = new ObjectMapper();
+    public StudyPlanResponse createPlan(Long uid, CreatePlanRequest r){
+        if (r.getExamDate() == null || r.getExamDate().isBefore(LocalDate.now())) throw new CommonException(ErrorCode.BAD_REQUEST);
+        if (r.getHoursPerWeek() == null || r.getHoursPerWeek() < 1 || r.getHoursPerWeek() > 80) throw new CommonException(ErrorCode.BAD_REQUEST);
+        if (r.getCertificateId() != null && !certificates.existsById(r.getCertificateId())) throw new CommonException(ErrorCode.ENTITY_NOT_FOUND);
+        StudyPlan p=plans.save(StudyPlan.builder().userId(uid).certificateId(r.getCertificateId()).targetScore(r.getTargetScore()).examDate(r.getExamDate()).hoursPerWeek(r.getHoursPerWeek()).title(r.getTitle().trim()).build()); generateDefaultTasks(p.getPlanId()); return to(p);
+    }
     public List<StudyPlanResponse> listPlans(Long uid){return plans.findByUserIdOrderByPlanCreatedAtDesc(uid).stream().map(this::to).toList();}
     public StudyPlanResponse getPlan(Long uid, Long id){ return to(owned(uid,id)); }
-    public PlanTaskResponse updateTask(Long taskId, UpdateTaskRequest req){ PlanTask t=tasks.findById(taskId).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); t.setStatus(req.getStatus()); if(req.getNotes()!=null) t.setDescription(t.getDescription()+" | notes: "+req.getNotes()); return to(tasks.save(t)); }
-    public StudyPlanResponse completePlan(Long uid, Long planId){ StudyPlan p=owned(uid,planId); if(tasks.countByPlanIdAndStatus(planId, PlanTaskStatus.PENDING)>0) throw new CommonException(ErrorCode.BAD_REQUEST); p.setStatus(PlanStatus.COMPLETED); return to(plans.save(p)); }
-    public StudyPlanResponse archivePlan(Long uid, Long planId){ StudyPlan p=owned(uid,planId); p.setStatus(PlanStatus.ARCHIVED); return to(plans.save(p)); }
-    public List<PlanTaskResponse> generateDefaultTasks(Long planId){ StudyPlan p=plans.findById(planId).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); long existing=tasks.findByPlanIdOrderByScheduledDateAsc(planId).size(); if(existing>0) return tasks.findByPlanIdOrderByScheduledDateAsc(planId).stream().map(this::to).toList(); List<PlanTask> gen=new ArrayList<>(); LocalDate start=LocalDate.now(); LocalDate end=p.getExamDate()!=null? p.getExamDate(): start.plusDays(30); long days=Math.max(1, java.time.temporal.ChronoUnit.DAYS.between(start,end)); int totalHours=Math.max(1,p.getHoursPerWeek()) * (int)Math.max(1, (days/7)+1); int tasksPerWeek = Math.max(3, p.getHoursPerWeek()); String[] skills={"LISTENING","READING","WRITING","SPEAKING"}; PlanTaskType[] types={PlanTaskType.MOCK_TEST, PlanTaskType.WRITING, PlanTaskType.REVIEW, PlanTaskType.PRACTICE, PlanTaskType.STUDY}; int count=Math.min((int)days, totalHours*2); for(int i=0;i<count;i++){ LocalDate d=start.plusDays((long)(i*days/(double)count)); String skill=skills[i%skills.length]; PlanTaskType type=types[i%types.length]; int dur=30+ (i%3)*15; gen.add(PlanTask.builder().planId(planId).scheduledDate(d).skill(skill).taskType(type).durationMinutes(dur).description(type+" task for "+skill+" on "+d).build()); } tasks.saveAll(gen); return gen.stream().map(this::to).toList(); }
+    public List<PlanTaskResponse> getTasks(Long uid, Long planId){ owned(uid,planId); return tasks.findByPlanIdOrderByScheduledDateAsc(planId).stream().map(this::to).toList(); }
+    public PlanTaskResponse updateTask(Long userId, Long taskId, UpdateTaskRequest req){ PlanTask t=tasks.findById(taskId).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); StudyPlan plan=owned(userId,t.getPlanId()); if(plan.getStatus()!=PlanStatus.ACTIVE || req.getStatus()==null) throw new CommonException(ErrorCode.BAD_REQUEST); t.setStatus(req.getStatus()); if(req.getNotes()!=null && !req.getNotes().isBlank()) t.setDescription((t.getDescription()==null?"":t.getDescription())+" | notes: "+req.getNotes().trim()); return to(tasks.save(t)); }
+    public StudyPlanResponse completePlan(Long uid, Long planId){ StudyPlan p=owned(uid,planId); if(p.getStatus()!=PlanStatus.ACTIVE || tasks.countByPlanIdAndStatus(planId, PlanTaskStatus.PENDING)>0) throw new CommonException(ErrorCode.BAD_REQUEST); p.setStatus(PlanStatus.COMPLETED); return to(plans.save(p)); }
+    public StudyPlanResponse archivePlan(Long uid, Long planId){ StudyPlan p=owned(uid,planId); if(p.getStatus()!=PlanStatus.ACTIVE) throw new CommonException(ErrorCode.BAD_REQUEST); p.setStatus(PlanStatus.ARCHIVED); return to(plans.save(p)); }
+    public List<PlanTaskResponse> generateDefaultTasks(Long planId){ StudyPlan p=plans.findById(planId).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); long existing=tasks.findByPlanIdOrderByScheduledDateAsc(planId).size(); if(existing>0) return tasks.findByPlanIdOrderByScheduledDateAsc(planId).stream().map(this::to).toList(); List<PlanTask> gen=new ArrayList<>(); LocalDate start=LocalDate.now(); LocalDate end=p.getExamDate()!=null? p.getExamDate(): start.plusDays(30); long days=Math.max(1, java.time.temporal.ChronoUnit.DAYS.between(start,end)); int totalHours=Math.max(1,p.getHoursPerWeek()) * (int)Math.max(1, (days/7)+1); int tasksPerWeek = Math.max(3, p.getHoursPerWeek()); String[] skills={"LISTENING","READING","WRITING","SPEAKING"}; PlanTaskType[] types={PlanTaskType.MOCK_TEST, PlanTaskType.WRITING, PlanTaskType.REVIEW, PlanTaskType.PRACTICE, PlanTaskType.STUDY}; int count=Math.min((int)days, totalHours*2); for(int i=0;i<count;i++){ LocalDate d=start.plusDays((long)(i*days/(double)count)); String skill=skills[i%skills.length]; PlanTaskType type=types[i%types.length]; int dur=30+ (i%3)*15; gen.add(PlanTask.builder().planId(planId).scheduledDate(d).skill(skill).taskType(type).durationMinutes(dur).description(taskDescription(type,skill,d)).build()); } tasks.saveAll(gen); return gen.stream().map(this::to).toList(); }
     private StudyPlan owned(Long uid, Long id){ return plans.findById(id).filter(pl->uid.equals(pl.getUserId())).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); }
+    private String taskDescription(PlanTaskType type, String skill, LocalDate date) {
+        String typeLabel = switch (type) {
+            case STUDY -> "Học theo mục tiêu";
+            case PRACTICE -> "Luyện tập";
+            case MOCK_TEST -> "Làm đề thi thử";
+            case REVIEW -> "Ôn tập";
+            case WRITING -> "Luyện viết";
+            case SPEAKING -> "Luyện nói";
+        };
+        String skillLabel = switch (skill) {
+            case "LISTENING" -> "Nghe";
+            case "READING" -> "Đọc";
+            case "WRITING" -> "Viết";
+            case "SPEAKING" -> "Nói";
+            default -> skill;
+        };
+        return typeLabel + " · " + skillLabel + " · " + date;
+    }
     private StudyPlanResponse to(StudyPlan p){ long total=tasks.countByPlanIdAndStatus(p.getPlanId(),PlanTaskStatus.PENDING)+tasks.countByPlanIdAndStatus(p.getPlanId(),PlanTaskStatus.COMPLETED)+tasks.countByPlanIdAndStatus(p.getPlanId(),PlanTaskStatus.SKIPPED); long done=tasks.countByPlanIdAndStatus(p.getPlanId(),PlanTaskStatus.COMPLETED); return StudyPlanResponse.builder().planId(p.getPlanId()).title(p.getTitle()).certificateId(p.getCertificateId()).targetScore(p.getTargetScore()).examDate(p.getExamDate()).hoursPerWeek(p.getHoursPerWeek()).status(p.getStatus()).version(p.getVersion()).taskCount(total).completedCount(done).createdAt(p.getPlanCreatedAt()).build(); }
     private PlanTaskResponse to(PlanTask t){ return PlanTaskResponse.builder().taskId(t.getTaskId()).planId(t.getPlanId()).scheduledDate(t.getScheduledDate()).skill(t.getSkill()).taskType(t.getTaskType()).durationMinutes(t.getDurationMinutes()).description(t.getDescription()).status(t.getStatus()).build(); }
 }

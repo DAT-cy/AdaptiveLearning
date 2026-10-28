@@ -6,14 +6,16 @@ import lombok.Data;
 @Data
 @Schema(name = "GenerateQuestionsRequest")
 public class GenerateQuestionsRequest {
-    @NotNull
+    @NotNull @Positive
     private Long certificateId;
-    @NotNull
+    @NotNull @Positive
     private Long topicId;
-    @NotBlank
+    @NotBlank @Size(max = 50)
     private String questionType;
+    @Size(max = 20)
     private String difficulty;
     @Min(1) @Max(20)
     private int count = 5;
+    @Size(max = 4000)
     private String instructions;
 }

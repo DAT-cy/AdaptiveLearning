@@ -9,6 +9,8 @@
     CheckCircle2,
     BarChart3,
     ChevronDown,
+    ChevronLeft,
+    ChevronRight,
     ClipboardCheck,
     CircleCheck,
     CirclePause,
@@ -25,6 +27,7 @@
     Layers,
     LayoutDashboard,
     LoaderCircle,
+    Lock,
     LogOut,
     Menu,
     MoreHorizontal,
@@ -39,9 +42,12 @@
     Tag,
     Trash2,
     TrendingUp,
+    Unlock,
     Upload,
     User,
+    UserCheck,
     Users,
+    UserX,
     Wallet,
     X,
   } from 'lucide-vue-next'
@@ -73,10 +79,14 @@
     'exams',
     'knowledge',
   ]
-  const initialSection = String(route.query.section || 'overview')
-  const activeSection = ref(
-    sectionIds.includes(initialSection) ? initialSection : 'overview'
-  )
+  function resolveSectionId(sec) {
+    const raw = String(sec || 'overview')
+    if (raw === 'knowledge-base') return 'knowledge'
+    return sectionIds.includes(raw) ? raw : 'overview'
+  }
+  const initialSection = resolveSectionId(route.query.section)
+  const activeSection = ref(initialSection)
+
   const users = ref([])
   const payments = ref([])
   const plans = ref([])
@@ -130,6 +140,9 @@
   const knowledgeFiles = ref([])
   const knowledgeSearch = ref('')
   const knowledgeFilter = ref('all')
+  const knowledgeProgramFilter = ref('all')
+  const knowledgePage = ref(1)
+  const knowledgePageSize = ref(8)
   const knowledgeDragging = ref(false)
   const knowledgeNotice = ref('')
   const knowledgeFormErrors = reactive({ files: '', exam: '', titles: '' })
@@ -274,19 +287,34 @@
   )
 
   const navigation = [
-    { id: 'overview', label: 'Tổng quan', icon: LayoutDashboard },
-    { id: 'accounts', label: 'Tài khoản', icon: Users },
-    { id: 'billing', label: 'Gói cước & Thanh toán', icon: CreditCard },
-    { id: 'results', label: 'Kết quả học tập', icon: BarChart3 },
-    { id: 'programs', label: 'Kỳ thi & chứng chỉ', icon: GraduationCap },
-    { id: 'exams', label: 'Bài kiểm tra', icon: ClipboardCheck },
-    { id: 'knowledge', label: 'Kho kiến thức', icon: Database },
+    { id: 'overview', label: 'Tổng quan hệ thống', icon: LayoutDashboard, group: 'BÁO CÁO & PHÂN TÍCH' },
+    { id: 'results', label: 'Kết quả học tập', icon: BarChart3, group: 'BÁO CÁO & PHÂN TÍCH' },
+    { id: 'programs', label: 'Kỳ thi & chứng chỉ', icon: GraduationCap, group: 'QUẢN LÝ ĐÀO TẠO' },
+    { id: 'exams', label: 'Bài kiểm tra', icon: ClipboardCheck, group: 'QUẢN LÝ ĐÀO TẠO' },
+    { id: 'knowledge', label: 'Kho kiến thức', icon: Database, group: 'QUẢN LÝ ĐÀO TẠO' },
+    { id: 'accounts', label: 'Quản lý tài khoản', icon: Users, group: 'VẬN HÀNH & HỆ THỐNG' },
+    { id: 'billing', label: 'Gói cước & Thanh toán', icon: CreditCard, group: 'VẬN HÀNH & HỆ THỐNG' },
+  ]
+
+  const navGroups = [
+    {
+      title: 'BÁO CÁO & PHÂN TÍCH',
+      items: navigation.filter((item) => item.group === 'BÁO CÁO & PHÂN TÍCH'),
+    },
+    {
+      title: 'QUẢN LÝ ĐÀO TẠO',
+      items: navigation.filter((item) => item.group === 'QUẢN LÝ ĐÀO TẠO'),
+    },
+    {
+      title: 'VẬN HÀNH & HỆ THỐNG',
+      items: navigation.filter((item) => item.group === 'VẬN HÀNH & HỆ THỐNG'),
+    },
   ]
 
   const currentTitle = computed(
     () =>
       activeSection.value === 'overview'
-        ? 'Thống kê học tập'
+        ? 'Tổng quan hệ thống'
         : navigation.find((item) => item.id === activeSection.value)?.label ||
       'Tổng quan'
   )
@@ -349,7 +377,7 @@
       { userId: 'demo-4', username: 'Phạm Quốc Bảo', attempts: 2, averageScorePercent: 62.7, lastAttemptAt: null },
     ],
   }
-  const displayAnalyticsData = computed(() => showAnalyticsSample.value ? analyticsSample : analyticsData.value)
+  const displayAnalyticsData = computed(() => analyticsData.value)
   const adminName = computed(() => userStore.state.fullName || userStore.state.username || 'Quản trị viên')
   const activeUsers = computed(
     () => users.value.filter((item) => item.enabled && item.emailVerified !== false).length
@@ -414,11 +442,28 @@
     return knowledgeDocuments.value.filter((document) => {
       if (knowledgeFilter.value === 'active' && !document.active) return false
       if (knowledgeFilter.value === 'inactive' && document.active) return false
+      if (knowledgeProgramFilter.value !== 'all' && String(document.certificateId) !== String(knowledgeProgramFilter.value)) return false
       if (!search) return true
       return `${document.title} ${document.fileName} ${programName(document.certificateId)} ${knowledgeTopicName(document.topicId)}`
         .toLocaleLowerCase('vi')
         .includes(search)
     })
+  })
+  const knowledgeTotalPages = computed(() =>
+    Math.max(1, Math.ceil(filteredKnowledgeDocuments.value.length / knowledgePageSize.value))
+  )
+  const paginatedKnowledgeDocuments = computed(() => {
+    const start = (knowledgePage.value - 1) * knowledgePageSize.value
+    return filteredKnowledgeDocuments.value.slice(start, start + knowledgePageSize.value)
+  })
+  function resetKnowledgeFilters() {
+    knowledgeSearch.value = ''
+    knowledgeFilter.value = 'all'
+    knowledgeProgramFilter.value = 'all'
+    knowledgePage.value = 1
+  }
+  watch([knowledgeSearch, knowledgeFilter, knowledgeProgramFilter], () => {
+    knowledgePage.value = 1
   })
   const knowledgeTopics = computed(() =>
     topics.value.filter(
@@ -446,27 +491,163 @@
     return Array.isArray(trend) ? trend : []
   })
   const learnerSkillCount = computed(() => Object.keys(parseJson(learnerProgress.value?.masteryBySkillJson)).length)
-  const filteredUsers = computed(() =>
-    users.value.filter((item) =>
-      `${item.username} ${item.role}`
+  const accountSearchQuery = ref('')
+  const accountRoleFilter = ref('all')
+  const accountPlanFilter = ref('all')
+  const accountStatusFilter = ref('all')
+  const accountPage = ref(1)
+  const accountPageSize = ref(10)
+
+  function resetAccountFilters() {
+    accountSearchQuery.value = ''
+    accountRoleFilter.value = 'all'
+    accountPlanFilter.value = 'all'
+    accountStatusFilter.value = 'all'
+    accountPage.value = 1
+  }
+
+  const totalAccountsCount = computed(() => users.value.length)
+  const studentAccountsCount = computed(() => users.value.filter((u) => u.role === 'ROLE_USER').length)
+  const activeAccountsCount = computed(() => users.value.filter((u) => u.enabled && u.emailVerified !== false).length)
+  const premiumAccountsCount = computed(() => users.value.filter((u) => u.plan === 'PREMIUM').length)
+
+  const filteredUsers = computed(() => {
+    const q = (accountSearchQuery.value || query.value).trim().toLowerCase()
+    return users.value.filter((item) => {
+      if (q) {
+        const matchesUsername = item.username?.toLowerCase().includes(q)
+        const matchesId = String(item.userId || '').includes(q)
+        const matchesRole = item.role?.toLowerCase().includes(q)
+        if (!matchesUsername && !matchesId && !matchesRole) return false
+      }
+      if (accountRoleFilter.value !== 'all' && item.role !== accountRoleFilter.value) {
+        return false
+      }
+      if (accountPlanFilter.value !== 'all') {
+        const currentPlan = item.plan || 'FREE'
+        if (currentPlan !== accountPlanFilter.value) return false
+      }
+      if (accountStatusFilter.value === 'active') {
+        if (!item.enabled || item.emailVerified === false) return false
+      } else if (accountStatusFilter.value === 'disabled') {
+        if (item.enabled) return false
+      } else if (accountStatusFilter.value === 'unverified') {
+        if (item.emailVerified !== false) return false
+      }
+      return true
+    })
+  })
+
+  const accountTotalPages = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / accountPageSize.value)))
+  const paginatedUsers = computed(() => {
+    const start = (accountPage.value - 1) * accountPageSize.value
+    return filteredUsers.value.slice(start, start + accountPageSize.value)
+  })
+
+  watch([accountSearchQuery, accountRoleFilter, accountPlanFilter, accountStatusFilter, query], () => {
+    accountPage.value = 1
+  })
+  // Results attempts search and pagination
+  const attemptSearch = ref('')
+  const attemptStatusFilter = ref('all')
+  const attemptPage = ref(1)
+  const attemptPageSize = ref(10)
+  const filteredLearnerAttempts = computed(() => {
+    const q = attemptSearch.value.trim().toLowerCase()
+    return learnerScopedAttempts.value.filter((attempt) => {
+      const matchesSearch = !q || examTitle(attempt).toLowerCase().includes(q) || String(attempt.attemptId).includes(q)
+      const matchesStatus = attemptStatusFilter.value === 'all' || String(attempt.status || '').toUpperCase() === attemptStatusFilter.value
+      return matchesSearch && matchesStatus
+    })
+  })
+  const attemptTotalPages = computed(() => Math.max(1, Math.ceil(filteredLearnerAttempts.value.length / attemptPageSize.value)))
+  const paginatedLearnerAttempts = computed(() => {
+    const start = (attemptPage.value - 1) * attemptPageSize.value
+    return filteredLearnerAttempts.value.slice(start, start + attemptPageSize.value)
+  })
+  watch([attemptSearch, attemptStatusFilter, selectedLearnerId, learnerCertificateId], () => {
+    attemptPage.value = 1
+  })
+  function resetAttemptFilters() {
+    attemptSearch.value = ''
+    attemptStatusFilter.value = 'all'
+    attemptPage.value = 1
+  }
+
+  // Programs search and skill parser
+  const programSearch = ref('')
+  const filteredPrograms = computed(() => {
+    const q = (programSearch.value || query.value).trim().toLowerCase()
+    return programs.value.filter((item) =>
+      !q || `${item.name} ${item.code} ${item.description || ''}`
         .toLowerCase()
-        .includes(query.value.toLowerCase())
+        .includes(q)
     )
-  )
-  const filteredPrograms = computed(() =>
-    programs.value.filter((item) =>
-      `${item.name} ${item.code} ${item.description || ''}`
+  })
+  function resetProgramFilters() {
+    programSearch.value = ''
+    query.value = ''
+  }
+  function parseSkillArray(skills) {
+    const labels = {
+      LISTENING: 'Nghe',
+      READING: 'Đọc',
+      WRITING: 'Viết',
+      SPEAKING: 'Nói',
+      TOAN: 'Toán',
+      VAN: 'Ngữ văn',
+      ANH: 'Tiếng Anh',
+      LY: 'Vật lý',
+      HOA: 'Hóa học',
+      SINH: 'Sinh học',
+      SU: 'Lịch sử',
+      DIA: 'Địa lý',
+    }
+    try {
+      const arr = typeof skills === 'string' ? JSON.parse(skills || '[]') : skills
+      if (Array.isArray(arr)) {
+        return arr.map((item) => ({ code: item, label: labels[item] || item }))
+      }
+    } catch {
+      return []
+    }
+    return []
+  }
+
+  // Exams search, filter, pagination
+  const examSearch = ref('')
+  const examProgramFilter = ref('all')
+  const examStatusFilter = ref('all')
+  const examPage = ref(1)
+  const examPageSize = ref(10)
+  const filteredExams = computed(() => {
+    const q = (examSearch.value || query.value).trim().toLowerCase()
+    return exams.value.filter((item) => {
+      const matchesSearch = !q || `${item.title || ''} ${item.description || ''} ${programName(item.certificateId)}`
         .toLowerCase()
-        .includes(query.value.toLowerCase())
-    )
-  )
-  const filteredExams = computed(() =>
-    exams.value.filter((item) =>
-      `${item.title || ''} ${item.description || ''} ${programName(item.certificateId)}`
-        .toLowerCase()
-        .includes(query.value.toLowerCase())
-    )
-  )
+        .includes(q)
+      const matchesProgram = examProgramFilter.value === 'all' || String(item.certificateId) === String(examProgramFilter.value)
+      const matchesStatus = examStatusFilter.value === 'all'
+        || (examStatusFilter.value === 'PUBLISHED' && item.status === 'PUBLISHED')
+        || (examStatusFilter.value === 'DRAFT' && item.status !== 'PUBLISHED')
+      return matchesSearch && matchesProgram && matchesStatus
+    })
+  })
+  const examTotalPages = computed(() => Math.max(1, Math.ceil(filteredExams.value.length / examPageSize.value)))
+  const paginatedExams = computed(() => {
+    const start = (examPage.value - 1) * examPageSize.value
+    return filteredExams.value.slice(start, start + examPageSize.value)
+  })
+  watch([examSearch, examProgramFilter, examStatusFilter], () => {
+    examPage.value = 1
+  })
+  function resetExamFilters() {
+    examSearch.value = ''
+    examProgramFilter.value = 'all'
+    examStatusFilter.value = 'all'
+    examPage.value = 1
+    query.value = ''
+  }
   function asList(response) {
     if (Array.isArray(response)) return response
     return response?.content || response?.items || []
@@ -587,12 +768,10 @@
   watch(
     () => route.query.section,
     (section) => {
-      const requested = String(section || 'overview')
-      activeSection.value = sectionIds.includes(requested)
-        ? requested
-        : 'overview'
+      activeSection.value = resolveSectionId(section)
     }
   )
+
 
   watch([analyticsPeriod, analyticsCertificateId], () => {
     showAnalyticsSample.value = false
@@ -1054,27 +1233,54 @@
 
   async function updateRole(user, event) {
     const oldRole = user.role
-    user.role = event.target.value
+    const newRole = event.target.value
+    if (oldRole === newRole) return
+    const confirmed = await confirm({
+      title: 'Xác nhận thay đổi vai trò',
+      message: `Bạn có chắc muốn cấp vai trò "${newRole === 'ROLE_ADMIN' ? 'Quản trị viên (ROLE_ADMIN)' : 'Người học (ROLE_USER)'}" cho tài khoản "${user.username}"?`,
+      confirmLabel: 'Xác nhận',
+      cancelLabel: 'Hủy',
+    })
+    if (!confirmed) {
+      event.target.value = oldRole
+      return
+    }
+    user.role = newRole
     try {
-      await adminService.updateUserRole(user.userId, user.role)
+      await adminService.updateUserRole(user.userId, newRole)
+      toast.success(`Đã cập nhật vai trò thành công cho "${user.username}"`)
+      await loadData()
     } catch (error) {
       user.role = oldRole
       pageError.value =
         error?.response?.data?.responseMessage ||
         'Không thể cập nhật quyền tài khoản.'
+      toast.error(pageError.value)
     }
   }
 
   async function updateStatus(user) {
-    const enabled = !user.enabled
-    user.enabled = enabled
+    const nextEnabled = !user.enabled
+    if (!nextEnabled) {
+      const confirmed = await confirm({
+        title: 'Xác nhận khóa tài khoản',
+        message: `Bạn có chắc muốn khóa tài khoản "${user.username}"? Người dùng này sẽ không thể đăng nhập hoặc làm bài thi.`,
+        confirmLabel: 'Khóa tài khoản',
+        cancelLabel: 'Hủy',
+      })
+      if (!confirmed) return
+    }
+    user.enabled = nextEnabled
     try {
-      await adminService.updateUserStatus(user.userId, enabled)
+      await adminService.updateUserStatus(user.userId, nextEnabled)
+      toast.success(nextEnabled ? `Đã mở khóa tài khoản "${user.username}"` : `Đã khóa tài khoản "${user.username}"`)
+      await loadData()
     } catch (error) {
-      user.enabled = !enabled
+      user.enabled = !nextEnabled
       pageError.value =
         error?.response?.data?.responseMessage ||
         'Không thể cập nhật trạng thái tài khoản.'
+      toast.error(pageError.value)
     }
   }
 
@@ -1207,8 +1413,16 @@
   }
 
   async function savePlan() {
-    if (!planForm.code.trim() || !planForm.name.trim()) {
-      planModalError.value = 'Vui lòng nhập đầy đủ Mã gói và Tên gói.'
+    if (!planForm.code.trim()) {
+      planModalError.value = 'Vui lòng nhập Mã gói cước (ví dụ: PRO_MONTHLY).'
+      return
+    }
+    if (!planForm.name.trim()) {
+      planModalError.value = 'Vui lòng nhập Tên gói cước.'
+      return
+    }
+    if (planForm.price < 0 || isNaN(Number(planForm.price))) {
+      planModalError.value = 'Giá gói cước không hợp lệ (phải từ 0 trở lên).'
       return
     }
     savingPlan.value = true
@@ -1248,12 +1462,21 @@
   }
 
   async function togglePlanStatus(plan) {
+    if (plan.isActive) {
+      const confirmed = await confirm({
+        title: 'Xác nhận tạm ẩn gói cước',
+        message: `Bạn có chắc muốn tạm ẩn gói "${plan.name}"? Học viên sẽ không còn thấy gói này trên trang Bảng giá.`,
+        confirmLabel: 'Tạm ẩn gói',
+        cancelLabel: 'Hủy',
+      })
+      if (!confirmed) return
+    }
     try {
       await adminService.togglePlan(plan.planId)
       plan.isActive = !plan.isActive
       toast.success(
         plan.isActive
-          ? `Đã kích hoạt gói "${plan.name}"`
+          ? `Đã mở bán lại gói "${plan.name}"`
           : `Đã tạm ẩn gói "${plan.name}"`
       )
     } catch (error) {
@@ -1291,6 +1514,28 @@
         (userBillingPlanFilter.value === 'FREE' && u.plan !== 'PREMIUM')
       return matchesSearch && matchesPlan
     })
+  })
+  const userBillingPage = ref(1)
+  const userBillingPageSize = ref(10)
+  const userBillingTotalPages = computed(() => Math.max(1, Math.ceil(filteredUserBillings.value.length / userBillingPageSize.value)))
+  const paginatedUserBillings = computed(() => {
+    const start = (userBillingPage.value - 1) * userBillingPageSize.value
+    return filteredUserBillings.value.slice(start, start + userBillingPageSize.value)
+  })
+
+  const paymentPage = ref(1)
+  const paymentPageSize = ref(10)
+  const paymentTotalPages = computed(() => Math.max(1, Math.ceil(filteredPayments.value.length / paymentPageSize.value)))
+  const paginatedPayments = computed(() => {
+    const start = (paymentPage.value - 1) * paymentPageSize.value
+    return filteredPayments.value.slice(start, start + paymentPageSize.value)
+  })
+
+  watch([userBillingSearch, userBillingPlanFilter], () => {
+    userBillingPage.value = 1
+  })
+  watch([paymentSearch, paymentStatusFilter, paymentProviderFilter], () => {
+    paymentPage.value = 1
   })
 
   async function viewUserPayments(userBilling) {
@@ -1368,50 +1613,86 @@
       class="admin-sidebar"
       :class="{ 'admin-sidebar-open': mobileMenuOpen }"
     >
-      <a class="admin-brand" href="/admin">
-        <span class="admin-brand-mark"><Shield :size="20" /></span>
-        <span class="admin-brand-copy">
-          <strong>Adaptive <em>Learning</em></strong>
-          <small>Trung tâm quản trị</small>
-        </span>
-      </a>
-      <div class="admin-workspace-label">QUẢN TRỊ HỌC TẬP</div>
-      <nav class="admin-nav" aria-label="Điều hướng quản trị">
-        <button
-          v-for="item in navigation"
-          :key="item.id"
-          :class="['admin-nav-link', { active: activeSection === item.id }]"
-          :aria-current="activeSection === item.id ? 'page' : undefined"
-          @click="openSection(item.id)"
-        >
-          <span class="admin-nav-icon" :class="`nav-icon-${item.id}`">
-            <component :is="item.icon" :size="17" aria-hidden="true" />
+      <div class="admin-sidebar-header">
+        <a class="admin-brand" href="/admin" @click.prevent="openSection('overview')">
+          <span class="admin-brand-mark"><Shield :size="20" /></span>
+          <span class="admin-brand-copy">
+            <strong>Adaptive <em>Learning</em></strong>
+            <small>Cổng Quản Trị Hệ Thống</small>
           </span>
-          <span class="admin-nav-label">{{ item.label }}</span>
-          <span v-if="activeSection === item.id" class="admin-nav-indicator" aria-hidden="true"></span>
+        </a>
+        <button
+          v-if="mobileMenuOpen"
+          type="button"
+          class="admin-sidebar-close"
+          aria-label="Đóng menu điều hướng"
+          @click="mobileMenuOpen = false"
+        >
+          <X :size="18" />
         </button>
-      </nav>
-      <div class="admin-sidebar-bottom">
-        <span class="admin-status-dot"></span>
-        <div>
-          <strong>Hệ thống hoạt động</strong>
-          <small>Quyền quản trị</small>
+      </div>
+
+      <nav class="admin-nav" aria-label="Điều hướng quản trị">
+        <div v-for="grp in navGroups" :key="grp.title" class="admin-nav-group">
+          <div class="admin-workspace-label">{{ grp.title }}</div>
+          <button
+            v-for="item in grp.items"
+            :key="item.id"
+            :class="['admin-nav-link', { active: activeSection === item.id }]"
+            :aria-current="activeSection === item.id ? 'page' : undefined"
+            @click="openSection(item.id)"
+          >
+            <span class="admin-nav-icon" :class="`nav-icon-${item.id}`">
+              <component :is="item.icon" :size="17" aria-hidden="true" />
+            </span>
+            <span class="admin-nav-label">{{ item.label }}</span>
+            <span v-if="activeSection === item.id" class="admin-nav-indicator" aria-hidden="true"></span>
+          </button>
         </div>
+      </nav>
+
+      <div class="admin-sidebar-bottom">
+        <div class="admin-status-indicator">
+          <span class="admin-status-dot"></span>
+          <div>
+            <strong>Hệ thống sẵn sàng</strong>
+            <small>Quyền Quản trị viên</small>
+          </div>
+        </div>
+        <RouterLink to="/home" class="admin-switch-learner-btn" title="Chuyển sang giao diện người học">
+          <Eye :size="14" />
+          <span>Giao diện Học viên</span>
+        </RouterLink>
       </div>
     </aside>
 
+    <div
+      v-if="mobileMenuOpen"
+      class="admin-scrim"
+      aria-hidden="true"
+      @click="mobileMenuOpen = false"
+    ></div>
+
     <section class="admin-workspace">
       <header class="admin-topbar">
-        <Tooltip :label="mobileMenuOpen ? 'Đóng menu điều hướng' : 'Mở menu điều hướng'">
-          <template #trigger>
-            <button class="admin-menu-button" :aria-label="mobileMenuOpen ? 'Đóng menu' : 'Mở menu'" @click="mobileMenuOpen = !mobileMenuOpen">
-              <X v-if="mobileMenuOpen" :size="19" />
-              <Menu v-else :size="19" />
-            </button>
-          </template>
-        </Tooltip>
+        <div class="admin-topbar-left">
+          <button
+            class="admin-menu-button"
+            :aria-label="mobileMenuOpen ? 'Đóng menu' : 'Mở menu'"
+            @click="mobileMenuOpen = !mobileMenuOpen"
+          >
+            <Menu :size="19" />
+          </button>
+
+          <div class="admin-breadcrumb">
+            <span class="breadcrumb-badge">Quản trị</span>
+            <ChevronRight :size="14" class="breadcrumb-arrow" />
+            <span class="breadcrumb-page">{{ currentTitle }}</span>
+          </div>
+        </div>
+
         <label class="admin-search">
-          <Search :size="17" />
+          <Search :size="16" />
           <input
             v-model="query"
             type="search"
@@ -1419,11 +1700,17 @@
             aria-label="Tìm kiếm quản trị"
           />
         </label>
+
         <div class="admin-top-actions">
+          <RouterLink to="/home" class="admin-preview-learner-link" title="Xem giao diện học viên">
+            <Eye :size="14" />
+            <span>Cổng học viên</span>
+          </RouterLink>
+
           <Tooltip label="Thông báo mới">
             <template #trigger>
               <button class="admin-notification" aria-label="Thông báo">
-                <Bell :size="18" />
+                <Bell :size="17" />
                 <i></i>
               </button>
             </template>
@@ -1519,9 +1806,9 @@
         </div>
         <div v-if="activeSection !== 'knowledge'" class="admin-page-heading">
           <div>
-            <p class="admin-kicker">{{ activeSection === 'overview' ? 'BÁO CÁO HỌC TẬP' : 'TRUNG TÂM QUẢN TRỊ' }}</p>
+            <p class="admin-kicker">{{ activeSection === 'overview' ? 'BÁO CÁO & PHÂN TÍCH' : 'TRUNG TÂM QUẢN TRỊ' }}</p>
             <h1>{{ currentTitle }}</h1>
-            <p>{{ activeSection === 'overview' ? 'Kết quả làm bài và tiến độ người học trong kỳ được chọn.' : 'Quản lý tài khoản và nội dung phục vụ lộ trình học tập cá nhân.' }}</p>
+            <p>{{ activeSection === 'overview' ? 'Theo dõi chỉ số học tập, lượt thi thực tế và trạng thái vận hành nền tảng theo thời gian thực.' : 'Quản lý tài khoản và nội dung phục vụ lộ trình học tập cá nhân.' }}</p>
           </div>
           <div class="heading-actions">
             <div v-if="activeSection === 'overview'" class="analytics-controls">
@@ -1535,6 +1822,17 @@
                   <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">{{ program.name }}</option>
                 </select>
               </label>
+              <button
+                type="button"
+                class="admin-secondary-button overview-refresh-button"
+                :disabled="analyticsLoading"
+                title="Làm mới số liệu thống kê"
+                aria-label="Làm mới số liệu thống kê"
+                @click="loadAnalytics"
+              >
+                <RefreshCw :size="15" :class="{ 'overlay-spinner': analyticsLoading }" />
+                <span>Làm mới</span>
+              </button>
             </div>
             <button
               v-if="activeSection === 'accounts'"
@@ -1556,189 +1854,752 @@
         </div>
 
         <template v-if="activeSection === 'overview'">
-          <div v-if="analyticsLoading" class="analytics-state analytics-loading" role="status" aria-live="polite">
-            <span class="analytics-loading-line"></span><span>Đang tổng hợp kết quả học tập…</span>
-          </div>
-          <div v-else-if="analyticsError" class="analytics-state analytics-error" role="alert">
-            <div><strong>Không thể tải báo cáo</strong><span>{{ analyticsError }}</span></div>
-            <button type="button" class="analytics-retry" @click="loadAnalytics">Thử lại</button>
-          </div>
-          <div v-else-if="!displayAnalyticsData || !displayAnalyticsData.startedAttempts" class="analytics-state analytics-empty">
-            <p class="analytics-overline">{{ analyticsPeriods.find((period) => period.id === analyticsPeriod)?.label }} · {{ programs.find((program) => String(program.certificateId) === String(analyticsCertificateId))?.name || 'Tất cả kỳ thi' }}</p>
-            <h2>Chưa có lượt thi trong khoảng thời gian này</h2>
-            <p>Khi người học bắt đầu làm bài, xu hướng điểm và tỷ lệ hoàn thành sẽ được tổng hợp tại đây.</p>
-            <button type="button" class="analytics-sample-button" @click="showAnalyticsSample = true">Xem dữ liệu minh họa</button>
-          </div>
-          <template v-else>
-            <p v-if="showAnalyticsSample" class="analytics-demo-notice">Dữ liệu minh họa, không phải số liệu thật</p>
-            <div class="analytics-observation" aria-live="polite">
-              <span>ĐIỂM ĐÁNG CHÚ Ý</span>
-              <p>{{ analyticsInsight }}</p>
-            </div>
-            <section class="analytics-lead" aria-label="Tổng quan kết quả học tập">
-              <div class="analytics-primary-metric">
-                <span>TỶ LỆ HOÀN THÀNH</span>
-                <strong>{{ formatPercent(displayAnalyticsData.completionRate) }}</strong>
-                <div class="analytics-primary-meta">
-                  <span>{{ formatAdminNumber(displayAnalyticsData.completedAttempts) }} / {{ formatAdminNumber(displayAnalyticsData.startedAttempts) }} lượt thi đã nộp</span>
-                  <span v-if="displayAnalyticsData.completionRateChange != null" :class="['analytics-delta', displayAnalyticsData.completionRateChange > 0 ? 'positive' : displayAnalyticsData.completionRateChange < 0 ? 'negative' : 'neutral']">
-                    {{ displayAnalyticsData.completionRateChange > 0 ? '+' : displayAnalyticsData.completionRateChange < 0 ? '−' : '' }}{{ formatSignedPoint(displayAnalyticsData.completionRateChange) }} đpt
+          <div class="overview-container">
+            <!-- 1. Real-Data KPI Summary Cards -->
+            <div class="overview-kpi-grid">
+              <!-- KPI 1: Học viên hệ thống -->
+              <div class="overview-kpi-card is-interactive" @click="openSection('accounts')">
+                <div class="overview-kpi-header">
+                  <div class="overview-kpi-icon icon-blue">
+                    <Users :size="20" />
+                  </div>
+                  <span class="overview-kpi-action">Quản lý →</span>
+                </div>
+                <div class="overview-kpi-info">
+                  <span class="overview-kpi-label">Học viên hệ thống</span>
+                  <strong class="overview-kpi-value">{{ formatAdminNumber(studentAccountsCount) }}</strong>
+                  <div class="overview-kpi-meta">
+                    <span class="status-dot online"></span>
+                    <span>{{ formatAdminNumber(activeAccountsCount) }} hoạt động · {{ formatAdminNumber(premiumAccountsCount) }} Premium</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- KPI 2: Lượt làm bài trong kỳ -->
+              <div class="overview-kpi-card">
+                <div class="overview-kpi-header">
+                  <div class="overview-kpi-icon icon-teal">
+                    <ClipboardCheck :size="20" />
+                  </div>
+                  <span
+                    v-if="displayAnalyticsData?.completionRateChange != null"
+                    :class="['overview-delta-badge', displayAnalyticsData.completionRateChange > 0 ? 'delta-positive' : displayAnalyticsData.completionRateChange < 0 ? 'delta-negative' : 'delta-neutral']"
+                  >
+                    {{ displayAnalyticsData.completionRateChange > 0 ? '+' : displayAnalyticsData.completionRateChange < 0 ? '−' : '' }}{{ formatSignedPoint(displayAnalyticsData.completionRateChange) }}%
                   </span>
                 </div>
-                <p>So với {{ analyticsPeriods.find((period) => period.id === analyticsPeriod)?.label.toLowerCase() }} liền trước</p>
+                <div class="overview-kpi-info">
+                  <span class="overview-kpi-label">Lượt thi trong kỳ ({{ analyticsPeriods.find((p) => p.id === analyticsPeriod)?.label }})</span>
+                  <strong class="overview-kpi-value">{{ formatAdminNumber(displayAnalyticsData?.startedAttempts ?? 0) }}</strong>
+                  <div class="overview-kpi-meta">
+                    <span>{{ formatAdminNumber(displayAnalyticsData?.completedAttempts ?? 0) }} đã nộp bài ({{ formatPercent(displayAnalyticsData?.completionRate) }})</span>
+                  </div>
+                </div>
               </div>
-              <dl class="analytics-supporting-metrics">
-                <div><dt>Điểm trung bình</dt><dd>{{ formatPercent(displayAnalyticsData.averageScorePercent) }}</dd><small v-if="displayAnalyticsData.averageScoreChange != null" :class="['analytics-delta', displayAnalyticsData.averageScoreChange > 0 ? 'positive' : displayAnalyticsData.averageScoreChange < 0 ? 'negative' : 'neutral']">{{ displayAnalyticsData.averageScoreChange > 0 ? '+' : displayAnalyticsData.averageScoreChange < 0 ? '−' : '' }}{{ formatSignedPoint(displayAnalyticsData.averageScoreChange) }} điểm so với kỳ trước</small><small v-else>Trên các lượt đã chấm</small></div>
-                <div><dt>Tỷ lệ đạt</dt><dd>{{ formatPercent(displayAnalyticsData.passRate) }}</dd><small>Trong số bài đã chấm</small></div>
-                <div><dt>Người học có lượt thi</dt><dd>{{ formatAdminNumber(displayAnalyticsData.activeLearners) }}</dd><small>Trong khoảng thời gian đã chọn</small></div>
-              </dl>
-            </section>
-            <div class="analytics-detail-grid">
-              <section class="analytics-chart-section" aria-labelledby="analytics-chart-title">
-                <div class="analytics-section-heading">
-                  <div><h2 id="analytics-chart-title">Điểm số theo thời gian</h2><p>Điểm trung bình và số lượt làm theo tuần</p></div>
-                  <div class="analytics-legend" aria-label="Chú giải biểu đồ"><span class="legend-score">Điểm TB</span><span class="legend-volume">Số lượt</span></div>
+
+              <!-- KPI 3: Điểm trung bình & Tỷ lệ đạt -->
+              <div class="overview-kpi-card">
+                <div class="overview-kpi-header">
+                  <div class="overview-kpi-icon icon-green">
+                    <TrendingUp :size="20" />
+                  </div>
+                  <span
+                    v-if="displayAnalyticsData?.averageScoreChange != null"
+                    :class="['overview-delta-badge', displayAnalyticsData.averageScoreChange > 0 ? 'delta-positive' : displayAnalyticsData.averageScoreChange < 0 ? 'delta-negative' : 'delta-neutral']"
+                  >
+                    {{ displayAnalyticsData.averageScoreChange > 0 ? '+' : displayAnalyticsData.averageScoreChange < 0 ? '−' : '' }}{{ formatSignedPoint(displayAnalyticsData.averageScoreChange) }}đ
+                  </span>
                 </div>
-                <div v-if="!analyticsChartPoints.some((point) => point.y != null)" class="analytics-chart-empty">Chưa có bài thi được chấm điểm trong kỳ này.</div>
-                <svg v-else class="analytics-chart" viewBox="0 0 720 300" role="img" aria-label="Biểu đồ điểm trung bình theo thời gian; cột xám biểu thị số lượt thi">
-                  <g class="analytics-chart-grid">
-                    <template v-for="tick in [0, 25, 50, 75, 100]" :key="tick">
-                      <line x1="48" :y1="22 + (100 - tick) * 2.1" x2="672" :y2="22 + (100 - tick) * 2.1" />
-                      <text x="36" :y="26 + (100 - tick) * 2.1">{{ tick }}</text>
-                    </template>
-                  </g>
-                  <g class="analytics-chart-bars" aria-hidden="true">
-                    <rect v-for="(point, index) in analyticsChartPoints" :key="`bar-${index}`" :x="point.x - 9" :y="256 - Math.max(2, point.attempts / analyticsMaxAttempts * 28)" width="18" :height="Math.max(2, point.attempts / analyticsMaxAttempts * 28)" rx="2" />
-                  </g>
-                  <path v-if="analyticsScorePath" class="analytics-score-line" :d="analyticsScorePath" />
-                  <g v-for="(point, index) in analyticsChartPoints" :key="`point-${index}`">
-                    <circle v-if="point.y != null" class="analytics-score-point" :cx="point.x" :cy="point.y" r="4"><title>{{ point.label }}: {{ formatPercent(point.averageScorePercent) }}</title></circle>
-                    <g v-if="point.annotation" class="analytics-annotation">
-                      <title>{{ point.annotation }} · {{ point.label }}</title>
-                      <line :x1="point.x" :y1="256 - Math.max(2, point.attempts / analyticsMaxAttempts * 28) - 2" :x2="point.x" :y2="256 - Math.max(2, point.attempts / analyticsMaxAttempts * 28) - 14" />
-                      <rect :x="Math.min(630, Math.max(48, point.x - 41))" :y="256 - Math.max(2, point.attempts / analyticsMaxAttempts * 28) - 32" width="82" height="18" rx="2" />
-                      <text :x="Math.min(630, Math.max(48, point.x - 41)) + 41" :y="256 - Math.max(2, point.attempts / analyticsMaxAttempts * 28) - 19">{{ point.annotation }}</text>
-                    </g>
-                    <text :class="['analytics-chart-label', { 'label-hidden-mobile': analyticsChartPoints.length > 8 && index % 2 === 1 }]" :x="point.x" y="278">{{ point.label }}</text>
-                  </g>
-                  <text class="analytics-chart-unit" x="48" y="16">Điểm (%)</text>
-                </svg>
-              </section>
-              <section class="analytics-learners-section" aria-labelledby="analytics-learners-title">
-                <div class="analytics-section-heading">
-                  <div><h2 id="analytics-learners-title">Người học cần theo dõi</h2><p>Xếp theo điểm trung bình thấp nhất</p></div>
+                <div class="overview-kpi-info">
+                  <span class="overview-kpi-label">Điểm trung bình lượt thi</span>
+                  <strong class="overview-kpi-value">{{ formatPercent(displayAnalyticsData?.averageScorePercent) }}</strong>
+                  <div class="overview-kpi-meta">
+                    <span>Tỷ lệ đạt chuẩn: <strong>{{ formatPercent(displayAnalyticsData?.passRate) }}</strong></span>
+                  </div>
                 </div>
-                <div v-if="!displayAnalyticsData.learnersToSupport.length" class="analytics-chart-empty">Chưa có kết quả đã chấm để xếp hạng.</div>
-                <div v-else class="analytics-table-wrap">
-                  <table class="analytics-table">
-                    <thead><tr><th>Người học</th><th>Lượt</th><th>Điểm TB</th></tr></thead>
-                    <tbody>
-                      <tr v-for="learner in displayAnalyticsData.learnersToSupport" :key="learner.userId">
-                        <td><strong>{{ learner.username }}</strong><small>{{ learner.lastAttemptAt ? formatAttemptDate(learner.lastAttemptAt) : '—' }}</small></td>
-                        <td>{{ learner.attempts }}</td>
-                        <td>{{ formatPercent(learner.averageScorePercent) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+              </div>
+
+              <!-- KPI 4: Học liệu & Tri thức RAG -->
+              <div class="overview-kpi-card is-interactive" @click="openSection('knowledge')">
+                <div class="overview-kpi-header">
+                  <div class="overview-kpi-icon icon-purple">
+                    <Database :size="20" />
+                  </div>
+                  <span class="overview-kpi-action">Kho tri thức →</span>
                 </div>
-              </section>
+                <div class="overview-kpi-info">
+                  <span class="overview-kpi-label">Học liệu & Tri thức RAG</span>
+                  <strong class="overview-kpi-value">{{ formatAdminNumber(exams.length) }} <span class="overview-kpi-unit">đề thi</span></strong>
+                  <div class="overview-kpi-meta">
+                    <span>{{ programs.length }} chứng chỉ · {{ knowledgeDocuments.length }} tài liệu ({{ formatAdminNumber(knowledgeChunkCount) }} chunks)</span>
+                  </div>
+                </div>
+              </div>
             </div>
-          </template>
+
+            <!-- 2. Loading State -->
+            <div v-if="analyticsLoading" class="overview-status-card overview-loading-state" role="status" aria-live="polite">
+              <LoaderCircle :size="32" class="overlay-spinner" />
+              <div class="status-text">
+                <h3>Đang tổng hợp dữ liệu học tập...</h3>
+                <p>Hệ thống đang truy vấn số liệu thi và tiến độ người học.</p>
+              </div>
+            </div>
+
+            <!-- 3. Error State -->
+            <div v-else-if="analyticsError" class="overview-status-card overview-error-state" role="alert">
+              <div class="error-info">
+                <Info :size="24" class="error-icon" />
+                <div>
+                  <h3>Không thể tải báo cáo thống kê</h3>
+                  <p>{{ analyticsError }}</p>
+                </div>
+              </div>
+              <button type="button" class="admin-secondary-button" @click="loadAnalytics">
+                <RefreshCw :size="15" />
+                <span>Thử lại</span>
+              </button>
+            </div>
+
+            <!-- 4. Content Area (When not loading and no error) -->
+            <template v-else>
+              <!-- AI Insight Banner (when real attempts exist) -->
+              <div v-if="displayAnalyticsData && displayAnalyticsData.startedAttempts > 0" class="overview-insight-banner">
+                <div class="insight-badge">
+                  <Sparkles :size="15" />
+                  <span>PHÂN TÍCH NHANH</span>
+                </div>
+                <p class="insight-content">{{ analyticsInsight }}</p>
+                <span class="insight-period">{{ analyticsPeriods.find((p) => p.id === analyticsPeriod)?.label }} qua · {{ programs.find((program) => String(program.certificateId) === String(analyticsCertificateId))?.name || 'Tất cả kỳ thi' }}</span>
+              </div>
+
+              <!-- Notice Banner when 0 attempts recorded -->
+              <div v-else class="overview-notice-banner">
+                <Info :size="18" class="notice-icon" />
+                <div class="notice-content">
+                  <strong>Chưa có lượt thi trong khoảng thời gian {{ analyticsPeriods.find((p) => p.id === analyticsPeriod)?.label.toLowerCase() }}</strong>
+                  <p>Khi học viên làm bài kiểm tra, biểu đồ xu hướng điểm và danh sách học viên cần hỗ trợ sẽ được tính toán tự động.</p>
+                </div>
+              </div>
+
+              <!-- 2-Column Analytics Details Grid -->
+              <div class="overview-detail-grid">
+                <!-- Column 1: SVG Trend Chart -->
+                <section class="overview-card" aria-labelledby="overview-chart-title">
+                  <div class="overview-card-header">
+                    <div>
+                      <h2 id="overview-chart-title" class="overview-card-title">Xu hướng điểm số & Lượt thi</h2>
+                      <p class="overview-card-subtitle">Điểm trung bình (%) và số lượt nộp bài theo từng mốc thời gian</p>
+                    </div>
+                    <div class="overview-chart-legend">
+                      <span class="legend-item">
+                        <span class="legend-color line-color"></span>
+                        Điểm TB (%)
+                      </span>
+                      <span class="legend-item">
+                        <span class="legend-color bar-color"></span>
+                        Số lượt thi
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="overview-card-body">
+                    <div v-if="!analyticsChartPoints.some((point) => point.y != null)" class="overview-empty-box">
+                      <BarChart3 :size="36" class="empty-icon" />
+                      <h4>Chưa có bài thi được chấm điểm</h4>
+                      <p>Không có bài thi nào được hoàn thành và chấm điểm trong kỳ này để biểu diễn trên biểu đồ.</p>
+                    </div>
+
+                    <div v-else class="overview-chart-wrap">
+                      <svg class="analytics-chart" viewBox="0 0 720 300" role="img" aria-label="Biểu đồ điểm trung bình và lượt thi">
+                        <g class="analytics-chart-grid">
+                          <template v-for="tick in [0, 25, 50, 75, 100]" :key="tick">
+                            <line x1="48" :y1="22 + (100 - tick) * 2.1" x2="672" :y2="22 + (100 - tick) * 2.1" />
+                            <text x="36" :y="26 + (100 - tick) * 2.1">{{ tick }}%</text>
+                          </template>
+                        </g>
+                        <g class="analytics-chart-bars" aria-hidden="true">
+                          <rect v-for="(point, index) in analyticsChartPoints" :key="`bar-${index}`" :x="point.x - 10" :y="256 - Math.max(3, point.attempts / analyticsMaxAttempts * 32)" width="20" :height="Math.max(3, point.attempts / analyticsMaxAttempts * 32)" rx="3" />
+                        </g>
+                        <path v-if="analyticsScorePath" class="analytics-score-line" :d="analyticsScorePath" />
+                        <g v-for="(point, index) in analyticsChartPoints" :key="`point-${index}`">
+                          <circle v-if="point.y != null" class="analytics-score-point" :cx="point.x" :cy="point.y" r="4.5">
+                            <title>{{ point.label }}: {{ formatPercent(point.averageScorePercent) }} ({{ point.attempts }} lượt)</title>
+                          </circle>
+                          <g v-if="point.annotation" class="analytics-annotation">
+                            <title>{{ point.annotation }} · {{ point.label }}</title>
+                            <line :x1="point.x" :y1="256 - Math.max(3, point.attempts / analyticsMaxAttempts * 32) - 2" :x2="point.x" :y2="256 - Math.max(3, point.attempts / analyticsMaxAttempts * 32) - 14" />
+                            <rect :x="Math.min(625, Math.max(48, point.x - 42))" :y="256 - Math.max(3, point.attempts / analyticsMaxAttempts * 32) - 34" width="84" height="20" rx="4" />
+                            <text :x="Math.min(625, Math.max(48, point.x - 42)) + 42" :y="256 - Math.max(3, point.attempts / analyticsMaxAttempts * 32) - 20">{{ point.annotation }}</text>
+                          </g>
+                          <text :class="['analytics-chart-label', { 'label-hidden-mobile': analyticsChartPoints.length > 8 && index % 2 === 1 }]" :x="point.x" y="280">{{ point.label }}</text>
+                        </g>
+                        <text class="analytics-chart-unit" x="48" y="16">Thang điểm (%)</text>
+                      </svg>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Column 2: Learners Needing Support Table -->
+                <section class="overview-card" aria-labelledby="overview-learners-title">
+                  <div class="overview-card-header">
+                    <div>
+                      <h2 id="overview-learners-title" class="overview-card-title">Học viên cần theo dõi</h2>
+                      <p class="overview-card-subtitle">Xếp theo điểm trung bình thấp nhất trong kỳ</p>
+                    </div>
+                    <span v-if="displayAnalyticsData?.learnersToSupport?.length" class="overview-badge-count">
+                      {{ displayAnalyticsData.learnersToSupport.length }}
+                    </span>
+                  </div>
+
+                  <div class="overview-card-body p-0">
+                    <div v-if="!displayAnalyticsData?.learnersToSupport?.length" class="overview-empty-box">
+                      <UserCheck :size="36" class="empty-icon icon-success" />
+                      <h4>Không có học viên dưới chuẩn</h4>
+                      <p>Tất cả học viên hoàn thành bài thi đều đạt kết quả tốt hoặc chưa có dữ liệu điểm thấp cần hỗ trợ.</p>
+                    </div>
+
+                    <div v-else class="overview-table-wrap">
+                      <table class="overview-table">
+                        <thead>
+                          <tr>
+                            <th>Học viên</th>
+                            <th class="text-center">Lượt thi</th>
+                            <th class="text-right">Điểm TB</th>
+                            <th class="text-right">Báo cáo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="learner in displayAnalyticsData.learnersToSupport" :key="learner.userId">
+                            <td>
+                              <div class="learner-cell">
+                                <div class="learner-avatar">
+                                  {{ (learner.username || 'U').slice(0, 2).toUpperCase() }}
+                                </div>
+                                <div class="learner-meta">
+                                  <span class="learner-name" :title="learner.username">{{ learner.username }}</span>
+                                  <small class="learner-date">{{ learner.lastAttemptAt ? formatAttemptDate(learner.lastAttemptAt) : 'Chưa có ngày thi' }}</small>
+                                </div>
+                              </div>
+                            </td>
+                            <td class="text-center">
+                              <span class="attempts-pill">{{ learner.attempts }}</span>
+                            </td>
+                            <td class="text-right">
+                              <span
+                                :class="[
+                                  'score-badge',
+                                  learner.averageScorePercent < 50 ? 'score-low' : learner.averageScorePercent < 70 ? 'score-medium' : 'score-high'
+                                ]"
+                              >
+                                {{ formatPercent(learner.averageScorePercent) }}
+                              </span>
+                            </td>
+                            <td class="text-right">
+                              <button
+                                type="button"
+                                class="overview-action-btn"
+                                title="Xem chi tiết kết quả học tập"
+                                @click="openLearnerReport(learner)"
+                              >
+                                Xem kết quả
+                              </button>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <!-- 3 System Operations Pillars -->
+              <div class="overview-pillars-grid">
+                <!-- Pillar 1: Accounts -->
+                <div class="overview-pillar-card" @click="openSection('accounts')">
+                  <div class="pillar-header">
+                    <div class="pillar-icon pillar-icon-blue">
+                      <Users :size="20" />
+                    </div>
+                    <div>
+                      <h3 class="pillar-title">Vận hành Tài khoản</h3>
+                      <p class="pillar-desc">Quản lý người học, phân quyền và trạng thái</p>
+                    </div>
+                  </div>
+                  <div class="pillar-stats">
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(totalAccountsCount) }}</span>
+                      <span class="stat-label">Tổng tài khoản</span>
+                    </div>
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(studentAccountsCount) }}</span>
+                      <span class="stat-label">Học viên</span>
+                    </div>
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(activeAccountsCount) }}</span>
+                      <span class="stat-label">Hoạt động</span>
+                    </div>
+                  </div>
+                  <div class="pillar-footer">
+                    <span>Xem danh sách tài khoản</span>
+                    <span class="arrow-icon">→</span>
+                  </div>
+                </div>
+
+                <!-- Pillar 2: Exams & Programs -->
+                <div class="overview-pillar-card" @click="openSection('exams')">
+                  <div class="pillar-header">
+                    <div class="pillar-icon pillar-icon-emerald">
+                      <GraduationCap :size="20" />
+                    </div>
+                    <div>
+                      <h3 class="pillar-title">Đào tạo & Khảo thí</h3>
+                      <p class="pillar-desc">Ngân hàng đề thi, bài kiểm tra và chứng chỉ</p>
+                    </div>
+                  </div>
+                  <div class="pillar-stats">
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(programs.length) }}</span>
+                      <span class="stat-label">Chứng chỉ</span>
+                    </div>
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(exams.length) }}</span>
+                      <span class="stat-label">Bài kiểm tra</span>
+                    </div>
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(displayAnalyticsData?.activeLearners ?? 0) }}</span>
+                      <span class="stat-label">Thí sinh trong kỳ</span>
+                    </div>
+                  </div>
+                  <div class="pillar-footer">
+                    <span>Quản lý đề thi & kỳ thi</span>
+                    <span class="arrow-icon">→</span>
+                  </div>
+                </div>
+
+                <!-- Pillar 3: Knowledge Base & RAG -->
+                <div class="overview-pillar-card" @click="openSection('knowledge')">
+                  <div class="pillar-header">
+                    <div class="pillar-icon pillar-icon-purple">
+                      <Database :size="20" />
+                    </div>
+                    <div>
+                      <h3 class="pillar-title">Kho tri thức & RAG AI</h3>
+                      <p class="pillar-desc">Tài liệu kiến thức nạp vào hệ thống AI Tutor</p>
+                    </div>
+                  </div>
+                  <div class="pillar-stats">
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(knowledgeDocuments.length) }}</span>
+                      <span class="stat-label">Tài liệu RAG</span>
+                    </div>
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(activeKnowledgeCount) }}</span>
+                      <span class="stat-label">Đang hiệu lực</span>
+                    </div>
+                    <div class="pillar-stat-item">
+                      <span class="stat-number">{{ formatAdminNumber(knowledgeChunkCount) }}</span>
+                      <span class="stat-label">Đoạn tri thức</span>
+                    </div>
+                  </div>
+                  <div class="pillar-footer">
+                    <span>Quản lý kho tri thức RAG</span>
+                    <span class="arrow-icon">→</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
         </template>
 
         <section
           v-else-if="activeSection === 'accounts'"
-          class="admin-panel admin-table-panel"
+          class="admin-accounts-section"
         >
-          <div class="admin-panel-heading">
-            <div>
-              <h2>Tài khoản người dùng</h2>
-              <p>{{ filteredUsers.length }} tài khoản khớp tìm kiếm</p>
+          <!-- KPI Summary Cards -->
+          <div class="account-kpi-grid">
+            <div class="account-kpi-card">
+              <div class="account-kpi-icon icon-total">
+                <Users :size="20" />
+              </div>
+              <div class="account-kpi-info">
+                <span class="account-kpi-label">Tổng tài khoản</span>
+                <strong class="account-kpi-value">{{ formatAdminNumber(totalAccountsCount) }}</strong>
+                <small class="account-kpi-hint">Toàn bộ tài khoản hệ thống</small>
+              </div>
             </div>
-            <button class="admin-primary-button" @click="openAccount">
-              <Users :size="16" />
-              Tạo tài khoản
-            </button>
-          </div>
-          <div v-if="loading" class="admin-empty admin-empty-loading">
-            <LoaderCircle class="overlay-spinner" :size="22" />
-            <span>Đang tải danh sách tài khoản…</span>
-          </div>
-          <div v-else-if="!filteredUsers.length" class="admin-empty">
-            <div class="empty-icon-wrap">
-              <Users :size="26" />
+
+            <div class="account-kpi-card">
+              <div class="account-kpi-icon icon-students">
+                <GraduationCap :size="20" />
+              </div>
+              <div class="account-kpi-info">
+                <span class="account-kpi-label">Học viên</span>
+                <strong class="account-kpi-value">{{ formatAdminNumber(studentAccountsCount) }}</strong>
+                <small class="account-kpi-hint">Tài khoản vai trò Người học</small>
+              </div>
             </div>
-            <strong>Không có tài khoản phù hợp</strong>
-            <p>Không tìm thấy tài khoản người dùng nào khớp với bộ lọc tìm kiếm hiện tại.</p>
+
+            <div class="account-kpi-card">
+              <div class="account-kpi-icon icon-active">
+                <UserCheck :size="20" />
+              </div>
+              <div class="account-kpi-info">
+                <span class="account-kpi-label">Đang hoạt động</span>
+                <strong class="account-kpi-value">{{ formatAdminNumber(activeAccountsCount) }}</strong>
+                <small class="account-kpi-hint">Đã kích hoạt & xác thực email</small>
+              </div>
+            </div>
+
+            <div class="account-kpi-card">
+              <div class="account-kpi-icon icon-premium">
+                <Sparkles :size="20" />
+              </div>
+              <div class="account-kpi-info">
+                <span class="account-kpi-label">Gói Premium</span>
+                <strong class="account-kpi-value">{{ formatAdminNumber(premiumAccountsCount) }}</strong>
+                <small class="account-kpi-hint">Học viên gói dịch vụ nâng cao</small>
+              </div>
+            </div>
           </div>
-          <div v-else class="admin-table-wrap">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>Tài khoản</th>
-                  <th>Loại tài khoản</th>
-                  <th>Gói học</th>
-                  <th>Trạng thái</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in filteredUsers" :key="user.userId">
-                  <td>
-                    <span class="table-account">
-                      <i
+
+          <!-- Main Account Management Panel -->
+          <div class="admin-panel account-main-panel">
+            <div class="admin-panel-heading account-panel-header">
+              <div>
+                <h2>Danh sách người dùng & Phân quyền</h2>
+                <p>Quản trị vai trò (ROLE_USER, ROLE_ADMIN), gói dịch vụ và trạng thái hoạt động của tài khoản.</p>
+              </div>
+              <div class="account-header-actions">
+                <button
+                  type="button"
+                  class="admin-secondary-button"
+                  :disabled="loading"
+                  title="Tải lại danh sách tài khoản"
+                  @click="loadData"
+                >
+                  <RefreshCw :size="15" :class="{ 'overlay-spinner': loading }" />
+                  <span>Làm mới</span>
+                </button>
+                <button
+                  type="button"
+                  class="admin-primary-button"
+                  @click="openAccount"
+                >
+                  <Plus :size="16" />
+                  <span>Tạo tài khoản</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Filter & Search Toolbar -->
+            <div class="account-toolbar">
+              <div class="account-search-wrap">
+                <Search :size="16" class="account-search-icon" />
+                <input
+                  v-model="accountSearchQuery"
+                  type="search"
+                  placeholder="Tìm theo tên đăng nhập hoặc ID..."
+                  aria-label="Tìm kiếm người dùng"
+                  class="account-search-input"
+                />
+                <button
+                  v-if="accountSearchQuery"
+                  type="button"
+                  class="account-search-clear"
+                  aria-label="Xóa tìm kiếm"
+                  @click="accountSearchQuery = ''"
+                >
+                  <X :size="14" />
+                </button>
+              </div>
+
+              <div class="account-filters">
+                <label class="account-filter-item">
+                  <span class="filter-label">Vai trò</span>
+                  <select v-model="accountRoleFilter" class="filter-select">
+                    <option value="all">Tất cả vai trò</option>
+                    <option value="ROLE_USER">Người học (ROLE_USER)</option>
+                    <option value="ROLE_ADMIN">Quản trị viên (ROLE_ADMIN)</option>
+                  </select>
+                </label>
+
+                <label class="account-filter-item">
+                  <span class="filter-label">Gói cước</span>
+                  <select v-model="accountPlanFilter" class="filter-select">
+                    <option value="all">Tất cả gói</option>
+                    <option value="FREE">Gói Miễn phí (Free)</option>
+                    <option value="PREMIUM">⭐ Gói Cao cấp (Premium)</option>
+                  </select>
+                </label>
+
+                <label class="account-filter-item">
+                  <span class="filter-label">Trạng thái</span>
+                  <select v-model="accountStatusFilter" class="filter-select">
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="active">Đang hoạt động</option>
+                    <option value="disabled">Đã khóa</option>
+                    <option value="unverified">Chờ xác minh email</option>
+                  </select>
+                </label>
+
+                <button
+                  v-if="accountSearchQuery || accountRoleFilter !== 'all' || accountPlanFilter !== 'all' || accountStatusFilter !== 'all'"
+                  type="button"
+                  class="account-reset-filter-btn"
+                  @click="resetAccountFilters"
+                >
+                  <RotateCcw :size="13" />
+                  <span>Đặt lại</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Count & Meta summary -->
+            <div class="account-meta-summary">
+              <span>Hiển thị <strong>{{ paginatedUsers.length }}</strong> / <strong>{{ filteredUsers.length }}</strong> tài khoản phù hợp (Tổng số: {{ totalAccountsCount }})</span>
+            </div>
+
+            <!-- Loading State -->
+            <div v-if="loading" class="admin-empty admin-empty-loading">
+              <LoaderCircle class="overlay-spinner" :size="24" />
+              <span>Đang tải danh sách tài khoản từ hệ thống…</span>
+            </div>
+
+            <!-- Empty State -->
+            <div v-else-if="!filteredUsers.length" class="admin-empty account-empty-state">
+              <div class="empty-icon-wrap">
+                <UserX :size="28" />
+              </div>
+              <strong>Không tìm thấy tài khoản phù hợp</strong>
+              <p>Không có người dùng nào khớp với bộ lọc hoặc từ khóa tìm kiếm hiện tại.</p>
+              <button
+                v-if="accountSearchQuery || accountRoleFilter !== 'all' || accountPlanFilter !== 'all' || accountStatusFilter !== 'all'"
+                type="button"
+                class="overlay-button overlay-button-secondary"
+                style="margin-top: 8px;"
+                @click="resetAccountFilters"
+              >
+                Xóa bộ lọc tìm kiếm
+              </button>
+            </div>
+
+            <!-- Table & Card Views -->
+            <div v-else class="account-data-container">
+              <!-- Desktop Table View -->
+              <div class="admin-table-wrap account-desktop-table">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th style="min-width: 220px;">Tài khoản</th>
+                      <th style="min-width: 150px;">Vai trò</th>
+                      <th style="min-width: 180px;">Gói học & Hạn mức</th>
+                      <th style="min-width: 150px;">Trạng thái</th>
+                      <th style="text-align: right; min-width: 160px;">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="user in paginatedUsers" :key="user.userId" :class="{ 'row-disabled': !user.enabled }">
+                      <td>
+                        <div class="table-account">
+                          <span
+                            class="account-avatar"
+                            :class="{ 'administrator': user.role === 'ROLE_ADMIN' }"
+                          >
+                            {{ user.username.slice(0, 1).toUpperCase() }}
+                          </span>
+                          <div class="table-account-details">
+                            <strong class="account-username">{{ user.username }}</strong>
+                            <small class="account-id">ID: #{{ user.userId }}</small>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <select
+                          class="role-select"
+                          :value="user.role"
+                          aria-label="Thay đổi vai trò người dùng"
+                          @change="updateRole(user, $event)"
+                        >
+                          <option value="ROLE_USER">Người học</option>
+                          <option value="ROLE_ADMIN">Quản trị viên</option>
+                        </select>
+                      </td>
+
+                      <td>
+                        <select
+                          class="role-select plan-select"
+                          :class="{ 'plan-premium-selected': user.plan === 'PREMIUM' }"
+                          :value="user.plan || 'FREE'"
+                          aria-label="Thay đổi gói cước người dùng"
+                          @change="updateUserPlan(user, $event.target.value)"
+                        >
+                          <option value="FREE">Gói Free ({{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }}/{{ user.freeExamLimit || 0 }} lượt)</option>
+                          <option value="PREMIUM">⭐ Gói Premium</option>
+                        </select>
+                      </td>
+
+                      <td>
+                        <span
+                          :class="[
+                            'account-state',
+                            !user.enabled ? 'disabled' : user.emailVerified === false ? 'pending' : 'enabled',
+                          ]"
+                        >
+                          <span class="state-dot" aria-hidden="true"></span>
+                          <span>{{ !user.enabled ? 'Đã khóa' : user.emailVerified === false ? 'Chờ xác minh' : 'Hoạt động' }}</span>
+                        </span>
+                      </td>
+
+                      <td>
+                        <div class="account-actions-cell" style="justify-content: flex-end;">
+                          <button
+                            v-if="user.role === 'ROLE_USER'"
+                            type="button"
+                            class="table-action"
+                            title="Xem chi tiết tiến độ học tập và lịch sử làm bài"
+                            @click="openLearnerReport(user)"
+                          >
+                            <Eye :size="13" />
+                            <span>Tiến độ</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="table-action"
+                            :class="user.enabled ? 'danger' : 'primary-action'"
+                            :title="user.enabled ? 'Khóa truy cập của tài khoản' : 'Kích hoạt lại tài khoản'"
+                            @click="updateStatus(user)"
+                          >
+                            <component :is="user.enabled ? Lock : Unlock" :size="13" />
+                            <span>{{ user.enabled ? 'Khóa' : 'Mở khóa' }}</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Mobile Card View -->
+              <div class="account-mobile-grid">
+                <article
+                  v-for="user in paginatedUsers"
+                  :key="`m-${user.userId}`"
+                  class="account-mobile-card"
+                  :class="{ 'card-disabled': !user.enabled }"
+                >
+                  <div class="account-card-header">
+                    <div class="table-account">
+                      <span
                         class="account-avatar"
-                        :class="
-                          user.role === 'ROLE_ADMIN' ? 'administrator' : ''
-                        "
+                        :class="{ 'administrator': user.role === 'ROLE_ADMIN' }"
                       >
                         {{ user.username.slice(0, 1).toUpperCase() }}
-                      </i>
-                      <strong>{{ user.username }}</strong>
-                    </span>
-                  </td>
-                  <td>
-                    <select
-                      class="role-select"
-                      :value="user.role"
-                      @change="updateRole(user, $event)"
-                    >
-                      <option value="ROLE_USER">Người học</option>
-                      <option value="ROLE_ADMIN">Quản trị viên</option>
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      class="role-select plan-select"
-                      :class="{ 'plan-premium-selected': user.plan === 'PREMIUM' }"
-                      :value="user.plan || 'FREE'"
-                      @change="updateUserPlan(user, $event.target.value)"
-                    >
-                      <option value="FREE">Gói Free ({{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }}/{{ user.freeExamLimit || 0 }} lượt)</option>
-                      <option value="PREMIUM">⭐ Gói Premium</option>
-                    </select>
-                  </td>
-                  <td>
+                      </span>
+                      <div class="table-account-details">
+                        <strong class="account-username">{{ user.username }}</strong>
+                        <small class="account-id">ID: #{{ user.userId }}</small>
+                      </div>
+                    </div>
+
                     <span
                       :class="[
                         'account-state',
                         !user.enabled ? 'disabled' : user.emailVerified === false ? 'pending' : 'enabled',
                       ]"
                     >
-                      {{ !user.enabled ? 'Đã khóa' : user.emailVerified === false ? 'Chờ xác minh email' : 'Hoạt động' }}
+                      <span class="state-dot" aria-hidden="true"></span>
+                      <span>{{ !user.enabled ? 'Đã khóa' : user.emailVerified === false ? 'Chờ xác minh' : 'Hoạt động' }}</span>
                     </span>
-                  </td>
-                  <td>
-                    <button v-if="user.role === 'ROLE_USER'" class="table-action" @click="openLearnerReport(user)">
-                      Xem tiến độ
+                  </div>
+
+                  <div class="account-card-body">
+                    <div class="card-field-row">
+                      <span class="card-field-label">Vai trò:</span>
+                      <select
+                        class="role-select"
+                        :value="user.role"
+                        @change="updateRole(user, $event)"
+                      >
+                        <option value="ROLE_USER">Người học</option>
+                        <option value="ROLE_ADMIN">Quản trị viên</option>
+                      </select>
+                    </div>
+
+                    <div class="card-field-row">
+                      <span class="card-field-label">Gói học:</span>
+                      <select
+                        class="role-select plan-select"
+                        :class="{ 'plan-premium-selected': user.plan === 'PREMIUM' }"
+                        :value="user.plan || 'FREE'"
+                        @change="updateUserPlan(user, $event.target.value)"
+                      >
+                        <option value="FREE">Gói Free ({{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }}/{{ user.freeExamLimit || 0 }} lượt)</option>
+                        <option value="PREMIUM">⭐ Gói Premium</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="account-card-actions">
+                    <button
+                      v-if="user.role === 'ROLE_USER'"
+                      type="button"
+                      class="table-action mobile-card-btn"
+                      @click="openLearnerReport(user)"
+                    >
+                      <Eye :size="14" />
+                      <span>Xem tiến độ</span>
                     </button>
-                    <button class="table-action" @click="updateStatus(user)">
-                      {{ user.enabled ? 'Khóa' : 'Mở khóa' }}
+                    <button
+                      type="button"
+                      class="table-action mobile-card-btn"
+                      :class="user.enabled ? 'danger' : 'primary-action'"
+                      :title="user.enabled ? 'Khóa truy cập của tài khoản' : 'Kích hoạt lại tài khoản'"
+                      @click="updateStatus(user)"
+                    >
+                      <component :is="user.enabled ? Lock : Unlock" :size="14" />
+                      <span>{{ user.enabled ? 'Khóa' : 'Mở khóa' }}</span>
                     </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                  </div>
+                </article>
+              </div>
+
+              <!-- Pagination for Accounts -->
+              <div v-if="accountTotalPages > 1 || filteredUsers.length > 10" class="account-pagination">
+                <div class="pagination-size">
+                  <span>Hiển thị</span>
+                  <select v-model.number="accountPageSize" class="pagination-select" aria-label="Số dòng mỗi trang">
+                    <option :value="10">10 tài khoản</option>
+                    <option :value="25">25 tài khoản</option>
+                    <option :value="50">50 tài khoản</option>
+                  </select>
+                </div>
+                <div class="pagination-nav">
+                  <button
+                    type="button"
+                    class="pagination-btn"
+                    :disabled="accountPage <= 1"
+                    aria-label="Trang trước"
+                    @click="accountPage = Math.max(1, accountPage - 1)"
+                  >
+                    <ChevronLeft :size="16" />
+                    <span>Trước</span>
+                  </button>
+                  <span class="pagination-status">Trang <strong>{{ accountPage }}</strong> / {{ accountTotalPages }}</span>
+                  <button
+                    type="button"
+                    class="pagination-btn"
+                    :disabled="accountPage >= accountTotalPages"
+                    aria-label="Trang sau"
+                    @click="accountPage = Math.min(accountTotalPages, accountPage + 1)"
+                  >
+                    <span>Sau</span>
+                    <ChevronRight :size="16" />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -1751,17 +2612,28 @@
                 <CreditCard :size="15" />
                 <span>QUẢN LÝ GÓI CƯỚC & TÀI CHÍNH</span>
               </div>
-              <h2>Quản lý các gói thanh toán & User gói cước</h2>
-              <p>Thiết lập danh mục các gói học tập, theo dõi tình trạng thanh toán của học viên và giám sát doanh thu toàn hệ thống.</p>
+              <h2>Quản trị gói cước & Tài chính hệ thống</h2>
+              <p>Cấu hình danh mục gói học tập, quản lý hạn mức người học và theo dõi doanh thu thanh toán qua cổng Stripe & PayPal.</p>
             </div>
             <div class="billing-hero-actions">
-              <button v-if="billingSubTab === 'plans'" class="admin-primary-button" @click="openPlanModal()">
+              <button
+                v-if="billingSubTab === 'plans'"
+                type="button"
+                class="admin-primary-button"
+                @click="openPlanModal()"
+              >
                 <Plus :size="16" />
-                Thêm gói cước mới
+                <span>Thêm gói cước mới</span>
               </button>
-              <button class="admin-secondary-button" @click="loadData">
-                <RefreshCw :size="15" />
-                Làm mới dữ liệu
+              <button
+                type="button"
+                class="admin-secondary-button"
+                :disabled="loading"
+                title="Tải lại dữ liệu gói cước và giao dịch"
+                @click="loadData"
+              >
+                <RefreshCw :size="15" :class="{ 'overlay-spinner': loading }" />
+                <span>Làm mới dữ liệu</span>
               </button>
             </div>
           </div>
@@ -1849,7 +2721,22 @@
 
           <!-- TAB 1: QUẢN LÝ CÁC GÓI THANH TOÁN -->
           <div v-if="billingSubTab === 'plans'" class="billing-tab-pane">
-            <div class="billing-plans-grid">
+            <div v-if="loading" class="admin-empty admin-empty-loading">
+              <LoaderCircle class="overlay-spinner" :size="24" />
+              <span>Đang tải danh mục gói cước…</span>
+            </div>
+            <div v-else-if="!plans.length" class="admin-empty">
+              <div class="empty-icon-wrap">
+                <Layers :size="28" />
+              </div>
+              <strong>Chưa có gói cước nào trong hệ thống</strong>
+              <p>Bạn có thể tạo gói cước đầu tiên để học viên có thể đăng ký và nâng cấp.</p>
+              <button type="button" class="admin-primary-button" style="margin-top: 10px;" @click="openPlanModal()">
+                <Plus :size="15" />
+                <span>Thêm gói cước mới</span>
+              </button>
+            </div>
+            <div v-else class="billing-plans-grid">
               <article
                 v-for="plan in plans"
                 :key="plan.planId"
@@ -1864,7 +2751,7 @@
                     <h3>{{ plan.name }}</h3>
                   </div>
                   <div class="plan-price-tag">
-                    <strong>{{ Number(plan.price) === 0 ? '0đ' : `$${Number(plan.price).toFixed(2)}` }}</strong>
+                    <strong>{{ Number(plan.price) === 0 ? 'Miễn phí' : formatMoney(plan.price, plan.currency) }}</strong>
                     <small>{{ plan.currency }} / {{ plan.billingCycle === 'LIFETIME' ? 'Trọn đời' : plan.billingCycle === 'MONTHLY' ? 'Tháng' : plan.billingCycle === 'ANNUAL' ? 'Năm' : plan.billingCycle }}</small>
                   </div>
                 </div>
@@ -1872,13 +2759,14 @@
                 <p class="plan-card-desc">{{ plan.description || 'Chưa có mô tả cho gói cước này.' }}</p>
 
                 <div class="plan-quota-badge">
-                  <ClipboardCheck :size="14" />
+                  <component :is="plan.examLimit === -1 ? Sparkles : ClipboardCheck" :size="14" />
                   <span>{{ plan.examLimit === -1 ? 'Không giới hạn lượt làm bài thi' : `Giới hạn: ${plan.examLimit} lượt thi thử` }}</span>
                 </div>
 
                 <ul class="plan-features-list">
                   <li v-for="(feat, idx) in parseFeatures(plan.featuresJson)" :key="idx">
-                    <Check :size="15" /> {{ feat }}
+                    <Check :size="15" />
+                    <span>{{ feat }}</span>
                   </li>
                 </ul>
 
@@ -1888,15 +2776,28 @@
                     <small>{{ plan.isActive ? 'Đang mở bán' : 'Tạm ẩn' }}</small>
                   </div>
                   <div class="plan-actions">
-                    <button class="table-action" @click="togglePlanStatus(plan)">
+                    <button
+                      type="button"
+                      class="table-action"
+                      :title="plan.isActive ? 'Tạm ẩn gói khỏi trang Bảng giá' : 'Mở bán lại gói này'"
+                      @click="togglePlanStatus(plan)"
+                    >
                       {{ plan.isActive ? 'Tạm ẩn' : 'Mở bán' }}
                     </button>
-                    <button class="table-action" @click="openPlanModal(plan)">
-                      <Pencil :size="13" /> Sửa
+                    <button
+                      type="button"
+                      class="table-action"
+                      title="Chỉnh sửa thông tin gói cước"
+                      @click="openPlanModal(plan)"
+                    >
+                      <Pencil :size="13" />
+                      <span>Sửa</span>
                     </button>
                     <button
                       v-if="!['FREE', 'PREMIUM'].includes(plan.code)"
+                      type="button"
                       class="table-action danger"
+                      title="Xóa gói cước"
                       @click="deletePlan(plan)"
                     >
                       <Trash2 :size="13" />
@@ -1913,7 +2814,7 @@
               <div class="admin-panel-heading">
                 <div>
                   <h2>Danh sách học viên & Tình trạng gói cước</h2>
-                  <p>{{ filteredUserBillings.length }} tài khoản người học · Theo dõi mức chi tiêu và phân quyền gói dịch vụ.</p>
+                  <p>Theo dõi hạn mức làm bài thi, gói dịch vụ và tổng chi tiêu của học viên.</p>
                 </div>
                 <div class="billing-table-filters">
                   <div class="billing-search-box">
@@ -1922,51 +2823,164 @@
                       v-model="userBillingSearch"
                       type="search"
                       placeholder="Tìm theo ID, username..."
+                      aria-label="Tìm học viên thanh toán"
                     />
+                    <button
+                      v-if="userBillingSearch"
+                      type="button"
+                      class="account-search-clear"
+                      aria-label="Xóa tìm kiếm"
+                      @click="userBillingSearch = ''"
+                    >
+                      <X :size="14" />
+                    </button>
                   </div>
-                  <select v-model="userBillingPlanFilter" class="billing-select-filter">
+                  <select v-model="userBillingPlanFilter" class="billing-select-filter" aria-label="Lọc theo gói cước">
                     <option value="all">Tất cả gói</option>
-                    <option value="PREMIUM">Gói Premium</option>
+                    <option value="PREMIUM">⭐ Gói Premium</option>
                     <option value="FREE">Gói Miễn Phí</option>
                   </select>
+                  <button
+                    v-if="userBillingSearch || userBillingPlanFilter !== 'all'"
+                    type="button"
+                    class="account-reset-filter-btn"
+                    @click="userBillingSearch = ''; userBillingPlanFilter = 'all'"
+                  >
+                    <RotateCcw :size="13" />
+                    <span>Đặt lại</span>
+                  </button>
                 </div>
               </div>
 
-              <div v-if="loading" class="admin-empty">
-                <LoaderCircle class="spin" :size="24" />
-                <span>Đang tải dữ liệu học viên...</span>
+              <div class="account-meta-summary" style="padding: 10px 20px 14px;">
+                <span>Hiển thị <strong>{{ paginatedUserBillings.length }}</strong> / <strong>{{ filteredUserBillings.length }}</strong> tài khoản học viên (Tổng số: {{ userBillings.length }})</span>
+              </div>
+
+              <div v-if="loading" class="admin-empty admin-empty-loading">
+                <LoaderCircle class="overlay-spinner" :size="24" />
+                <span>Đang tải dữ liệu học viên…</span>
               </div>
               <div v-else-if="!filteredUserBillings.length" class="admin-empty">
-                <Users :size="36" class="admin-empty-icon" />
+                <div class="empty-icon-wrap">
+                  <Users :size="28" />
+                </div>
                 <strong>Không tìm thấy tài khoản học viên phù hợp</strong>
+                <p>Không có học viên nào khớp với bộ lọc tìm kiếm hiện tại.</p>
               </div>
-              <div v-else class="admin-table-wrap">
-                <table class="admin-table">
-                  <thead>
-                    <tr>
-                      <th>Học viên</th>
-                      <th>Gói cước hiện tại</th>
-                      <th>Ngày kích hoạt</th>
-                      <th>Lượt thi dùng</th>
-                      <th>Tổng chi tiêu</th>
-                      <th>Số đơn</th>
-                      <th>Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="user in filteredUserBillings" :key="user.userId">
-                      <td>
-                        <span class="account-cell">
-                          <i class="account-avatar">
-                            {{ user.username.slice(0, 1).toUpperCase() }}
-                          </i>
-                          <div>
-                            <strong>{{ user.username }}</strong>
-                            <small class="table-secondary">ID: #{{ user.userId }}</small>
+              <div v-else>
+                <!-- Desktop Table View -->
+                <div class="admin-table-wrap billing-desktop-table">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th style="min-width: 200px;">Học viên</th>
+                        <th style="min-width: 160px;">Gói cước hiện tại</th>
+                        <th style="min-width: 150px;">Ngày kích hoạt</th>
+                        <th style="min-width: 170px;">Lượt thi dùng</th>
+                        <th style="min-width: 130px;">Tổng chi tiêu</th>
+                        <th style="min-width: 110px;">Số đơn</th>
+                        <th style="text-align: right; min-width: 190px;">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="user in paginatedUserBillings" :key="user.userId">
+                        <td>
+                          <div class="table-account">
+                            <span class="account-avatar">
+                              {{ user.username.slice(0, 1).toUpperCase() }}
+                            </span>
+                            <div class="table-account-details">
+                              <strong class="account-username">{{ user.username }}</strong>
+                              <small class="account-id">ID: #{{ user.userId }}</small>
+                            </div>
                           </div>
+                        </td>
+                        <td>
+                          <select
+                            class="role-select plan-select"
+                            :class="{ 'plan-premium-selected': user.plan === 'PREMIUM' }"
+                            :value="user.plan || 'FREE'"
+                            aria-label="Thay đổi gói cước"
+                            @change="updateUserPlan(user, $event.target.value)"
+                          >
+                            <option value="FREE">Gói Free</option>
+                            <option value="PREMIUM">⭐ Gói Premium</option>
+                          </select>
+                        </td>
+                        <td>
+                          <span v-if="user.premiumActivatedAt" class="payment-time">
+                            {{ formatPaymentDate(user.premiumActivatedAt) }}
+                          </span>
+                          <span v-else class="table-secondary">—</span>
+                        </td>
+                        <td>
+                          <div class="quota-progress-cell">
+                            <strong v-if="user.plan === 'PREMIUM'" class="unlimited-quota">
+                              <Sparkles :size="13" />
+                              Không giới hạn
+                            </strong>
+                            <span v-else class="limited-quota">
+                              {{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }} / {{ user.freeExamLimit || 0 }} lượt
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <strong class="payment-amount">{{ formatMoney(user.totalSpent) }}</strong>
+                        </td>
+                        <td>
+                          <span class="order-count-badge">{{ user.paymentCount || 0 }} đơn</span>
+                        </td>
+                        <td>
+                          <div class="table-row-actions" style="justify-content: flex-end;">
+                            <button
+                              type="button"
+                              class="table-action"
+                              title="Xem chi tiết các đơn thanh toán của học viên"
+                              @click="viewUserPayments(user)"
+                            >
+                              <CreditCard :size="13" />
+                              <span>Lịch sử GD</span>
+                            </button>
+                            <button
+                              v-if="user.plan !== 'PREMIUM'"
+                              type="button"
+                              class="table-action"
+                              title="Reset số lượt thi đã dùng về 0"
+                              @click="resetUserQuota(user)"
+                            >
+                              <RotateCcw :size="13" />
+                              <span>Reset lượt</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- Mobile Card View -->
+                <div class="billing-mobile-grid" style="padding: 14px;">
+                  <article
+                    v-for="user in paginatedUserBillings"
+                    :key="`b-user-${user.userId}`"
+                    class="account-mobile-card"
+                  >
+                    <div class="account-card-header">
+                      <div class="table-account">
+                        <span class="account-avatar">
+                          {{ user.username.slice(0, 1).toUpperCase() }}
                         </span>
-                      </td>
-                      <td>
+                        <div class="table-account-details">
+                          <strong class="account-username">{{ user.username }}</strong>
+                          <small class="account-id">ID: #{{ user.userId }}</small>
+                        </div>
+                      </div>
+                      <span class="order-count-badge">{{ user.paymentCount || 0 }} đơn</span>
+                    </div>
+
+                    <div class="account-card-body">
+                      <div class="card-field-row">
+                        <span class="card-field-label">Gói cước:</span>
                         <select
                           class="role-select plan-select"
                           :class="{ 'plan-premium-selected': user.plan === 'PREMIUM' }"
@@ -1976,47 +2990,86 @@
                           <option value="FREE">Gói Free</option>
                           <option value="PREMIUM">⭐ Gói Premium</option>
                         </select>
-                      </td>
-                      <td>
-                        <span v-if="user.premiumActivatedAt" class="payment-time">
-                          {{ formatPaymentDate(user.premiumActivatedAt) }}
+                      </div>
+
+                      <div class="card-field-row">
+                        <span class="card-field-label">Lượt thi:</span>
+                        <strong v-if="user.plan === 'PREMIUM'" class="unlimited-quota">
+                          <Sparkles :size="13" />
+                          Không giới hạn
+                        </strong>
+                        <span v-else class="limited-quota">
+                          {{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }} / {{ user.freeExamLimit || 0 }} lượt
                         </span>
-                        <span v-else class="table-secondary">—</span>
-                      </td>
-                      <td>
-                        <div class="quota-progress-cell">
-                          <strong v-if="user.plan === 'PREMIUM'" class="unlimited-quota">
-                            Không giới hạn
-                          </strong>
-                          <span v-else class="limited-quota">
-                            {{ Math.max(0, Number(user.freeExamLimit || 0) - Number(user.freeExamsUsed || 0)) }} / {{ user.freeExamLimit || 0 }} lượt
-                          </span>
-                        </div>
-                      </td>
-                      <td>
+                      </div>
+
+                      <div class="card-field-row">
+                        <span class="card-field-label">Tổng chi tiêu:</span>
                         <strong class="payment-amount">{{ formatMoney(user.totalSpent) }}</strong>
-                      </td>
-                      <td>
-                        <span class="order-count-badge">{{ user.paymentCount || 0 }} đơn</span>
-                      </td>
-                      <td>
-                        <div class="table-row-actions">
-                          <button class="table-action" @click="viewUserPayments(user)">
-                            <CreditCard :size="13" /> Lịch sử GD
-                          </button>
-                          <button
-                            v-if="user.plan !== 'PREMIUM'"
-                            class="table-action"
-                            title="Reset lượt thi về 0"
-                            @click="resetUserQuota(user)"
-                          >
-                            <RotateCcw :size="13" /> Reset lượt
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                      </div>
+
+                      <div v-if="user.premiumActivatedAt" class="card-field-row">
+                        <span class="card-field-label">Kích hoạt:</span>
+                        <span class="payment-time">{{ formatPaymentDate(user.premiumActivatedAt) }}</span>
+                      </div>
+                    </div>
+
+                    <div class="account-card-actions">
+                      <button
+                        type="button"
+                        class="table-action mobile-card-btn"
+                        @click="viewUserPayments(user)"
+                      >
+                        <CreditCard :size="14" />
+                        <span>Lịch sử GD</span>
+                      </button>
+                      <button
+                        v-if="user.plan !== 'PREMIUM'"
+                        type="button"
+                        class="table-action mobile-card-btn"
+                        @click="resetUserQuota(user)"
+                      >
+                        <RotateCcw :size="14" />
+                        <span>Reset lượt thi</span>
+                      </button>
+                    </div>
+                  </article>
+                </div>
+
+                <!-- Pagination for Users -->
+                <div v-if="userBillingTotalPages > 1 || filteredUserBillings.length > 10" class="account-pagination" style="padding: 14px 20px;">
+                  <div class="pagination-size">
+                    <span>Hiển thị</span>
+                    <select v-model.number="userBillingPageSize" class="pagination-select" aria-label="Số dòng mỗi trang">
+                      <option :value="10">10 học viên</option>
+                      <option :value="25">25 học viên</option>
+                      <option :value="50">50 học viên</option>
+                    </select>
+                  </div>
+                  <div class="pagination-nav">
+                    <button
+                      type="button"
+                      class="pagination-btn"
+                      :disabled="userBillingPage <= 1"
+                      aria-label="Trang trước"
+                      @click="userBillingPage = Math.max(1, userBillingPage - 1)"
+                    >
+                      <ChevronLeft :size="16" />
+                      <span>Trước</span>
+                    </button>
+                    <span class="pagination-status">Trang <strong>{{ userBillingPage }}</strong> / {{ userBillingTotalPages }}</span>
+                    <button
+                      type="button"
+                      class="pagination-btn"
+                      :disabled="userBillingPage >= userBillingTotalPages"
+                      aria-label="Trang sau"
+                      @click="userBillingPage = Math.min(userBillingTotalPages, userBillingPage + 1)"
+                    >
+                      <span>Sau</span>
+                      <ChevronRight :size="16" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2036,362 +3089,1374 @@
                       v-model="paymentSearch"
                       type="search"
                       placeholder="Tìm theo mã đơn, học viên..."
+                      aria-label="Tìm kiếm giao dịch"
                     />
+                    <button
+                      v-if="paymentSearch"
+                      type="button"
+                      class="account-search-clear"
+                      aria-label="Xóa tìm kiếm"
+                      @click="paymentSearch = ''"
+                    >
+                      <X :size="14" />
+                    </button>
                   </div>
-                  <select v-model="paymentStatusFilter" class="billing-select-filter">
+                  <select v-model="paymentStatusFilter" class="billing-select-filter" aria-label="Lọc theo trạng thái giao dịch">
                     <option value="all">Tất cả trạng thái</option>
                     <option value="SUCCEEDED">Thành công</option>
                     <option value="PENDING">Đang chờ</option>
                     <option value="FAILED">Thất bại</option>
                     <option value="REFUNDED">Hoàn tiền</option>
                   </select>
-                  <select v-model="paymentProviderFilter" class="billing-select-filter">
+                  <select v-model="paymentProviderFilter" class="billing-select-filter" aria-label="Lọc theo cổng thanh toán">
                     <option value="all">Tất cả cổng</option>
                     <option value="STRIPE">Stripe</option>
                     <option value="PAYPAL">PayPal</option>
                   </select>
+                  <button
+                    v-if="paymentSearch || paymentStatusFilter !== 'all' || paymentProviderFilter !== 'all'"
+                    type="button"
+                    class="account-reset-filter-btn"
+                    @click="paymentSearch = ''; paymentStatusFilter = 'all'; paymentProviderFilter = 'all'"
+                  >
+                    <RotateCcw :size="13" />
+                    <span>Đặt lại</span>
+                  </button>
                 </div>
               </div>
 
-              <div v-if="loading" class="admin-empty">
-                <LoaderCircle class="spin" :size="24" />
-                <span>Đang tải lịch sử giao dịch...</span>
+              <div class="account-meta-summary" style="padding: 10px 20px 14px;">
+                <span>Hiển thị <strong>{{ paginatedPayments.length }}</strong> / <strong>{{ filteredPayments.length }}</strong> giao dịch (Tổng số: {{ payments.length }})</span>
+              </div>
+
+              <div v-if="loading" class="admin-empty admin-empty-loading">
+                <LoaderCircle class="overlay-spinner" :size="24" />
+                <span>Đang tải lịch sử giao dịch…</span>
               </div>
               <div v-else-if="!filteredPayments.length" class="admin-empty">
-                <CreditCard :size="36" class="admin-empty-icon" />
-                <strong>Chưa có giao dịch thanh toán nào</strong>
+                <div class="empty-icon-wrap">
+                  <CreditCard :size="28" />
+                </div>
+                <strong>Chưa có giao dịch thanh toán nào phù hợp</strong>
                 <p>Học viên có thể nâng cấp gói cước tại trang Bảng giá (/pricing) qua cổng Stripe hoặc PayPal.</p>
               </div>
-              <div v-else class="admin-table-wrap">
+              <div v-else>
+                <!-- Desktop Table View -->
+                <div class="admin-table-wrap billing-desktop-table">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th style="min-width: 170px;">Mã giao dịch</th>
+                        <th style="min-width: 190px;">Học viên</th>
+                        <th style="min-width: 130px;">Cổng thanh toán</th>
+                        <th style="min-width: 130px;">Số tiền</th>
+                        <th style="min-width: 130px;">Trạng thái</th>
+                        <th style="min-width: 150px;">Thời gian</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="payment in paginatedPayments" :key="payment.paymentId">
+                        <td>
+                          <span class="payment-id-badge">#PAY-{{ payment.paymentId }}</span>
+                          <small v-if="payment.providerPaymentId" class="table-secondary">
+                            Ref: {{ payment.providerPaymentId.slice(0, 18) }}...
+                          </small>
+                        </td>
+                        <td>
+                          <div class="table-account">
+                            <span class="account-avatar">
+                              {{ (payment.username || 'U').slice(0, 1).toUpperCase() }}
+                            </span>
+                            <div class="table-account-details">
+                              <strong class="account-username">{{ payment.username || `User #${payment.userId}` }}</strong>
+                              <small class="account-id">ID: #{{ payment.userId }}</small>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span class="provider-badge" :class="payment.provider?.toLowerCase()">
+                            {{ payment.provider }}
+                          </span>
+                        </td>
+                        <td>
+                          <strong class="payment-amount">{{ formatMoney(payment.amount, payment.currency) }}</strong>
+                        </td>
+                        <td>
+                          <span
+                            class="payment-status-pill"
+                            :class="payment.status?.toLowerCase()"
+                          >
+                            <span class="state-dot" aria-hidden="true"></span>
+                            <span>{{
+                              payment.status === 'SUCCEEDED'
+                                ? 'Thành công'
+                                : payment.status === 'PENDING'
+                                ? 'Đang chờ'
+                                : payment.status === 'FAILED'
+                                ? 'Thất bại'
+                                : payment.status === 'REFUNDED'
+                                ? 'Đã hoàn tiền'
+                                : payment.status
+                            }}</span>
+                          </span>
+                        </td>
+                        <td>
+                          <span class="payment-time">{{ formatPaymentDate(payment.createdAt) }}</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- Mobile Card View -->
+                <div class="billing-mobile-grid" style="padding: 14px;">
+                  <article
+                    v-for="payment in paginatedPayments"
+                    :key="`b-pay-${payment.paymentId}`"
+                    class="account-mobile-card"
+                  >
+                    <div class="account-card-header">
+                      <div>
+                        <span class="payment-id-badge">#PAY-{{ payment.paymentId }}</span>
+                        <small v-if="payment.providerPaymentId" class="table-secondary" style="display: block; margin-top: 2px;">
+                          Ref: {{ payment.providerPaymentId.slice(0, 16) }}...
+                        </small>
+                      </div>
+                      <span
+                        class="payment-status-pill"
+                        :class="payment.status?.toLowerCase()"
+                      >
+                        <span class="state-dot" aria-hidden="true"></span>
+                        <span>{{
+                          payment.status === 'SUCCEEDED'
+                            ? 'Thành công'
+                            : payment.status === 'PENDING'
+                            ? 'Đang chờ'
+                            : payment.status === 'FAILED'
+                            ? 'Thất bại'
+                            : payment.status === 'REFUNDED'
+                            ? 'Đã hoàn tiền'
+                            : payment.status
+                        }}</span>
+                      </span>
+                    </div>
+
+                    <div class="account-card-body">
+                      <div class="card-field-row">
+                        <span class="card-field-label">Học viên:</span>
+                        <div class="table-account">
+                          <span class="account-avatar" style="width: 26px; height: 26px; font-size: 11px;">
+                            {{ (payment.username || 'U').slice(0, 1).toUpperCase() }}
+                          </span>
+                          <strong class="account-username">{{ payment.username || `User #${payment.userId}` }}</strong>
+                        </div>
+                      </div>
+
+                      <div class="card-field-row">
+                        <span class="card-field-label">Cổng & Số tiền:</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <span class="provider-badge" :class="payment.provider?.toLowerCase()">
+                            {{ payment.provider }}
+                          </span>
+                          <strong class="payment-amount">{{ formatMoney(payment.amount, payment.currency) }}</strong>
+                        </div>
+                      </div>
+
+                      <div class="card-field-row">
+                        <span class="card-field-label">Thời gian:</span>
+                        <span class="payment-time">{{ formatPaymentDate(payment.createdAt) }}</span>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <!-- Pagination for Transactions -->
+                <div v-if="paymentTotalPages > 1 || filteredPayments.length > 10" class="account-pagination" style="padding: 14px 20px;">
+                  <div class="pagination-size">
+                    <span>Hiển thị</span>
+                    <select v-model.number="paymentPageSize" class="pagination-select" aria-label="Số giao dịch mỗi trang">
+                      <option :value="10">10 giao dịch</option>
+                      <option :value="25">25 giao dịch</option>
+                      <option :value="50">50 giao dịch</option>
+                    </select>
+                  </div>
+                  <div class="pagination-nav">
+                    <button
+                      type="button"
+                      class="pagination-btn"
+                      :disabled="paymentPage <= 1"
+                      aria-label="Trang trước"
+                      @click="paymentPage = Math.max(1, paymentPage - 1)"
+                    >
+                      <ChevronLeft :size="16" />
+                      <span>Trước</span>
+                    </button>
+                    <span class="pagination-status">Trang <strong>{{ paymentPage }}</strong> / {{ paymentTotalPages }}</span>
+                    <button
+                      type="button"
+                      class="pagination-btn"
+                      :disabled="paymentPage >= paymentTotalPages"
+                      aria-label="Trang sau"
+                      @click="paymentPage = Math.min(paymentTotalPages, paymentPage + 1)"
+                    >
+                      <span>Sau</span>
+                      <ChevronRight :size="16" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- KẾT QUẢ & TIẾN ĐỘ HỌC TẬP -->
+        <section v-else-if="activeSection === 'results'" class="admin-results-section">
+          <!-- TOP HEADING PANEL -->
+          <div class="admin-panel results-hero-panel">
+            <div class="results-hero-content">
+              <div class="results-hero-badge">
+                <BarChart3 :size="15" />
+                <span>KẾT QUẢ & TIẾN ĐỘ HỌC TẬP</span>
+              </div>
+              <h2>Báo cáo kết quả và tiến độ học tập</h2>
+              <p>Theo dõi lịch sử làm bài thi, phân tích kỹ năng và đánh giá tiến độ điểm số của từng học viên.</p>
+            </div>
+            <div class="results-hero-controls">
+              <div class="results-filter-control">
+                <span class="control-label"><User :size="14" /> Học viên:</span>
+                <select v-model="selectedLearnerId" class="results-select" @change="learnerCertificateId = ''; loadLearnerReport()">
+                  <option value="" disabled>Chọn tài khoản học viên</option>
+                  <option v-for="student in students" :key="student.userId" :value="String(student.userId)">
+                    {{ student.username }} (#{{ student.userId }})
+                  </option>
+                </select>
+              </div>
+
+              <div v-if="programs.length" class="results-filter-control">
+                <span class="control-label"><GraduationCap :size="14" /> Kỳ thi:</span>
+                <select v-model="learnerCertificateId" class="results-select" @change="loadLearnerReport">
+                  <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">
+                    {{ program.name }} ({{ program.code }})
+                  </option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                class="admin-secondary-button"
+                :disabled="learnerLoading"
+                title="Tải lại báo cáo học tập"
+                @click="loadLearnerReport"
+              >
+                <RefreshCw :size="15" :class="{ 'overlay-spinner': learnerLoading }" />
+                <span>Làm mới</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ERROR STATE -->
+          <div v-if="learnerError" class="admin-alert-error" role="alert">
+            <Info :size="16" />
+            <span>{{ learnerError }}</span>
+          </div>
+
+          <!-- LOADING STATE -->
+          <div v-if="learnerLoading" class="admin-empty admin-empty-loading">
+            <LoaderCircle class="overlay-spinner" :size="24" />
+            <span>Đang tải báo cáo học tập của học viên…</span>
+          </div>
+
+          <!-- LEARNER SELECTED -->
+          <template v-else-if="selectedLearner">
+            <!-- 4 SUMMARY KPI CARDS -->
+            <div class="results-metrics-grid">
+              <article class="results-stat-card blue">
+                <div class="results-stat-icon">
+                  <CheckCircle2 :size="20" />
+                </div>
+                <div class="results-stat-info">
+                  <span>LƯỢT THI ĐÃ HOÀN THÀNH</span>
+                  <strong>{{ completedLearnerAttempts.length }}</strong>
+                  <small>{{ learnerScopedAttempts.length }} lượt thi trong kỳ thi đang chọn</small>
+                </div>
+              </article>
+
+              <article class="results-stat-card emerald">
+                <div class="results-stat-icon">
+                  <TrendingUp :size="20" />
+                </div>
+                <div class="results-stat-info">
+                  <span>ĐIỂM TRUNG BÌNH</span>
+                  <strong>{{ learnerAverageScore == null ? '—' : `${Math.round(learnerAverageScore)}%` }}</strong>
+                  <small>Tỷ lệ điểm các lượt thi đã chấm</small>
+                </div>
+              </article>
+
+              <article class="results-stat-card purple">
+                <div class="results-stat-icon">
+                  <Sparkles :size="20" />
+                </div>
+                <div class="results-stat-info">
+                  <span>LẦN THI GẦN NHẤT</span>
+                  <strong>{{ learnerLatestAttempt ? formatAdminNumber(learnerLatestAttempt.bandScore ?? learnerLatestAttempt.score) : '—' }}</strong>
+                  <small>{{ learnerLatestAttempt ? formatAttemptDate(learnerLatestAttempt.submittedAt || learnerLatestAttempt.startedAt) : 'Chưa có lượt thi' }}</small>
+                </div>
+              </article>
+
+              <article class="results-stat-card amber">
+                <div class="results-stat-icon">
+                  <BarChart3 :size="20" />
+                </div>
+                <div class="results-stat-info">
+                  <span>KỸ NĂNG CÓ DỮ LIỆU</span>
+                  <strong>{{ learnerSkillCount }}</strong>
+                  <small>Đo lường từ kết quả các bài thi đã nộp</small>
+                </div>
+              </article>
+            </div>
+
+            <!-- LEARNER ATTEMPTS HISTORY PANEL -->
+            <div class="admin-panel results-history-panel">
+              <div class="admin-panel-heading results-history-heading">
+                <div>
+                  <h2>Lịch sử làm bài thi</h2>
+                  <p>{{ selectedLearner.username }} · {{ filteredLearnerAttempts.length }} lượt làm bài phù hợp</p>
+                </div>
+                <div class="results-table-filters">
+                  <div class="results-search-box">
+                    <Search :size="15" />
+                    <input
+                      v-model="attemptSearch"
+                      type="search"
+                      placeholder="Tìm bài thi hoặc mã lượt thi..."
+                      aria-label="Tìm kiếm bài thi"
+                    />
+                    <button
+                      v-if="attemptSearch"
+                      type="button"
+                      class="account-search-clear"
+                      aria-label="Xóa tìm kiếm"
+                      @click="attemptSearch = ''"
+                    >
+                      <X :size="14" />
+                    </button>
+                  </div>
+                  <select v-model="attemptStatusFilter" class="results-select-filter" aria-label="Lọc trạng thái bài thi">
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="GRADED">Đã chấm điểm</option>
+                    <option value="SUBMITTED">Đã nộp bài</option>
+                    <option value="IN_PROGRESS">Đang làm bài</option>
+                  </select>
+                  <button
+                    v-if="attemptSearch || attemptStatusFilter !== 'all'"
+                    type="button"
+                    class="account-reset-filter-btn"
+                    @click="resetAttemptFilters"
+                  >
+                    <RotateCcw :size="13" />
+                    <span>Đặt lại</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="account-meta-summary" style="padding: 10px 20px 14px;">
+                <span>Hiển thị <strong>{{ paginatedLearnerAttempts.length }}</strong> / <strong>{{ filteredLearnerAttempts.length }}</strong> lượt thi</span>
+              </div>
+
+              <div v-if="!learnerScopedAttempts.length" class="admin-empty">
+                <div class="empty-icon-wrap">
+                  <ClipboardCheck :size="28" />
+                </div>
+                <strong>Chưa có lượt làm bài nào</strong>
+                <p>Học viên "{{ selectedLearner.username }}" chưa thực hiện lượt làm bài nào trong kỳ thi đang chọn.</p>
+              </div>
+
+              <div v-else-if="!filteredLearnerAttempts.length" class="admin-empty">
+                <div class="empty-icon-wrap">
+                  <Search :size="28" />
+                </div>
+                <strong>Không tìm thấy bài thi phù hợp</strong>
+                <p>Không có lượt thi nào khớp với từ khóa tìm kiếm hoặc bộ lọc trạng thái hiện tại.</p>
+                <button
+                  type="button"
+                  class="overlay-button overlay-button-secondary"
+                  style="margin-top: 8px;"
+                  @click="resetAttemptFilters"
+                >
+                  Xóa bộ lọc tìm kiếm
+                </button>
+              </div>
+
+              <div v-else>
+                <!-- Desktop Table View -->
+                <div class="admin-table-wrap results-desktop-table">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th style="min-width: 220px;">Bài kiểm tra</th>
+                        <th style="min-width: 160px;">Thời gian nộp</th>
+                        <th style="min-width: 130px;">Trạng thái</th>
+                        <th style="min-width: 120px;">Điểm số</th>
+                        <th style="min-width: 90px;">Band</th>
+                        <th style="min-width: 110px;">Vi phạm</th>
+                        <th style="text-align: right; min-width: 130px;">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="attempt in paginatedLearnerAttempts" :key="attempt.attemptId">
+                        <td>
+                          <div class="results-exam-cell">
+                            <strong>{{ examTitle(attempt) }}</strong>
+                            <small class="table-secondary">Mã lượt: #ATT-{{ attempt.attemptId }}</small>
+                          </div>
+                        </td>
+                        <td>
+                          <span class="payment-time">{{ formatAttemptDate(attempt.submittedAt || attempt.startedAt) }}</span>
+                        </td>
+                        <td>
+                          <span
+                            class="results-status-pill"
+                            :class="String(attempt.status || '').toLowerCase()"
+                          >
+                            <span class="state-dot" aria-hidden="true"></span>
+                            <span>{{
+                              attempt.status === 'GRADED'
+                                ? 'Đã chấm'
+                                : attempt.status === 'SUBMITTED'
+                                ? 'Đã nộp'
+                                : attempt.status === 'IN_PROGRESS'
+                                ? 'Đang làm'
+                                : attempt.status || '—'
+                            }}</span>
+                          </span>
+                        </td>
+                        <td>
+                          <strong class="results-score-value">{{ formatAttemptScore(attempt) }}</strong>
+                        </td>
+                        <td>
+                          <span class="results-band-badge">{{ attempt.bandScore ?? '—' }}</span>
+                        </td>
+                        <td>
+                          <span v-if="attempt.violationCount > 0" class="results-violation-badge">
+                            {{ attempt.violationCount }} lần
+                          </span>
+                          <span v-else class="results-clean-badge">0</span>
+                        </td>
+                        <td>
+                          <div class="table-row-actions" style="justify-content: flex-end;">
+                            <button
+                              type="button"
+                              class="table-action"
+                              :disabled="!attempt.submittedAt || attempt.score == null"
+                              title="Xem chi tiết kết quả bài thi"
+                              @click="viewAttemptResult(attempt)"
+                            >
+                              <Eye :size="13" />
+                              <span>Chi tiết</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- Mobile Card View -->
+                <div class="results-mobile-grid" style="padding: 14px;">
+                  <article
+                    v-for="attempt in paginatedLearnerAttempts"
+                    :key="`m-attempt-${attempt.attemptId}`"
+                    class="account-mobile-card"
+                  >
+                    <div class="account-card-header">
+                      <div>
+                        <strong>{{ examTitle(attempt) }}</strong>
+                        <small class="table-secondary" style="display: block; margin-top: 2px;">#ATT-{{ attempt.attemptId }}</small>
+                      </div>
+                      <span
+                        class="results-status-pill"
+                        :class="String(attempt.status || '').toLowerCase()"
+                      >
+                        <span class="state-dot" aria-hidden="true"></span>
+                        <span>{{
+                          attempt.status === 'GRADED'
+                            ? 'Đã chấm'
+                            : attempt.status === 'SUBMITTED'
+                            ? 'Đã nộp'
+                            : attempt.status === 'IN_PROGRESS'
+                            ? 'Đang làm'
+                            : attempt.status || '—'
+                        }}</span>
+                      </span>
+                    </div>
+
+                    <div class="account-card-body">
+                      <div class="card-field-row">
+                        <span class="card-field-label">Điểm số / Band:</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <strong class="results-score-value">{{ formatAttemptScore(attempt) }}</strong>
+                          <span v-if="attempt.bandScore != null" class="results-band-badge">Band {{ attempt.bandScore }}</span>
+                        </div>
+                      </div>
+
+                      <div class="card-field-row">
+                        <span class="card-field-label">Thời gian:</span>
+                        <span class="payment-time">{{ formatAttemptDate(attempt.submittedAt || attempt.startedAt) }}</span>
+                      </div>
+
+                      <div class="card-field-row">
+                        <span class="card-field-label">Vi phạm quy chế:</span>
+                        <span :class="attempt.violationCount > 0 ? 'results-violation-badge' : 'results-clean-badge'">
+                          {{ attempt.violationCount ?? 0 }} lần
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="account-card-actions">
+                      <button
+                        type="button"
+                        class="table-action mobile-card-btn"
+                        :disabled="!attempt.submittedAt || attempt.score == null"
+                        @click="viewAttemptResult(attempt)"
+                      >
+                        <Eye :size="14" />
+                        <span>Xem chi tiết kết quả</span>
+                      </button>
+                    </div>
+                  </article>
+                </div>
+
+                <!-- Pagination for Attempts -->
+                <div v-if="attemptTotalPages > 1 || filteredLearnerAttempts.length > 10" class="account-pagination" style="padding: 14px 20px;">
+                  <div class="pagination-size">
+                    <span>Hiển thị</span>
+                    <select v-model.number="attemptPageSize" class="pagination-select" aria-label="Số dòng mỗi trang">
+                      <option :value="10">10 lượt thi</option>
+                      <option :value="25">25 lượt thi</option>
+                      <option :value="50">50 lượt thi</option>
+                    </select>
+                  </div>
+                  <div class="pagination-nav">
+                    <button
+                      type="button"
+                      class="pagination-btn"
+                      :disabled="attemptPage <= 1"
+                      aria-label="Trang trước"
+                      @click="attemptPage = Math.max(1, attemptPage - 1)"
+                    >
+                      <ChevronLeft :size="16" />
+                      <span>Trước</span>
+                    </button>
+                    <span class="pagination-status">Trang <strong>{{ attemptPage }}</strong> / {{ attemptTotalPages }}</span>
+                    <button
+                      type="button"
+                      class="pagination-btn"
+                      :disabled="attemptPage >= attemptTotalPages"
+                      aria-label="Trang sau"
+                      @click="attemptPage = Math.min(attemptTotalPages, attemptPage + 1)"
+                    >
+                      <span>Sau</span>
+                      <ChevronRight :size="16" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TWO-COLUMN ANALYTICS: SKILLS & SCORE TREND -->
+            <div class="results-analytics-row">
+              <!-- SKILLS MASTERY -->
+              <section class="admin-panel results-skill-panel">
+                <div class="admin-panel-heading">
+                  <div>
+                    <h2>Tiến độ theo kỹ năng</h2>
+                    <p>{{ programs.find((program) => String(program.certificateId) === String(learnerCertificateId))?.name || 'Kỳ thi đã chọn' }}</p>
+                  </div>
+                </div>
+                <div v-if="learnerProgress?.masteryBySkillJson && Object.keys(parseJson(learnerProgress.masteryBySkillJson)).length" class="skill-progress-list">
+                  <div
+                    v-for="(value, skill) in parseJson(learnerProgress.masteryBySkillJson)"
+                    :key="skill"
+                    class="skill-progress-row"
+                  >
+                    <div class="skill-label-wrap">
+                      <span class="skill-name">{{ skill }}</span>
+                    </div>
+                    <div class="skill-progress-track">
+                      <i :style="{ width: `${Math.min(100, Math.max(0, Number(value) || 0))}%` }"></i>
+                    </div>
+                    <strong class="skill-percent-value">{{ Math.round(Number(value) || 0) }}%</strong>
+                  </div>
+                </div>
+                <div v-else class="learner-progress-empty">
+                  <BarChart3 :size="20" />
+                  <span>Chưa có dữ liệu phân tích kỹ năng cho kỳ thi này.</span>
+                </div>
+              </section>
+
+              <!-- SCORE TREND -->
+              <section class="admin-panel results-trend-panel">
+                <div class="admin-panel-heading">
+                  <div>
+                    <h2>Diễn biến điểm thi</h2>
+                    <p>{{ learnerScoreTrend.length }} lượt đã chấm gần nhất</p>
+                  </div>
+                </div>
+                <div v-if="learnerScoreTrend.length" class="learner-trend-chart" role="img" aria-label="Biểu đồ diễn biến điểm thi">
+                  <div
+                    v-for="item in learnerScoreTrend"
+                    :key="item.attemptId"
+                    class="learner-trend-point"
+                    :title="`Lượt #${item.attemptId}: ${item.scorePercent}%`"
+                  >
+                    <strong>{{ Math.round(Number(item.scorePercent) || 0) }}%</strong>
+                    <i :style="{ height: `${Math.max(8, Math.min(100, Number(item.scorePercent) || 0))}%` }"></i>
+                    <small>{{ formatTrendDate(item.submittedAt) }}</small>
+                  </div>
+                </div>
+                <div v-else class="learner-progress-empty">
+                  <BarChart3 :size="20" />
+                  <span>Chưa có điểm đã chấm để so sánh theo thời gian.</span>
+                </div>
+              </section>
+            </div>
+          </template>
+
+          <!-- EMPTY STATE WHEN NO LEARNER SELECTED -->
+          <div v-else class="admin-empty">
+            <div class="empty-icon-wrap">
+              <User :size="28" />
+            </div>
+            <strong>Chưa có tài khoản người học để hiển thị</strong>
+            <p>Vui lòng tạo hoặc chọn một tài khoản học viên để xem chi tiết tiến độ.</p>
+          </div>
+        </section>
+
+        <!-- CHƯƠNG TRÌNH & KỲ THI -->
+        <section v-else-if="activeSection === 'programs'" class="admin-programs-section">
+          <!-- TOP HEADING PANEL -->
+          <div class="admin-panel programs-hero-panel">
+            <div class="programs-hero-content">
+              <div class="programs-hero-badge">
+                <GraduationCap :size="15" />
+                <span>CHỨNG CHỈ & KỲ THI</span>
+              </div>
+              <h2>Quản lý Chứng chỉ & Chương trình thi</h2>
+              <p>Cấu hình danh mục chứng chỉ chuẩn hóa (IELTS, TOEIC, THPT Quốc Gia), thang điểm và bộ kỹ năng đào tạo.</p>
+            </div>
+            <div class="programs-hero-actions">
+              <button
+                type="button"
+                class="admin-primary-button"
+                @click="openProgram()"
+              >
+                <Plus :size="16" />
+                <span>Tạo chứng chỉ / kỳ thi</span>
+              </button>
+              <button
+                type="button"
+                class="admin-secondary-button"
+                :disabled="loading"
+                title="Tải lại danh sách chứng chỉ"
+                @click="loadData"
+              >
+                <RefreshCw :size="15" :class="{ 'overlay-spinner': loading }" />
+                <span>Làm mới dữ liệu</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- KEY METRICS CARDS -->
+          <div class="programs-metrics-grid">
+            <article class="programs-stat-card blue">
+              <div class="programs-stat-icon">
+                <GraduationCap :size="20" />
+              </div>
+              <div class="programs-stat-info">
+                <span>TỔNG CHỨNG CHỈ / KỲ THI</span>
+                <strong>{{ programs.length }}</strong>
+                <small>Chương trình đang áp dụng</small>
+              </div>
+            </article>
+
+            <article class="programs-stat-card emerald">
+              <div class="programs-stat-icon">
+                <ClipboardCheck :size="20" />
+              </div>
+              <div class="programs-stat-info">
+                <span>TỔNG ĐỀ KIỂM TRA ĐANG CÓ</span>
+                <strong>{{ exams.length }}</strong>
+                <small>Đề thi phân theo kỹ năng</small>
+              </div>
+            </article>
+
+            <article class="programs-stat-card purple">
+              <div class="programs-stat-icon">
+                <Layers :size="20" />
+              </div>
+              <div class="programs-stat-info">
+                <span>MẪU CATALOG CHUẨN</span>
+                <strong>{{ certificatePresets.length }}</strong>
+                <small>IELTS, TOEIC, THPT Quốc Gia</small>
+              </div>
+            </article>
+          </div>
+
+          <!-- MAIN PROGRAMS PANEL -->
+          <div class="admin-panel admin-table-panel">
+            <div class="admin-panel-heading">
+              <div>
+                <h2>Danh sách kỳ thi trong hệ thống</h2>
+                <p>{{ filteredPrograms.length }} danh mục kỳ thi đang sẵn sàng phục vụ học viên.</p>
+              </div>
+              <div class="programs-table-filters">
+                <div class="programs-search-box">
+                  <Search :size="15" />
+                  <input
+                    v-model="programSearch"
+                    type="search"
+                    placeholder="Tìm theo tên hoặc mã kỳ thi..."
+                    aria-label="Tìm kiếm kỳ thi"
+                  />
+                  <button
+                    v-if="programSearch"
+                    type="button"
+                    class="account-search-clear"
+                    aria-label="Xóa tìm kiếm"
+                    @click="programSearch = ''"
+                  >
+                    <X :size="14" />
+                  </button>
+                </div>
+                <button
+                  v-if="programSearch"
+                  type="button"
+                  class="account-reset-filter-btn"
+                  @click="resetProgramFilters"
+                >
+                  <RotateCcw :size="13" />
+                  <span>Đặt lại</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="account-meta-summary" style="padding: 10px 20px 14px;">
+              <span>Hiển thị <strong>{{ filteredPrograms.length }}</strong> / <strong>{{ programs.length }}</strong> kỳ thi</span>
+            </div>
+
+            <div v-if="loading" class="admin-empty admin-empty-loading">
+              <LoaderCircle class="overlay-spinner" :size="24" />
+              <span>Đang tải danh sách kỳ thi…</span>
+            </div>
+
+            <!-- EMPTY CATALOG PRESET STATE -->
+            <div v-else-if="!programs.length" class="admin-empty">
+              <div class="catalog-empty-state">
+                <div class="empty-icon-wrap" style="margin-bottom: 12px;">
+                  <GraduationCap :size="28" />
+                </div>
+                <strong>Khởi tạo catalog kỳ thi mẫu</strong>
+                <p style="color: #64748B; font-size: 13.5px; margin: 4px 0 16px;">
+                  Chọn bộ dữ liệu chuẩn theo thang điểm và kỹ năng trong tài liệu nghiệp vụ để khởi tạo nhanh.
+                </p>
+                <div class="preset-actions-grid">
+                  <button
+                    v-for="preset in certificatePresets"
+                    :key="preset.code"
+                    type="button"
+                    class="preset-card-btn"
+                    @click="openPreset(preset)"
+                  >
+                    <div class="preset-card-icon">
+                      <GraduationCap :size="18" />
+                    </div>
+                    <div class="preset-card-text">
+                      <strong>{{ preset.name }}</strong>
+                      <small>{{ preset.code }} · Thang {{ preset.totalScore }} điểm</small>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="!filteredPrograms.length" class="admin-empty">
+              <div class="empty-icon-wrap">
+                <Search :size="28" />
+              </div>
+              <strong>Không tìm thấy kỳ thi phù hợp</strong>
+              <p>Không có chương trình nào khớp với từ khóa tìm kiếm "{{ programSearch }}".</p>
+              <button
+                type="button"
+                class="overlay-button overlay-button-secondary"
+                style="margin-top: 8px;"
+                @click="resetProgramFilters"
+              >
+                Xóa bộ lọc tìm kiếm
+              </button>
+            </div>
+
+            <div v-else>
+              <!-- Desktop Table View -->
+              <div class="admin-table-wrap programs-desktop-table">
                 <table class="admin-table">
                   <thead>
                     <tr>
-                      <th>Mã giao dịch</th>
-                      <th>Học viên</th>
-                      <th>Cổng thanh toán</th>
-                      <th>Số tiền</th>
-                      <th>Trạng thái</th>
-                      <th>Thời gian</th>
+                      <th style="min-width: 220px;">Chứng chỉ / Kỳ thi</th>
+                      <th style="min-width: 100px;">Mã</th>
+                      <th style="min-width: 200px;">Mô tả</th>
+                      <th style="min-width: 120px;">Tổng điểm</th>
+                      <th style="min-width: 130px;">Điểm đạt / Band</th>
+                      <th style="min-width: 220px;">Kỹ năng / Môn</th>
+                      <th style="min-width: 100px;">Số đề thi</th>
+                      <th style="text-align: right; min-width: 150px;">Thao tác</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="payment in filteredPayments" :key="payment.paymentId">
+                    <tr v-for="program in filteredPrograms" :key="program.certificateId">
                       <td>
-                        <span class="payment-id-badge">#PAY-{{ payment.paymentId }}</span>
-                        <small v-if="payment.providerPaymentId" class="table-secondary">
-                          Ref: {{ payment.providerPaymentId.slice(0, 18) }}...
-                        </small>
+                        <div class="program-title-cell">
+                          <strong>{{ program.name }}</strong>
+                        </div>
                       </td>
                       <td>
-                        <span class="account-cell">
-                          <i class="account-avatar">
-                            {{ (payment.username || 'U').slice(0, 1).toUpperCase() }}
-                          </i>
-                          <strong>{{ payment.username || `User #${payment.userId}` }}</strong>
+                        <span class="program-code-badge">{{ program.code }}</span>
+                      </td>
+                      <td class="description-cell">
+                        <span :title="program.description">{{ program.description || '—' }}</span>
+                      </td>
+                      <td>
+                        <span class="program-score-pill">{{ program.totalScore }} điểm</span>
+                      </td>
+                      <td>
+                        <span class="program-passing-pill">{{ program.passingBand || program.passingScore }}</span>
+                      </td>
+                      <td>
+                        <div class="program-skills-tags">
+                          <span
+                            v-for="sk in parseSkillArray(program.skills)"
+                            :key="sk.code"
+                            class="skill-chip-tag"
+                          >
+                            {{ sk.label }}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span class="order-count-badge">
+                          {{ exams.filter((e) => e.certificateId === program.certificateId).length }} đề
                         </span>
                       </td>
                       <td>
-                        <span class="provider-badge" :class="payment.provider?.toLowerCase()">
-                          {{ payment.provider }}
-                        </span>
-                      </td>
-                      <td>
-                        <strong class="payment-amount">{{ formatMoney(payment.amount, payment.currency) }}</strong>
-                      </td>
-                      <td>
-                        <span
-                          class="payment-status-pill"
-                          :class="payment.status?.toLowerCase()"
-                        >
-                          {{
-                            payment.status === 'SUCCEEDED'
-                              ? 'Thành công'
-                              : payment.status === 'PENDING'
-                              ? 'Đang chờ'
-                              : payment.status === 'FAILED'
-                              ? 'Thất bại'
-                              : payment.status === 'REFUNDED'
-                              ? 'Đã hoàn tiền'
-                              : payment.status
-                          }}
-                        </span>
-                      </td>
-                      <td>
-                        <span class="payment-time">{{ formatPaymentDate(payment.createdAt) }}</span>
+                        <div class="table-row-actions" style="justify-content: flex-end;">
+                          <button
+                            type="button"
+                            class="table-action"
+                            title="Chỉnh sửa kỳ thi"
+                            @click="openProgram(program)"
+                          >
+                            <Pencil :size="13" />
+                            <span>Sửa</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="table-action danger"
+                            title="Xóa kỳ thi"
+                            @click="deleteProgram(program)"
+                          >
+                            <Trash2 :size="13" />
+                            <span>Xóa</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-            </div>
-          </div>
-        </section>
 
-        <section v-else-if="activeSection === 'results'" class="learner-report">
-          <div class="admin-panel learner-report-toolbar">
-            <div>
-              <h2>Kết quả và tiến độ học</h2>
-              <p>Theo dõi lịch sử làm bài và tiến bộ của từng người học.</p>
-            </div>
-            <div class="learner-report-filters">
-              <label>
-                <span>Người học</span>
-                <select v-model="selectedLearnerId" @change="learnerCertificateId = ''; loadLearnerReport()">
-                  <option value="" disabled>Chọn tài khoản</option>
-                  <option v-for="student in students" :key="student.userId" :value="String(student.userId)">{{ student.username }}</option>
-                </select>
-              </label>
-              <label v-if="programs.length">
-                <span>Kỳ thi</span>
-                <select v-model="learnerCertificateId" @change="loadLearnerReport">
-                  <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">{{ program.name }}</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <div v-if="learnerError" class="learner-report-error" role="alert">{{ learnerError }}</div>
-          <div v-if="learnerLoading" class="admin-empty">Đang tải báo cáo học tập…</div>
-          <template v-else-if="selectedLearner">
-            <div class="learner-summary-grid">
-              <article class="learner-summary-card blue"><span>Lượt thi đã hoàn thành</span><strong>{{ completedLearnerAttempts.length }}</strong><small>{{ learnerScopedAttempts.length }} lượt thi trong kỳ đã chọn</small></article>
-              <article class="learner-summary-card teal"><span>Điểm trung bình</span><strong>{{ learnerAverageScore == null ? '—' : `${Math.round(learnerAverageScore)}%` }}</strong><small>Trung bình tỷ lệ điểm các lượt đã chấm</small></article>
-              <article class="learner-summary-card violet"><span>Lần thi gần nhất</span><strong>{{ learnerLatestAttempt ? formatAdminNumber(learnerLatestAttempt.bandScore ?? learnerLatestAttempt.score) : '—' }}</strong><small>{{ learnerLatestAttempt ? formatAttemptDate(learnerLatestAttempt.submittedAt || learnerLatestAttempt.startedAt) : 'Chưa có lượt thi' }}</small></article>
-              <article class="learner-summary-card amber"><span>Kỹ năng / môn có dữ liệu</span><strong>{{ learnerSkillCount }}</strong><small>Đo từ kết quả bài thi đã chấm</small></article>
-            </div>
-            <section class="admin-panel learner-history-panel">
-              <div class="admin-panel-heading"><div><h2>Lịch sử bài thi</h2><p>{{ selectedLearner.username }} · {{ learnerScopedAttempts.length }} lượt trong kỳ đã chọn</p></div></div>
-              <div v-if="!learnerScopedAttempts.length" class="admin-empty">Tài khoản này chưa có lượt làm bài trong kỳ thi đang chọn.</div>
-              <div v-else class="admin-table-wrap">
-                <table class="admin-table learner-history-table">
-                  <thead><tr><th>Bài thi</th><th>Ngày làm</th><th>Trạng thái</th><th>Điểm</th><th>Band</th><th>Vi phạm</th><th></th></tr></thead>
-                  <tbody><tr v-for="attempt in learnerScopedAttempts" :key="attempt.attemptId">
-                    <td><strong>{{ examTitle(attempt) }}</strong><small class="table-secondary">Lượt #{{ attempt.attemptId }}</small></td>
-                    <td>{{ formatAttemptDate(attempt.submittedAt || attempt.startedAt) }}</td>
-                    <td><span class="attempt-state" :class="String(attempt.status || '').toLowerCase()">{{ attempt.status === 'GRADED' ? 'Đã chấm' : attempt.status === 'SUBMITTED' ? 'Đã nộp' : attempt.status === 'IN_PROGRESS' ? 'Đang làm' : attempt.status || '—' }}</span></td>
-                    <td>{{ formatAttemptScore(attempt) }}</td><td>{{ attempt.bandScore ?? '—' }}</td><td>{{ attempt.violationCount ?? 0 }}</td><td><button class="table-action" :disabled="!attempt.submittedAt || attempt.score == null" @click="viewAttemptResult(attempt)">Chi tiết</button></td>
-                  </tr></tbody>
-                </table>
-              </div>
-            </section>
-            <section class="admin-panel learner-skill-panel">
-              <div><h2>Tiến độ theo kỹ năng</h2><p>{{ programs.find((program) => String(program.certificateId) === String(learnerCertificateId))?.name || 'Chọn kỳ thi để xem snapshot' }}</p></div>
-              <div v-if="learnerProgress?.masteryBySkillJson && Object.keys(parseJson(learnerProgress.masteryBySkillJson)).length" class="skill-progress-list">
-                <div v-for="(value, skill) in parseJson(learnerProgress.masteryBySkillJson)" :key="skill" class="skill-progress-row"><span>{{ skill }}</span><div class="skill-progress-track"><i :style="{ width: `${Math.min(100, Math.max(0, Number(value) || 0))}%` }"></i></div><strong>{{ Math.round(Number(value) || 0) }}%</strong></div>
-              </div>
-              <div v-else class="learner-progress-empty"><BarChart3 :size="20" /><span>Chưa có dữ liệu phân tích kỹ năng cho kỳ thi này.</span></div>
-            </section>
-            <section class="admin-panel learner-trend-panel">
-              <div><h2>Diễn biến điểm thi</h2><p>{{ learnerScoreTrend.length }} lượt đã chấm gần nhất</p></div>
-              <div v-if="learnerScoreTrend.length" class="learner-trend-chart" role="img" aria-label="Biểu đồ diễn biến điểm thi">
-                <div v-for="item in learnerScoreTrend" :key="item.attemptId" class="learner-trend-point" :title="`Lượt ${item.attemptId}: ${item.scorePercent}%`"><strong>{{ Math.round(Number(item.scorePercent) || 0) }}%</strong><i :style="{ height: `${Math.max(8, Math.min(100, Number(item.scorePercent) || 0))}%` }"></i><small>{{ formatTrendDate(item.submittedAt) }}</small></div>
-              </div>
-              <div v-else class="learner-progress-empty"><BarChart3 :size="20" /><span>Chưa có điểm đã chấm để so sánh theo thời gian.</span></div>
-            </section>
-          </template>
-          <div v-else class="admin-empty">Chưa có tài khoản người học để hiển thị.</div>
-        </section>
-
-        <section
-          v-else-if="activeSection === 'programs'"
-          class="admin-panel admin-table-panel"
-        >
-          <div class="admin-panel-heading">
-            <div>
-              <h2>Chứng chỉ và kỳ thi</h2>
-              <p>{{ filteredPrograms.length }} danh mục · IELTS, TOEIC, THPT</p>
-            </div>
-            <button class="admin-primary-button" @click="openProgram">
-              <GraduationCap :size="16" />
-              Tạo chứng chỉ / kỳ thi
-            </button>
-          </div>
-          <div v-if="loading" class="admin-empty">Đang tải chương trình...</div>
-          <div v-else-if="!filteredPrograms.length" class="admin-empty">
-            <div class="catalog-empty-state">
-              <strong>Khởi tạo catalog kỳ thi</strong>
-              <span>
-                Chọn bộ dữ liệu chuẩn theo thang điểm và kỹ năng trong
-                BUSINESS.md.
-              </span>
-              <div class="preset-actions">
-                <button
-                  v-for="preset in certificatePresets"
-                  :key="preset.code"
-                  class="preset-button"
-                  @click="openPreset(preset)"
+              <!-- Mobile Card View -->
+              <div class="programs-mobile-grid" style="padding: 14px;">
+                <article
+                  v-for="program in filteredPrograms"
+                  :key="`m-prog-${program.certificateId}`"
+                  class="account-mobile-card"
                 >
-                  <GraduationCap :size="15" />
-                  <span>{{ preset.name }}</span>
-                  <small>{{ preset.totalScore }} điểm</small>
+                  <div class="account-card-header">
+                    <div>
+                      <strong>{{ program.name }}</strong>
+                      <small class="table-secondary" style="display: block; margin-top: 2px;">{{ program.description || 'Chương trình luyện thi' }}</small>
+                    </div>
+                    <span class="program-code-badge">{{ program.code }}</span>
+                  </div>
+
+                  <div class="account-card-body">
+                    <div class="card-field-row">
+                      <span class="card-field-label">Thang điểm:</span>
+                      <div>
+                        <span>Tổng: {{ program.totalScore }} điểm · Đạt: {{ program.passingBand || program.passingScore }}</span>
+                      </div>
+                    </div>
+
+                    <div class="card-field-row">
+                      <span class="card-field-label">Số đề thi:</span>
+                      <span class="order-count-badge">
+                        {{ exams.filter((e) => e.certificateId === program.certificateId).length }} đề thi
+                      </span>
+                    </div>
+
+                    <div class="card-field-row" style="align-items: flex-start;">
+                      <span class="card-field-label">Kỹ năng:</span>
+                      <div class="program-skills-tags" style="justify-content: flex-end;">
+                        <span
+                          v-for="sk in parseSkillArray(program.skills)"
+                          :key="sk.code"
+                          class="skill-chip-tag"
+                        >
+                          {{ sk.label }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="account-card-actions">
+                    <button
+                      type="button"
+                      class="table-action mobile-card-btn"
+                      @click="openProgram(program)"
+                    >
+                      <Pencil :size="14" />
+                      <span>Chỉnh sửa</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="table-action mobile-card-btn danger"
+                      @click="deleteProgram(program)"
+                    >
+                      <Trash2 :size="14" />
+                      <span>Xóa kỳ thi</span>
+                    </button>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- BÀI KIỂM TRA & ĐỀ THI -->
+        <section v-else-if="activeSection === 'exams'" class="admin-exams-section">
+          <!-- TOP HEADING PANEL -->
+          <div class="admin-panel exams-hero-panel">
+            <div class="exams-hero-content">
+              <div class="exams-hero-badge">
+                <ClipboardCheck :size="15" />
+                <span>DANH MỤC BÀI KIỂM TRA</span>
+              </div>
+              <h2>Quản trị Đề thi & Bài kiểm tra</h2>
+              <p>Quản lý toàn bộ đề thi chuẩn hóa, cấu hình câu hỏi, phân loại theo kỹ năng và phát hành cho học viên.</p>
+            </div>
+            <div class="exams-hero-actions">
+              <button
+                type="button"
+                class="admin-primary-button"
+                :disabled="!programs.length || !topics.length"
+                @click="showExamBuilder = true"
+              >
+                <Plus :size="16" />
+                <span>Tạo bài kiểm tra</span>
+              </button>
+              <button
+                type="button"
+                class="admin-secondary-button"
+                :disabled="loading"
+                title="Tải lại danh sách đề thi"
+                @click="loadData"
+              >
+                <RefreshCw :size="15" :class="{ 'overlay-spinner': loading }" />
+                <span>Làm mới dữ liệu</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- KEY METRICS CARDS -->
+          <div class="exams-metrics-grid">
+            <article class="exams-stat-card blue">
+              <div class="exams-stat-icon">
+                <ClipboardCheck :size="20" />
+              </div>
+              <div class="exams-stat-info">
+                <span>TỔNG SỐ ĐỀ THI</span>
+                <strong>{{ exams.length }}</strong>
+                <small>Đề kiểm tra trên hệ thống</small>
+              </div>
+            </article>
+
+            <article class="exams-stat-card emerald">
+              <div class="exams-stat-icon">
+                <CheckCircle2 :size="20" />
+              </div>
+              <div class="exams-stat-info">
+                <span>ĐÃ PHÁT HÀNH</span>
+                <strong>{{ exams.filter((e) => e.status === 'PUBLISHED').length }}</strong>
+                <small>Học viên có thể làm bài</small>
+              </div>
+            </article>
+
+            <article class="exams-stat-card amber">
+              <div class="exams-stat-icon">
+                <FileText :size="20" />
+              </div>
+              <div class="exams-stat-info">
+                <span>BẢN NHÁP / ĐANG XÂY</span>
+                <strong>{{ exams.filter((e) => e.status !== 'PUBLISHED').length }}</strong>
+                <small>Chưa mở cho người học</small>
+              </div>
+            </article>
+
+            <article class="exams-stat-card purple">
+              <div class="exams-stat-icon">
+                <GraduationCap :size="20" />
+              </div>
+              <div class="exams-stat-info">
+                <span>CHƯƠNG TRÌNH ÁP DỤNG</span>
+                <strong>{{ new Set(exams.map((e) => e.certificateId)).size }}</strong>
+                <small>Kỳ thi có bộ đề</small>
+              </div>
+            </article>
+          </div>
+
+          <!-- MAIN EXAMS PANEL -->
+          <div class="admin-panel admin-table-panel">
+            <div class="admin-panel-heading">
+              <div>
+                <h2>Danh sách đề kiểm tra</h2>
+                <p>{{ filteredExams.length }} đề thi sẵn sàng đánh giá năng lực học viên.</p>
+              </div>
+              <div class="exams-table-filters">
+                <div class="exams-search-box">
+                  <Search :size="15" />
+                  <input
+                    v-model="examSearch"
+                    type="search"
+                    placeholder="Tìm theo tiêu đề, mô tả..."
+                    aria-label="Tìm kiếm đề thi"
+                  />
+                  <button
+                    v-if="examSearch"
+                    type="button"
+                    class="account-search-clear"
+                    aria-label="Xóa tìm kiếm"
+                    @click="examSearch = ''"
+                  >
+                    <X :size="14" />
+                  </button>
+                </div>
+                <select v-model="examProgramFilter" class="exams-select-filter" aria-label="Lọc theo kỳ thi">
+                  <option value="all">Tất cả kỳ thi</option>
+                  <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">
+                    {{ program.name }} ({{ program.code }})
+                  </option>
+                </select>
+                <select v-model="examStatusFilter" class="exams-select-filter" aria-label="Lọc theo trạng thái">
+                  <option value="all">Tất cả trạng thái</option>
+                  <option value="PUBLISHED">Đã phát hành</option>
+                  <option value="DRAFT">Bản nháp</option>
+                </select>
+                <button
+                  v-if="examSearch || examProgramFilter !== 'all' || examStatusFilter !== 'all'"
+                  type="button"
+                  class="account-reset-filter-btn"
+                  @click="resetExamFilters"
+                >
+                  <RotateCcw :size="13" />
+                  <span>Đặt lại</span>
                 </button>
               </div>
             </div>
-          </div>
-          <div v-else class="admin-table-wrap">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>Chứng chỉ / kỳ thi</th>
-                  <th>Mã</th>
-                  <th>Mô tả</th>
-                  <th>Tổng điểm</th>
-                  <th>Điểm mục tiêu</th>
-                  <th>Kỹ năng / môn</th>
-                  <th>Số đề</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="program in filteredPrograms"
-                  :key="program.certificateId"
-                >
-                  <td>
-                    <strong>{{ program.name }}</strong>
-                  </td>
-                  <td>{{ program.code }}</td>
-                  <td class="description-cell">
-                    {{ program.description || '—' }}
-                  </td>
-                  <td>{{ program.totalScore }}</td>
-                  <td>{{ program.passingBand || program.passingScore }}</td>
-                  <td class="description-cell">
-                    {{ skillLabels(program.skills) }}
-                  </td>
-                  <td>
-                    {{
-                      exams.filter(
-                        (exam) => exam.certificateId === program.certificateId
-                      ).length
-                    }}
-                  </td>
-                  <td>
-                    <button class="table-action" @click="openProgram(program)">
-                      Sửa
-                    </button>
-                    <button
-                      class="table-action danger"
-                      @click="deleteProgram(program)"
-                    >
-                      Xóa
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
 
-        <section
-          v-else-if="activeSection === 'exams'"
-          class="admin-panel admin-table-panel"
-        >
-          <div class="admin-panel-heading">
-            <div>
-              <h2>Bài kiểm tra</h2>
-              <p>{{ filteredExams.length }} đề · nhóm theo kỹ năng / môn thi</p>
+            <div class="account-meta-summary" style="padding: 10px 20px 14px;">
+              <span>Hiển thị <strong>{{ paginatedExams.length }}</strong> / <strong>{{ filteredExams.length }}</strong> đề kiểm tra</span>
             </div>
-            <button class="admin-primary-button" :disabled="!programs.length || !topics.length" @click="showExamBuilder = true">
-              <Plus :size="16" /> Tạo bài kiểm tra
-            </button>
-          </div>
-          <div v-if="loading" class="admin-empty admin-empty-loading">
-            <LoaderCircle class="overlay-spinner" :size="22" />
-            <span>Đang tải danh sách bài kiểm tra…</span>
-          </div>
-          <div v-else-if="!filteredExams.length" class="admin-empty">
-            <div class="empty-icon-wrap">
-              <ClipboardCheck :size="26" />
-            </div>
-            <strong>Chưa có bài kiểm tra nào</strong>
-            <p>Bắt đầu tạo bài kiểm tra đầu tiên để phục vụ luyện tập và đánh giá năng lực học viên.</p>
-            <button class="admin-primary-button" :disabled="!programs.length || !topics.length" @click="showExamBuilder = true">
-              <Plus :size="15" /> Tạo bài kiểm tra
-            </button>
-          </div>
-          <div v-else class="admin-table-wrap">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>Đề kiểm tra</th>
-                  <th>Kỳ thi / kỹ năng</th>
-                  <th>Mục tiêu</th>
-                  <th>Thời lượng</th>
-                  <th>Số câu</th>
-                  <th>Trạng thái</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="exam in filteredExams" :key="exam.examId">
-                  <td>
-                    <strong>{{ exam.title }}</strong>
-                    <small class="secondary-text">
-                      {{ exam.description || 'Bài đánh giá học tập' }}
-                    </small>
-                  </td>
-                  <td>{{ programName(exam.certificateId) }} · {{ topicName(exam.topicId) }}</td>
-                  <td>{{ exam.targetScoreMin != null ? `${exam.targetScoreMin}–${exam.targetScoreMax} ${exam.targetScoreUnit || ''}` : '—' }}</td>
-                  <td>{{ exam.durationMinutes || 0 }} phút</td>
-                  <td>{{ exam.questionCount || exam.totalQuestions || 0 }}</td>
-                  <td>
-                    <span
-                      :class="[
-                        'account-state',
-                        exam.status === 'PUBLISHED' ? 'enabled' : 'disabled',
-                      ]"
-                    >
-                      {{
-                        exam.status === 'PUBLISHED'
-                          ? 'Đã phát hành'
-                          : exam.status || 'Bản nháp'
-                      }}
-                    </span>
-                  </td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
 
-        <template v-else>
-          <section class="knowledge-page">
-            <header class="knowledge-page-heading">
-              <div class="knowledge-breadcrumb">
-                <span>Quản trị</span><span aria-hidden="true">/</span>
-                <strong>Kho kiến thức</strong>
+            <div v-if="loading" class="admin-empty admin-empty-loading">
+              <LoaderCircle class="overlay-spinner" :size="24" />
+              <span>Đang tải danh sách bài kiểm tra…</span>
+            </div>
+
+            <div v-else-if="!exams.length" class="admin-empty">
+              <div class="empty-icon-wrap">
+                <ClipboardCheck :size="28" />
               </div>
-              <h1>Kho kiến thức</h1>
-              <p>Tài liệu PDF được phân nhóm theo kỳ thi.</p>
-            </header>
+              <strong>Chưa có bài kiểm tra nào trong hệ thống</strong>
+              <p>Bắt đầu tạo bài kiểm tra đầu tiên để phục vụ luyện tập và đánh giá năng lực học viên.</p>
+              <button
+                type="button"
+                class="admin-primary-button"
+                style="margin-top: 10px;"
+                :disabled="!programs.length || !topics.length"
+                @click="showExamBuilder = true"
+              >
+                <Plus :size="15" />
+                <span>Tạo bài kiểm tra đầu tiên</span>
+              </button>
+            </div>
 
-            <section class="knowledge-summary" aria-label="Tổng quan tài liệu">
-              <article class="knowledge-stat stat-blue">
-                <span class="knowledge-stat-icon"><FileText :size="19" /></span>
-                <div><span>Tổng tài liệu</span><strong>{{ formatAdminNumber(knowledgeDocuments.length) }}</strong><small>PDF trong kho</small></div>
-              </article>
-              <article class="knowledge-stat stat-teal">
-                <span class="knowledge-stat-icon"><CircleCheck :size="19" /></span>
-                <div><span>Đang sử dụng</span><strong>{{ formatAdminNumber(activeKnowledgeCount) }}</strong><small>{{ activeKnowledgePercent }}% tổng tài liệu</small></div>
-              </article>
-              <article class="knowledge-stat stat-amber">
-                <span class="knowledge-stat-icon"><CirclePause :size="19" /></span>
-                <div><span>Đã tắt</span><strong>{{ formatAdminNumber(inactiveKnowledgeCount) }}</strong><small>Không dùng khi tạo câu hỏi</small></div>
-              </article>
-              <article class="knowledge-stat stat-violet">
-                <span class="knowledge-stat-icon"><Database :size="19" /></span>
-                <div><span>Tổng đoạn kiến thức</span><strong>{{ formatAdminNumber(knowledgeChunkCount) }}</strong><small>Tách từ tất cả tài liệu</small></div>
-              </article>
-            </section>
+            <div v-else-if="!filteredExams.length" class="admin-empty">
+              <div class="empty-icon-wrap">
+                <Search :size="28" />
+              </div>
+              <strong>Không tìm thấy bài kiểm tra phù hợp</strong>
+              <p>Không có đề thi nào khớp với bộ lọc hoặc từ khóa tìm kiếm hiện tại.</p>
+              <button
+                type="button"
+                class="overlay-button overlay-button-secondary"
+                style="margin-top: 8px;"
+                @click="resetExamFilters"
+              >
+                Xóa bộ lọc tìm kiếm
+              </button>
+            </div>
 
-            <section class="knowledge-layout">
-                <form id="kb-add" class="knowledge-card knowledge-import" @submit.prevent="importKnowledge">
-                <div class="knowledge-card-heading">
-                  <span class="knowledge-heading-icon"><Plus :size="20" /></span>
-                  <div><h2>Thêm tài liệu vào kho</h2><p>File PDF theo kỳ thi và kỹ năng/môn thi.</p></div>
+            <div v-else>
+              <!-- Desktop Table View -->
+              <div class="admin-table-wrap exams-desktop-table">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th style="min-width: 240px;">Đề kiểm tra</th>
+                      <th style="min-width: 190px;">Kỳ thi / Kỹ năng</th>
+                      <th style="min-width: 140px;">Mục tiêu</th>
+                      <th style="min-width: 120px;">Thời lượng</th>
+                      <th style="min-width: 110px;">Số câu</th>
+                      <th style="min-width: 130px;">Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="exam in paginatedExams" :key="exam.examId">
+                      <td>
+                        <div class="results-exam-cell">
+                          <strong>{{ exam.title }}</strong>
+                          <small class="table-secondary">
+                            {{ exam.description || 'Bài đánh giá học tập theo kỹ năng' }}
+                          </small>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="exam-program-cell">
+                          <span class="exam-prog-name">{{ programName(exam.certificateId) }}</span>
+                          <span class="exam-topic-name">· {{ topicName(exam.topicId) }}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span class="program-passing-pill">
+                          {{ exam.targetScoreMin != null ? `${exam.targetScoreMin}–${exam.targetScoreMax} ${exam.targetScoreUnit || ''}` : '—' }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="exam-duration-badge">
+                          {{ exam.durationMinutes || 0 }} phút
+                        </span>
+                      </td>
+                      <td>
+                        <span class="order-count-badge">
+                          {{ exam.questionCount || exam.totalQuestions || 0 }} câu
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          class="results-status-pill"
+                          :class="exam.status === 'PUBLISHED' ? 'published' : 'draft'"
+                        >
+                          <span class="state-dot" aria-hidden="true"></span>
+                          <span>{{ exam.status === 'PUBLISHED' ? 'Đã phát hành' : exam.status || 'Bản nháp' }}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Mobile Card View -->
+              <div class="exams-mobile-grid" style="padding: 14px;">
+                <article
+                  v-for="exam in paginatedExams"
+                  :key="`m-exam-${exam.examId}`"
+                  class="account-mobile-card"
+                >
+                  <div class="account-card-header">
+                    <div>
+                      <strong>{{ exam.title }}</strong>
+                      <small class="table-secondary" style="display: block; margin-top: 2px;">
+                        {{ programName(exam.certificateId) }} · {{ topicName(exam.topicId) }}
+                      </small>
+                    </div>
+                    <span
+                      class="results-status-pill"
+                      :class="exam.status === 'PUBLISHED' ? 'published' : 'draft'"
+                    >
+                      <span class="state-dot" aria-hidden="true"></span>
+                      <span>{{ exam.status === 'PUBLISHED' ? 'Đã phát hành' : exam.status || 'Bản nháp' }}</span>
+                    </span>
+                  </div>
+
+                  <div class="account-card-body">
+                    <div class="card-field-row">
+                      <span class="card-field-label">Thời lượng & Số câu:</span>
+                      <div style="display: flex; gap: 8px;">
+                        <span class="exam-duration-badge">{{ exam.durationMinutes || 0 }} phút</span>
+                        <span class="order-count-badge">{{ exam.questionCount || exam.totalQuestions || 0 }} câu</span>
+                      </div>
+                    </div>
+
+                    <div class="card-field-row">
+                      <span class="card-field-label">Điểm mục tiêu:</span>
+                      <span class="program-passing-pill">
+                        {{ exam.targetScoreMin != null ? `${exam.targetScoreMin}–${exam.targetScoreMax} ${exam.targetScoreUnit || ''}` : '—' }}
+                      </span>
+                    </div>
+
+                    <div v-if="exam.description" class="card-field-row">
+                      <span class="card-field-label">Mô tả:</span>
+                      <small class="table-secondary">{{ exam.description }}</small>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <!-- Pagination for Exams -->
+              <div v-if="examTotalPages > 1 || filteredExams.length > 10" class="account-pagination" style="padding: 14px 20px;">
+                <div class="pagination-size">
+                  <span>Hiển thị</span>
+                  <select v-model.number="examPageSize" class="pagination-select" aria-label="Số dòng mỗi trang">
+                    <option :value="10">10 đề thi</option>
+                    <option :value="25">25 đề thi</option>
+                    <option :value="50">50 đề thi</option>
+                  </select>
                 </div>
+                <div class="pagination-nav">
+                  <button
+                    type="button"
+                    class="pagination-btn"
+                    :disabled="examPage <= 1"
+                    aria-label="Trang trước"
+                    @click="examPage = Math.max(1, examPage - 1)"
+                  >
+                    <ChevronLeft :size="16" />
+                    <span>Trước</span>
+                  </button>
+                  <span class="pagination-status">Trang <strong>{{ examPage }}</strong> / {{ examTotalPages }}</span>
+                  <button
+                    type="button"
+                    class="pagination-btn"
+                    :disabled="examPage >= examTotalPages"
+                    aria-label="Trang sau"
+                    @click="examPage = Math.min(examTotalPages, examPage + 1)"
+                  >
+                    <span>Sau</span>
+                    <ChevronRight :size="16" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
+        <section v-else class="admin-knowledge-section">
+          <!-- HERO PANEL -->
+          <div class="knowledge-hero-panel">
+            <div class="knowledge-hero-content">
+              <div class="knowledge-hero-badge">
+                <Sparkles :size="14" />
+                <span>KHO TRI THỨC AI · RAG ENGINE</span>
+              </div>
+              <h1 class="knowledge-hero-title">Kho tri thức & Quản lý tài liệu RAG</h1>
+              <p class="knowledge-hero-desc">
+                Tải lên và quản lý tài liệu học tập PDF, tự động phân tách đoạn tri thức (chunks) làm nguồn dữ liệu chuẩn cho Trợ lý gia sư AI và thuật toán sinh đề thi thích ứng.
+              </p>
+            </div>
+            <div class="knowledge-hero-actions">
+              <button
+                type="button"
+                class="knowledge-btn-secondary"
+                :disabled="loading"
+                title="Tải lại dữ liệu"
+                @click="loadData"
+              >
+                <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
+                <span>Tải lại</span>
+              </button>
+              <a href="#kb-add" class="knowledge-btn-primary">
+                <Upload :size="16" />
+                <span>Nạp tài liệu mới</span>
+              </a>
+            </div>
+          </div>
+
+          <!-- 4 KPI METRICS -->
+          <div class="knowledge-metrics-grid">
+            <div class="knowledge-stat-card">
+              <div class="knowledge-stat-header">
+                <span class="knowledge-stat-label">Tổng số tài liệu</span>
+                <div class="knowledge-stat-icon icon-blue">
+                  <FileText :size="18" />
+                </div>
+              </div>
+              <div class="knowledge-stat-value">{{ formatAdminNumber(knowledgeDocuments.length) }}</div>
+              <div class="knowledge-stat-hint">Tệp PDF được nạp vào kho</div>
+            </div>
+
+            <div class="knowledge-stat-card">
+              <div class="knowledge-stat-header">
+                <span class="knowledge-stat-label">Đang sử dụng</span>
+                <div class="knowledge-stat-icon icon-emerald">
+                  <CircleCheck :size="18" />
+                </div>
+              </div>
+              <div class="knowledge-stat-value">{{ formatAdminNumber(activeKnowledgeCount) }}</div>
+              <div class="knowledge-stat-hint">
+                Chiếm <strong>{{ activeKnowledgePercent }}%</strong> tổng tài liệu
+              </div>
+            </div>
+
+            <div class="knowledge-stat-card">
+              <div class="knowledge-stat-header">
+                <span class="knowledge-stat-label">Đã tạm tắt</span>
+                <div class="knowledge-stat-icon icon-amber">
+                  <CirclePause :size="18" />
+                </div>
+              </div>
+              <div class="knowledge-stat-value">{{ formatAdminNumber(inactiveKnowledgeCount) }}</div>
+              <div class="knowledge-stat-hint">Không dùng khi truy xuất & tạo câu hỏi</div>
+            </div>
+
+            <div class="knowledge-stat-card">
+              <div class="knowledge-stat-header">
+                <span class="knowledge-stat-label">Tổng đoạn tri thức (chunks)</span>
+                <div class="knowledge-stat-icon icon-purple">
+                  <Database :size="18" />
+                </div>
+              </div>
+              <div class="knowledge-stat-value">{{ formatAdminNumber(knowledgeChunkCount) }}</div>
+              <div class="knowledge-stat-hint">Vector chunks được phân tách từ PDF</div>
+            </div>
+          </div>
+
+          <!-- 2-COLUMN WORKSPACE: LEFT UPLOAD FORM, RIGHT DOCUMENT LIBRARY -->
+          <div class="knowledge-workspace-grid">
+            <!-- CỘT TRÁI: FORM NẠP TÀI LIỆU -->
+            <div id="kb-add" class="knowledge-panel knowledge-import-panel">
+              <div class="knowledge-panel-header">
+                <div class="knowledge-panel-title-group">
+                  <div class="knowledge-panel-icon-box">
+                    <Upload :size="18" />
+                  </div>
+                  <div>
+                    <h2 class="knowledge-panel-title">Nạp tài liệu PDF vào kho</h2>
+                    <p class="knowledge-panel-subtitle">Gán theo kỳ thi và kỹ năng để tạo ngữ cảnh chuẩn xác</p>
+                  </div>
+                </div>
+              </div>
+
+              <form class="knowledge-upload-form" @submit.prevent="importKnowledge">
+                <!-- DROPZONE -->
                 <label
                   class="knowledge-dropzone"
                   :class="{ 'is-dragging': knowledgeDragging }"
@@ -2401,158 +4466,359 @@
                   @drop="dropKnowledgeFiles"
                 >
                   <input type="file" accept=".pdf,application/pdf" multiple @change="readKnowledgeFiles" />
-                  <span class="knowledge-upload-icon"><Upload :size="23" /></span>
-                  <strong>Kéo thả PDF hoặc chọn từ máy</strong>
-                  <small>PDF · tối đa 20 MB mỗi tệp</small>
+                  <div class="knowledge-dropzone-icon">
+                    <Upload :size="24" />
+                  </div>
+                  <strong class="knowledge-dropzone-title">Kéo thả tệp PDF vào đây hoặc bấm để duyệt tệp</strong>
+                  <span class="knowledge-dropzone-subtitle">Hỗ trợ định dạng .PDF · Tối đa 20 MB mỗi tệp</span>
                 </label>
-                <small v-if="knowledgeFormErrors.files" class="knowledge-field-error" role="alert">{{ knowledgeFormErrors.files }}</small>
+                <p v-if="knowledgeFormErrors.files" class="knowledge-form-error" role="alert">
+                  {{ knowledgeFormErrors.files }}
+                </p>
 
-                <label class="knowledge-field">
-                  <span>Kỳ thi <b class="required-mark" aria-hidden="true">*</b></span>
-                  <select v-model="knowledgeForm.certificateId" required :aria-invalid="!!knowledgeFormErrors.exam" @invalid="knowledgeFormErrors.exam = 'Chọn kỳ thi cho tài liệu.'" @change="knowledgeFormErrors.exam = ''">
-                    <option disabled value="">Chọn kỳ thi</option>
+                <!-- KỲ THI / CHỨNG CHỈ -->
+                <div class="knowledge-field-group">
+                  <label class="knowledge-field-label">
+                    Kỳ thi / Chương trình áp dụng <span class="required-star">*</span>
+                  </label>
+                  <select
+                    v-model="knowledgeForm.certificateId"
+                    required
+                    class="knowledge-select-input"
+                    :class="{ 'has-error': knowledgeFormErrors.exam }"
+                    @change="knowledgeFormErrors.exam = ''"
+                  >
+                    <option disabled value="">-- Chọn kỳ thi áp dụng --</option>
                     <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">
-                      {{ program.name }}
+                      {{ program.name }} ({{ program.code }})
                     </option>
                   </select>
-                  <small v-if="knowledgeFormErrors.exam" class="knowledge-field-error" role="alert">{{ knowledgeFormErrors.exam }}</small>
-                </label>
+                  <p v-if="knowledgeFormErrors.exam" class="knowledge-form-error" role="alert">
+                    {{ knowledgeFormErrors.exam }}
+                  </p>
+                </div>
 
-                <div v-if="knowledgeTopics.length" class="knowledge-skill-field">
-                  <div id="knowledge-skill-heading" class="knowledge-skill-heading"><span>Kỹ năng / môn thi</span><small>Tùy chọn</small></div>
-                  <div class="knowledge-skill-choice" role="group" aria-labelledby="knowledge-skill-heading">
-                    <button type="button" class="knowledge-skill-chip skill-auto" :class="{ selected: !knowledgeForm.topicId }" :aria-pressed="!knowledgeForm.topicId" @click="knowledgeForm.topicId = ''">
-                      <Check v-if="!knowledgeForm.topicId" :size="15" />
-                      <span v-else class="knowledge-skill-dot"></span>Tất cả
+                <!-- KỸ NĂNG / MÔN THI (TÙY CHỌN) -->
+                <div v-if="knowledgeTopics.length" class="knowledge-field-group">
+                  <div class="knowledge-field-label-row">
+                    <label class="knowledge-field-label">Kỹ năng / Môn thi</label>
+                    <span class="knowledge-field-sub">Tùy chọn</span>
+                  </div>
+                  <div class="knowledge-topic-chips" role="group">
+                    <button
+                      type="button"
+                      class="knowledge-topic-chip"
+                      :class="{ active: !knowledgeForm.topicId }"
+                      @click="knowledgeForm.topicId = ''"
+                    >
+                      <Check v-if="!knowledgeForm.topicId" :size="14" />
+                      <span>Tất cả kỹ năng</span>
                     </button>
                     <button
                       v-for="topic in knowledgeTopics"
                       :key="topic.topicId"
                       type="button"
-                      class="knowledge-skill-chip"
-                      :class="[knowledgeSkillTone(topic), { selected: String(topic.topicId) === knowledgeForm.topicId }]"
-                      :aria-pressed="String(topic.topicId) === knowledgeForm.topicId"
+                      class="knowledge-topic-chip"
+                      :class="{ active: String(topic.topicId) === knowledgeForm.topicId }"
                       @click="knowledgeForm.topicId = String(topic.topicId)"
                     >
-                      <Check v-if="String(topic.topicId) === knowledgeForm.topicId" :size="15" />
-                      <span v-else class="knowledge-skill-dot"></span>{{ topic.name }}
+                      <Check v-if="String(topic.topicId) === knowledgeForm.topicId" :size="14" />
+                      <span>{{ topic.name }}</span>
                     </button>
                   </div>
                 </div>
 
-                <div v-if="knowledgeFiles.length" class="knowledge-upload-list">
-                  <div v-for="item in knowledgeFiles" :key="item.id" class="knowledge-upload-item">
-                    <span class="queued-file-icon"><FileText :size="17" /></span>
-                    <div class="queued-file-info">
-                      <strong :title="item.file.name">{{ item.file.name }}</strong>
-                      <small>{{ (item.file.size / 1024 / 1024).toFixed(1) }} MB</small>
-                    </div>
-                    <label class="knowledge-field queued-title">
-                      <span>Tiêu đề <b class="required-mark" aria-hidden="true">*</b></span>
-                      <input v-model.trim="item.title" required maxlength="200" :aria-invalid="!!knowledgeFormErrors.titles && !item.title.trim()" @invalid="knowledgeFormErrors.titles = 'Nhập tiêu đề cho từng tài liệu.'" @input="knowledgeFormErrors.titles = ''" />
-                    </label>
-                    <button type="button" class="knowledge-icon-button danger" :disabled="importingKnowledge" :aria-label="`Bỏ ${item.file.name}`" title="Bỏ tệp" @click="removeKnowledgeFile(item.id)">
-                      <X :size="17" />
-                    </button>
+                <!-- QUEUED FILES LIST -->
+                <div v-if="knowledgeFiles.length" class="knowledge-queue-section">
+                  <div class="knowledge-queue-header">
+                    <span>Tệp đang chờ nạp ({{ knowledgeFiles.length }})</span>
+                    <button type="button" class="knowledge-queue-clear" @click="knowledgeFiles = []">Xóa tất cả</button>
                   </div>
-                </div>
-                <small v-if="knowledgeFormErrors.titles" class="knowledge-field-error" role="alert">{{ knowledgeFormErrors.titles }}</small>
-
-                <div v-if="knowledgeNotice" class="knowledge-notice" role="status">
-                  <CheckCircle2 :size="18" />
-                  <span>Đã thêm <strong>“{{ knowledgeNotice }}”</strong> vào kho kiến thức.</span>
-                  <button type="button" class="knowledge-notice-close" aria-label="Đóng thông báo" @click="closeKnowledgeNotice"><X :size="17" /></button>
-                </div>
-                <footer class="knowledge-form-footer">
-                  <span class="knowledge-form-hint"><Info :size="16" /> Tài liệu mới được bật ngay sau khi nhập.</span>
-                  <div class="knowledge-form-actions">
-                    <button type="button" class="knowledge-clear" @click="clearKnowledgeForm">Làm mới</button>
-                    <button class="knowledge-submit" type="submit" :disabled="importingKnowledge">
-                      <Database :size="17" />
-                      {{ importingKnowledge ? 'Đang nhập...' : 'Đưa vào kho kiến thức' }}
-                    </button>
-                  </div>
-                </footer>
-              </form>
-
-              <section class="knowledge-library-column">
-                <div class="knowledge-card knowledge-list">
-                  <div class="knowledge-card-heading library-heading">
-                    <div><h2>Tài liệu đã nhập</h2><p>Dùng chung cho mọi lộ trình học.</p></div>
-                    <span class="knowledge-total-badge">{{ formatAdminNumber(knowledgeDocuments.length) }}</span>
-                  </div>
-                  <div v-if="knowledgeDocuments.length" class="knowledge-library-tools">
-                    <label class="knowledge-search">
-                      <Search :size="17" />
-                      <input v-model="knowledgeSearch" type="search" placeholder="Tìm tên tài liệu, file, kỳ thi" aria-label="Tìm trong kho kiến thức" />
-                    </label>
-                    <div class="knowledge-filter" role="group" aria-label="Lọc tài liệu theo trạng thái">
-                      <button v-for="filter in [
-                        { id: 'all', label: 'Tất cả', count: knowledgeDocuments.length },
-                        { id: 'active', label: 'Đang dùng', count: activeKnowledgeCount },
-                        { id: 'inactive', label: 'Đã tắt', count: inactiveKnowledgeCount },
-                      ]" :key="filter.id" type="button" :aria-pressed="knowledgeFilter === filter.id" @click="knowledgeFilter = filter.id">
-                        {{ filter.label }} <span>{{ formatAdminNumber(filter.count) }}</span>
+                  <div class="knowledge-queue-list">
+                    <div v-for="item in knowledgeFiles" :key="item.id" class="knowledge-queue-item">
+                      <div class="knowledge-queue-file-icon">
+                        <FileText :size="18" />
+                      </div>
+                      <div class="knowledge-queue-file-details">
+                        <div class="knowledge-queue-filename" :title="item.file.name">{{ item.file.name }}</div>
+                        <div class="knowledge-queue-filesize">{{ (item.file.size / 1024 / 1024).toFixed(2) }} MB</div>
+                      </div>
+                      <div class="knowledge-queue-title-input-wrap">
+                        <input
+                          v-model.trim="item.title"
+                          type="text"
+                          placeholder="Tiêu đề tài liệu..."
+                          required
+                          maxlength="200"
+                          class="knowledge-queue-title-input"
+                          :class="{ 'has-error': knowledgeFormErrors.titles && !item.title.trim() }"
+                          @input="knowledgeFormErrors.titles = ''"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        class="knowledge-queue-remove-btn"
+                        :disabled="importingKnowledge"
+                        title="Bỏ tệp này"
+                        @click="removeKnowledgeFile(item.id)"
+                      >
+                        <X :size="16" />
                       </button>
                     </div>
                   </div>
+                  <p v-if="knowledgeFormErrors.titles" class="knowledge-form-error" role="alert">
+                    {{ knowledgeFormErrors.titles }}
+                  </p>
+                </div>
 
-                  <div v-if="!knowledgeDocuments.length" class="knowledge-empty">
-                    <span><Database :size="25" /></span>
-                    <strong>Chưa có tài liệu</strong>
-                    <small>Các tài liệu bạn thêm sẽ xuất hiện ở đây.</small>
-                    <a class="knowledge-empty-link" href="#kb-add">Thêm tài liệu đầu tiên</a>
+                <!-- SUCCESS NOTICE -->
+                <div v-if="knowledgeNotice" class="knowledge-success-banner" role="status">
+                  <CheckCircle2 :size="18" />
+                  <span>Đã nạp thành công <strong>“{{ knowledgeNotice }}”</strong> vào kho tri thức.</span>
+                  <button type="button" class="knowledge-banner-close" aria-label="Đóng thông báo" @click="closeKnowledgeNotice">
+                    <X :size="15" />
+                  </button>
+                </div>
+
+                <!-- FORM FOOTER -->
+                <div class="knowledge-form-footer">
+                  <div class="knowledge-footer-hint">
+                    <Info :size="15" />
+                    <span>Tài liệu sau khi tải lên sẽ tự động phân tách thành các đoạn tri thức (chunks).</span>
                   </div>
-                  <div v-else-if="!filteredKnowledgeDocuments.length" class="knowledge-empty compact-empty">
-                    <strong>Không tìm thấy tài liệu</strong>
-                    <small>Thử từ khóa hoặc bộ lọc khác.</small>
+                  <div class="knowledge-footer-actions">
+                    <button
+                      type="button"
+                      class="knowledge-btn-secondary"
+                      :disabled="importingKnowledge"
+                      @click="clearKnowledgeForm"
+                    >
+                      Đặt lại
+                    </button>
+                    <button
+                      type="submit"
+                      class="knowledge-btn-primary"
+                      :disabled="importingKnowledge || !knowledgeFiles.length"
+                    >
+                      <LoaderCircle v-if="importingKnowledge" :size="16" class="animate-spin" />
+                      <Database v-else :size="16" />
+                      <span>{{ importingKnowledge ? 'Đang nạp & phân tách...' : 'Đưa vào kho tri thức' }}</span>
+                    </button>
                   </div>
-                  <ul v-else class="knowledge-document-list">
-                    <li v-for="document in filteredKnowledgeDocuments" :key="document.documentId" class="knowledge-document" :class="{ 'is-inactive': !document.active }">
-                      <span class="knowledge-document-icon">PDF</span>
-                      <div class="knowledge-document-info">
-                        <strong :title="document.title">{{ document.title }}</strong>
-                        <small class="knowledge-file-name">{{ document.fileName }}</small>
-                        <span class="knowledge-document-meta">
-                          <span v-if="knowledgeTopicName(document.topicId)" class="knowledge-skill-tag" :class="knowledgeSkillTone(knowledgeTopicName(document.topicId))"><span class="knowledge-skill-dot"></span>{{ knowledgeTopicName(document.topicId) }}</span>
-                          <span>{{ programName(document.certificateId) }} · {{ formatAdminNumber(document.chunkCount) }} đoạn · {{ knowledgeDate(document.createdAt) }}</span>
+                </div>
+              </form>
+            </div>
+
+            <!-- CỘT PHẢI: DANH SÁCH TÀI LIỆU ĐÃ NẠP -->
+            <div class="knowledge-panel knowledge-library-panel">
+              <div class="knowledge-panel-header library-panel-header">
+                <div class="knowledge-panel-title-group">
+                  <div class="knowledge-panel-icon-box icon-box-library">
+                    <Database :size="18" />
+                  </div>
+                  <div>
+                    <h2 class="knowledge-panel-title">Danh mục tài liệu trong kho</h2>
+                    <p class="knowledge-panel-subtitle">Nguồn dữ liệu tham khảo cho AI phân tích và tạo bài</p>
+                  </div>
+                </div>
+                <span class="knowledge-count-badge">
+                  {{ formatAdminNumber(filteredKnowledgeDocuments.length) }} tài liệu
+                </span>
+              </div>
+
+              <!-- TOOLBAR -->
+              <div class="knowledge-library-toolbar">
+                <div class="knowledge-search-wrap">
+                  <Search :size="16" class="knowledge-search-icon" />
+                  <input
+                    v-model="knowledgeSearch"
+                    type="search"
+                    placeholder="Tìm theo tên tài liệu, tệp PDF, kỳ thi..."
+                    class="knowledge-search-input"
+                    aria-label="Tìm kiếm trong kho tri thức"
+                  />
+                </div>
+
+                <div class="knowledge-filters-row">
+                  <div class="knowledge-filter-pills" role="tablist">
+                    <button
+                      type="button"
+                      class="knowledge-filter-pill"
+                      :class="{ active: knowledgeFilter === 'all' }"
+                      @click="knowledgeFilter = 'all'"
+                    >
+                      <span>Tất cả</span>
+                      <span class="pill-count">{{ formatAdminNumber(knowledgeDocuments.length) }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="knowledge-filter-pill"
+                      :class="{ active: knowledgeFilter === 'active' }"
+                      @click="knowledgeFilter = 'active'"
+                    >
+                      <span>Đang dùng</span>
+                      <span class="pill-count">{{ formatAdminNumber(activeKnowledgeCount) }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="knowledge-filter-pill"
+                      :class="{ active: knowledgeFilter === 'inactive' }"
+                      @click="knowledgeFilter = 'inactive'"
+                    >
+                      <span>Đã tắt</span>
+                      <span class="pill-count">{{ formatAdminNumber(inactiveKnowledgeCount) }}</span>
+                    </button>
+                  </div>
+
+                  <div v-if="programs.length" class="knowledge-program-filter-wrap">
+                    <select v-model="knowledgeProgramFilter" class="knowledge-program-select">
+                      <option value="all">Tất cả kỳ thi</option>
+                      <option v-for="prog in programs" :key="prog.certificateId" :value="String(prog.certificateId)">
+                        {{ prog.code || prog.name }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- DOCUMENT LIST -->
+              <div v-if="!knowledgeDocuments.length" class="knowledge-empty-state">
+                <div class="knowledge-empty-icon">
+                  <Database :size="28" />
+                </div>
+                <h3 class="knowledge-empty-title">Kho tri thức đang trống</h3>
+                <p class="knowledge-empty-desc">Chưa có tài liệu PDF nào được tải lên. Hãy nạp tài liệu ở khung bên trái để AI có dữ liệu sinh đề và giải thích.</p>
+                <a href="#kb-add" class="knowledge-empty-action">
+                  <Upload :size="15" />
+                  <span>Nạp tài liệu đầu tiên</span>
+                </a>
+              </div>
+
+              <div v-else-if="!filteredKnowledgeDocuments.length" class="knowledge-empty-state compact">
+                <div class="knowledge-empty-icon">
+                  <Search :size="22" />
+                </div>
+                <h3 class="knowledge-empty-title">Không tìm thấy tài liệu phù hợp</h3>
+                <p class="knowledge-empty-desc">Thử điều chỉnh từ khóa tìm kiếm hoặc bộ lọc trạng thái kỳ thi.</p>
+                <button type="button" class="knowledge-empty-action" @click="resetKnowledgeFilters">
+                  <RotateCcw :size="14" />
+                  <span>Đặt lại bộ lọc</span>
+                </button>
+              </div>
+
+              <div v-else class="knowledge-documents-container">
+                <div class="knowledge-document-cards">
+                  <div
+                    v-for="doc in paginatedKnowledgeDocuments"
+                    :key="doc.documentId"
+                    class="knowledge-doc-card"
+                    :class="{ 'is-disabled': !doc.active }"
+                  >
+                    <div class="knowledge-doc-type-badge">
+                      <span>PDF</span>
+                    </div>
+                    <div class="knowledge-doc-body">
+                      <div class="knowledge-doc-title-row">
+                        <h4 class="knowledge-doc-title" :title="doc.title">{{ doc.title }}</h4>
+                      </div>
+                      <div class="knowledge-doc-filename" :title="doc.fileName">
+                        <FileText :size="13" />
+                        <span>{{ doc.fileName }}</span>
+                      </div>
+                      <div class="knowledge-doc-tags">
+                        <span class="doc-badge badge-program">
+                          {{ programName(doc.certificateId) }}
+                        </span>
+                        <span v-if="knowledgeTopicName(doc.topicId)" class="doc-badge badge-topic">
+                          {{ knowledgeTopicName(doc.topicId) }}
+                        </span>
+                        <span class="doc-badge badge-chunks">
+                          <Sparkles :size="11" />
+                          <span>{{ formatAdminNumber(doc.chunkCount) }} đoạn chunks</span>
+                        </span>
+                        <span class="doc-badge badge-date">
+                          {{ knowledgeDate(doc.createdAt) }}
                         </span>
                       </div>
-                      <div class="knowledge-document-actions">
-                        <Tooltip :label="document.active ? 'Ngừng dùng tài liệu' : 'Kích hoạt tài liệu'">
-                          <template #trigger>
-                            <button type="button" class="knowledge-switch" role="switch" :aria-checked="document.active" :aria-label="`${document.active ? 'Tắt' : 'Bật'} ${document.title}`" @click="toggleKnowledgeActive(document)">
-                              <span></span>
-                            </button>
-                          </template>
-                        </Tooltip>
-                        <small class="knowledge-switch-label">{{ document.active ? 'Đang dùng' : 'Đã tắt' }}</small>
-                        <DropdownMenu trigger-label="Tùy chọn tài liệu">
-                          <template #trigger>
-                            <button type="button" class="knowledge-icon-button" :aria-label="`Tùy chọn ${document.title}`">
-                              <MoreHorizontal :size="19" aria-hidden="true" />
-                            </button>
-                          </template>
-                          <DropdownMenuLabel>{{ document.title }}</DropdownMenuLabel>
-                          <DropdownMenuItem @select="viewKnowledgeDocument(document)">
-                            <template #icon><Eye :size="16" /></template>Xem trước đoạn kiến thức
-                          </DropdownMenuItem>
-                          <DropdownMenuItem @select="editKnowledgeDocument(document)">
-                            <template #icon><Pencil :size="16" /></template>Sửa tài liệu
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem destructive @select="removeKnowledge(document)">
-                            <template #icon><Trash2 :size="16" /></template>Xóa tài liệu
-                          </DropdownMenuItem>
-                        </DropdownMenu>
+                    </div>
+
+                    <div class="knowledge-doc-controls">
+                      <!-- ACTIVE SWITCH -->
+                      <div class="knowledge-toggle-group">
+                        <button
+                          type="button"
+                          class="knowledge-ios-switch"
+                          role="switch"
+                          :aria-checked="doc.active"
+                          :title="doc.active ? 'Bấm để tắt tài liệu' : 'Bấm để kích hoạt tài liệu'"
+                          @click="toggleKnowledgeActive(doc)"
+                        >
+                          <span class="switch-handle"></span>
+                        </button>
+                        <span class="knowledge-toggle-label" :class="{ active: doc.active }">
+                          {{ doc.active ? 'Đang dùng' : 'Đã tắt' }}
+                        </span>
                       </div>
-                    </li>
-                  </ul>
+
+                      <!-- ACTIONS MENU -->
+                      <DropdownMenu trigger-label="Tùy chọn tài liệu">
+                        <template #trigger>
+                          <button type="button" class="knowledge-more-btn" :aria-label="`Tùy chọn ${doc.title}`">
+                            <MoreHorizontal :size="18" />
+                          </button>
+                        </template>
+                        <DropdownMenuLabel>{{ doc.title }}</DropdownMenuLabel>
+                        <DropdownMenuItem @select="viewKnowledgeDocument(doc)">
+                          <template #icon><Eye :size="15" /></template>
+                          <span>Xem đoạn kiến thức</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @select="editKnowledgeDocument(doc)">
+                          <template #icon><Pencil :size="15" /></template>
+                          <span>Sửa tài liệu</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem destructive @select="removeKnowledge(doc)">
+                          <template #icon><Trash2 :size="15" /></template>
+                          <span>Xóa khỏi kho</span>
+                        </DropdownMenuItem>
+                      </DropdownMenu>
+                    </div>
+                  </div>
                 </div>
-              </section>
-            </section>
-          </section>
-        </template>
+
+                <!-- PAGINATION -->
+                <div v-if="knowledgeTotalPages > 1" class="knowledge-pagination-bar">
+                  <span class="pagination-info">
+                    Hiển thị <strong>{{ ((knowledgePage - 1) * knowledgePageSize) + 1 }}</strong> - <strong>{{ Math.min(knowledgePage * knowledgePageSize, filteredKnowledgeDocuments.length) }}</strong> trên <strong>{{ filteredKnowledgeDocuments.length }}</strong> tài liệu
+                  </span>
+                  <div class="pagination-actions">
+                    <button
+                      type="button"
+                      class="knowledge-page-btn"
+                      :disabled="knowledgePage <= 1"
+                      @click="knowledgePage = Math.max(1, knowledgePage - 1)"
+                    >
+                      <ChevronLeft :size="15" />
+                      <span>Trước</span>
+                    </button>
+                    <span class="knowledge-page-current">
+                      {{ knowledgePage }} / {{ knowledgeTotalPages }}
+                    </span>
+                    <button
+                      type="button"
+                      class="knowledge-page-btn"
+                      :disabled="knowledgePage >= knowledgeTotalPages"
+                      @click="knowledgePage = Math.min(knowledgeTotalPages, knowledgePage + 1)"
+                    >
+                      <span>Sau</span>
+                      <ChevronRight :size="15" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -2576,7 +4842,6 @@
     >
       <form v-if="modal === 'account'" id="admin-account-form" class="admin-overlay-form" @submit.prevent="saveAccount">
         <p v-if="adminModalError" class="overlay-form-error" role="alert">{{ adminModalError }}</p>
-        <p v-if="adminModalError" class="overlay-form-error" role="alert">{{ adminModalError }}</p>
         <label class="admin-overlay-field">Tên đăng nhập <b aria-hidden="true">*</b>
           <input v-model.trim="accountForm.username" required maxlength="50" autocomplete="username" placeholder="vd: hocvien01" />
         </label>
@@ -2589,23 +4854,31 @@
       </form>
       <form v-else-if="modal === 'program'" id="admin-program-form" class="admin-overlay-form" @submit.prevent="saveProgram">
         <p v-if="adminModalError" class="overlay-form-error" role="alert">{{ adminModalError }}</p>
-        <p v-if="adminModalError" class="overlay-form-error" role="alert">{{ adminModalError }}</p>
-        <label class="admin-overlay-field">Tên chứng chỉ / kỳ thi <b aria-hidden="true">*</b>
-          <input v-model.trim="programForm.name" required maxlength="120" placeholder="vd: IELTS Academic, TOEIC, THPT Quốc Gia" />
-        </label>
-        <label class="admin-overlay-field">Mã kỳ thi <b aria-hidden="true">*</b>
-          <input v-model.trim="programForm.code" required maxlength="50" placeholder="IELTS, TOEIC hoặc THPT" />
-        </label>
-        <label class="admin-overlay-field">Mô tả
-          <textarea v-model.trim="programForm.description" rows="3" placeholder="Thang điểm, mục tiêu và kỹ năng/môn thi"></textarea>
+        <div class="form-row">
+          <label class="admin-overlay-field">Tên chứng chỉ / kỳ thi <b aria-hidden="true">*</b>
+            <input v-model.trim="programForm.name" required maxlength="120" placeholder="vd: IELTS Academic, TOEIC, THPT Quốc Gia" />
+          </label>
+          <label class="admin-overlay-field">Mã kỳ thi <b aria-hidden="true">*</b>
+            <input v-model.trim="programForm.code" required maxlength="50" placeholder="IELTS, TOEIC hoặc THPT" />
+          </label>
+        </div>
+        <label class="admin-overlay-field">Mô tả chương trình thi
+          <textarea v-model.trim="programForm.description" rows="2" placeholder="Thang điểm, mục tiêu và kỹ năng / môn thi"></textarea>
         </label>
         <div class="form-row">
-          <label class="admin-overlay-field">Tổng điểm <b aria-hidden="true">*</b><input v-model.number="programForm.totalScore" type="number" min="1" required /></label>
-          <label class="admin-overlay-field">Điểm đạt <b aria-hidden="true">*</b><input v-model.number="programForm.passingScore" type="number" min="0" required /></label>
-          <label class="admin-overlay-field">Band / điểm mục tiêu<input v-model.number="programForm.passingBand" type="number" min="0" step="0.5" /></label>
+          <label class="admin-overlay-field">Tổng điểm <b aria-hidden="true">*</b>
+            <input v-model.number="programForm.totalScore" type="number" min="1" required />
+          </label>
+          <label class="admin-overlay-field">Điểm đạt <b aria-hidden="true">*</b>
+            <input v-model.number="programForm.passingScore" type="number" min="0" required />
+          </label>
+          <label class="admin-overlay-field">Band / điểm mục tiêu
+            <input v-model.number="programForm.passingBand" type="number" min="0" step="0.5" />
+          </label>
         </div>
-        <label class="admin-overlay-field">Kỹ năng / môn thi (JSON) <b aria-hidden="true">*</b>
-          <textarea v-model.trim="programForm.skills" rows="3" required placeholder='["LISTENING","READING"]'></textarea>
+        <label class="admin-overlay-field">Kỹ năng / môn thi (Mảng JSON) <b aria-hidden="true">*</b>
+          <textarea v-model.trim="programForm.skills" rows="3" required placeholder='["LISTENING","READING","WRITING","SPEAKING"]'></textarea>
+          <small class="table-secondary">Định dạng mảng JSON: ["LISTENING","READING"] hoặc ["TOAN","VAN","ANH"]</small>
         </label>
       </form>
       <template #footer>
@@ -2904,19 +5177,41 @@
     z-index: 30;
     inset: 0 auto 0 0;
     display: flex;
-    width: 256px;
+    width: 264px;
     flex-direction: column;
-    padding: 18px 12px;
+    padding: 16px 14px;
     border-right: 1px solid #E2E8F0;
     background: #FFFFFF;
     color: #475569;
+    overflow-y: auto;
+  }
+  .admin-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .admin-sidebar-close {
+    display: none;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: #64748B;
+    cursor: pointer;
+    transition: all 140ms ease;
+  }
+  .admin-sidebar-close:hover {
+    background: #F1F5F9;
+    color: #0F172A;
   }
   .admin-brand {
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 6px 10px;
-    margin-bottom: 6px;
+    padding: 6px 8px;
     color: #0F172A;
     text-decoration: none;
     border-radius: 8px;
@@ -2942,7 +5237,7 @@
     gap: 1px;
   }
   .admin-brand-copy strong {
-    font-size: 14.5px;
+    font-size: 14px;
     font-weight: 700;
     color: #0F172A;
     letter-spacing: -0.02em;
@@ -2957,18 +5252,24 @@
     font-size: 11px;
     font-weight: 500;
   }
-  .admin-workspace-label {
-    padding: 12px 10px 6px;
-    color: #94A3B8;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
   .admin-nav {
     display: flex;
     flex-direction: column;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .admin-nav-group {
+    display: flex;
+    flex-direction: column;
     gap: 3px;
+  }
+  .admin-workspace-label {
+    padding: 6px 10px 4px;
+    color: #94A3B8;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
   .admin-nav-link {
     position: relative;
@@ -3021,46 +5322,82 @@
     flex: 1;
   }
   .admin-nav-indicator {
-    display: none;
+    display: block;
+    position: absolute;
+    right: 8px;
+    width: 4px;
+    height: 18px;
+    border-radius: 2px;
+    background: #2563EB;
   }
   .admin-sidebar-bottom {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 10px;
     margin-top: auto;
-    padding: 10px 12px;
+    padding-top: 14px;
+    border-top: 1px solid #E2E8F0;
+  }
+  .admin-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
     border: 1px solid #E2E8F0;
     border-radius: 8px;
     background: #F8FAFC;
     color: #334155;
   }
   .admin-status-dot {
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     flex: 0 0 auto;
     border-radius: 50%;
-    background: #10B981;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+    background: #16A34A;
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
   }
-  .admin-sidebar-bottom div {
-    display: grid;
+  .admin-status-indicator div {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
     gap: 1px;
   }
-  .admin-sidebar-bottom strong {
-    font-size: 12px;
+  .admin-status-indicator strong {
+    font-size: 11.5px;
     font-weight: 600;
     color: #1E293B;
+    line-height: 1.2;
   }
-  .admin-sidebar-bottom small {
+  .admin-status-indicator small {
     color: #64748B;
-    font-size: 11px;
+    font-size: 10.5px;
+    line-height: 1.2;
+  }
+  .admin-switch-learner-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 7px 12px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #475569;
+    text-decoration: none;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    transition: all 140ms ease;
+  }
+  .admin-switch-learner-btn:hover {
+    background: #F8FAFC;
+    color: #0F172A;
+    border-color: #CBD5E1;
   }
   .admin-workspace {
     min-width: 0;
-    width: calc(100% - 256px);
+    width: calc(100% - 264px);
     box-sizing: border-box;
-    margin-left: 256px;
+    margin-left: 264px;
     background: #F8FAFC;
     min-height: 100vh;
   }
@@ -3075,15 +5412,48 @@
     gap: 16px;
     padding: 0 32px;
     border-bottom: 1px solid #E2E8F0;
-    background: rgba(255, 255, 255, 0.92);
+    background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(12px);
+  }
+  .admin-topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+  .admin-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .breadcrumb-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #F1F5F9;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .breadcrumb-arrow {
+    color: #94A3B8;
+    flex-shrink: 0;
+  }
+  .breadcrumb-page {
+    font-weight: 600;
+    color: #0F172A;
   }
   .admin-search {
     display: flex;
-    width: min(100%, 420px);
+    width: min(100%, 380px);
     min-width: 0;
     height: 38px;
-    flex: 1 1 300px;
+    flex: 1 1 240px;
     align-items: center;
     gap: 9px;
     padding: 0 12px;
@@ -3094,8 +5464,8 @@
     transition: all 0.15s ease;
   }
   .admin-search:focus-within {
-    border-color: #0F766E;
-    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
   }
   .admin-search input {
     width: 100%;
@@ -3115,6 +5485,26 @@
     align-items: center;
     gap: 10px;
     margin-left: auto;
+  }
+  .admin-preview-learner-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #475569;
+    text-decoration: none;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    transition: all 140ms ease;
+    white-space: nowrap;
+  }
+  .admin-preview-learner-link:hover {
+    background: #F8FAFC;
+    color: #0F172A;
+    border-color: #CBD5E1;
   }
   .admin-notification,
   .admin-menu-button {
@@ -3169,7 +5559,7 @@
     height: 28px;
     place-items: center;
     border-radius: 6px;
-    background: #0F766E;
+    background: #2563EB;
     color: #FFFFFF;
     font-size: 12px;
     font-weight: 700;
@@ -3194,25 +5584,25 @@
     transition: color 0.15s ease;
   }
   .admin-profile:hover > svg {
-    color: #0F766E;
+    color: #2563EB;
   }
   .admin-menu-avatar {
-    background: linear-gradient(135deg, #0F766E, #0E7490) !important;
+    background: linear-gradient(135deg, #1E293B, #0F172A) !important;
   }
   .badge-admin {
-    background: #E6F7F3 !important;
-    color: #0F766E !important;
-    border: 1px solid #C9ECE2 !important;
+    background: #EFF6FF !important;
+    color: #1D4ED8 !important;
+    border: 1px solid #BFDBFE !important;
   }
   .admin-menu-button {
     display: none;
   }
   .admin-content {
     width: 100%;
-    max-width: 1440px;
+    max-width: none;
     min-width: 0;
     box-sizing: border-box;
-    margin: 0 auto;
+    margin: 0;
     padding: 24px 32px 56px;
   }
   .admin-content > *,
@@ -3270,7 +5660,7 @@
   }
   .admin-kicker {
     margin: 0 0 4px;
-    color: #0F766E;
+    color: #2563EB;
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -3297,83 +5687,761 @@
     align-items: center;
     gap: 8px;
   }
-  .analytics-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-  .analytics-time-filter { display: inline-flex; min-height: 44px; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--ds-border); border-radius: var(--radius-lg); background: var(--surface); }
-  .analytics-time-filter button { min-width: 60px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--text-secondary); background: transparent; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
-  .analytics-time-filter button:hover { background: var(--surface-hover); }
-  .analytics-time-filter button.active { color: var(--primary-ink); background: var(--primary-soft); font-weight: 600; }
-  .analytics-exam-filter select { min-width: 156px; max-width: 240px; min-height: 44px; padding: 0 34px 0 12px; border: 1px solid var(--border-control); border-radius: var(--radius-md); color: var(--text-strong); background: var(--surface); font: inherit; font-size: 13px; }
-  .analytics-state { min-height: 240px; border-top: 1px solid var(--ds-border); border-bottom: 1px solid var(--ds-border); }
-  .analytics-loading { display: flex; align-items: center; gap: 14px; color: var(--text-muted); font-size: 13px; }
-  .analytics-loading-line { width: min(180px, 32%); height: 6px; overflow: hidden; background: var(--surface-muted); }
-  .analytics-loading-line::after { display: block; width: 35%; height: 100%; background: var(--primary); content: ''; animation: analytics-loading 1.2s ease-in-out infinite; }
-  .analytics-error { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 24px; }
-  .analytics-error > div { display: grid; gap: 4px; }
-  .analytics-error strong { color: var(--text-strong); font-size: 15px; }
-  .analytics-error span { color: var(--text-muted); font-size: 13px; }
-  .analytics-retry { min-height: 44px; padding: 0 16px; border: 1px solid var(--border-control); border-radius: var(--radius-md); color: var(--text-strong); background: var(--surface); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-  .analytics-empty { display: flex; min-height: 280px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 30px 4px; }
-  .analytics-overline { margin: 0 0 9px; color: var(--text-overline); font-size: 11px; font-weight: 700; }
-  .analytics-empty h2 { margin: 0; color: var(--text-strong); font-size: 20px; line-height: 28px; font-weight: 600; }
-  .analytics-empty > p:last-child { max-width: 500px; margin: 8px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
-  .analytics-sample-button { min-height: 44px; margin-top: 18px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: var(--radius-md); color: var(--text-strong); background: var(--surface); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-  .analytics-sample-button:hover { border-color: var(--primary-border); color: var(--primary-ink); background: var(--primary-tint); }
-  .analytics-demo-notice { margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 11px; font-weight: 600; }
-  .analytics-observation { display: grid; grid-template-columns: 132px minmax(0, 1fr); align-items: baseline; gap: 14px; padding: 0 0 16px; border-bottom: 1px solid var(--border-subtle); }
-  .analytics-observation > span { color: var(--primary-ink); font-size: 11px; font-weight: 700; }
-  .analytics-observation p { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.55; }
-  .analytics-lead { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .8fr); gap: clamp(24px, 5vw, 72px); padding: 30px 0 28px; border-bottom: 1px solid var(--ds-border); }
-  .analytics-primary-metric { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; justify-content: center; }
-  .analytics-primary-metric > span { color: var(--text-overline); font-size: 11px; font-weight: 700; }
-  .analytics-primary-metric > strong { margin: 8px 0 10px; color: var(--text); font-size: 64px; line-height: 1.05; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .analytics-primary-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--text-secondary); font-size: 13px; }
-  .analytics-delta { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .analytics-delta.positive { color: var(--primary-ink); }
-  .analytics-delta.negative { color: var(--text-secondary); }
-  .analytics-delta.neutral { color: var(--text-muted); }
-  .analytics-primary-metric > p { margin: 7px 0 0; color: var(--text-muted); font-size: 12px; }
-  .analytics-supporting-metrics { display: grid; align-content: center; margin: 0; }
-  .analytics-supporting-metrics > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 5px 16px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
-  .analytics-supporting-metrics > div:last-child { border-bottom: 0; }
-  .analytics-supporting-metrics dt { color: var(--text-muted); font-size: 12px; }
-  .analytics-supporting-metrics dd { grid-column: 2; grid-row: 1 / span 2; margin: 0; color: var(--text-strong); font-size: 23px; line-height: 29px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .analytics-supporting-metrics small { color: var(--text-muted); font-size: 11px; }
-  .analytics-detail-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .85fr); gap: clamp(24px, 4vw, 56px); padding-top: 26px; }
-  .analytics-chart-section,
-  .analytics-learners-section { min-width: 0; }
-  .analytics-section-heading { display: flex; min-height: 54px; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-  .analytics-section-heading h2 { margin: 0; color: var(--text-strong); font-size: 16px; line-height: 23px; font-weight: 600; }
-  .analytics-section-heading p { margin: 3px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
-  .analytics-legend { display: flex; flex-wrap: wrap; gap: 12px; padding-top: 4px; color: var(--text-muted); font-size: 11px; }
-  .analytics-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-  .analytics-legend span::before { display: inline-block; width: 15px; height: 2px; background: var(--primary); content: ''; }
-  .analytics-legend .legend-volume::before { width: 8px; height: 8px; background: var(--surface-muted); }
-  .analytics-chart { display: block; width: 100%; height: auto; overflow: visible; }
-  .analytics-chart-grid line { stroke: var(--border-subtle); stroke-width: 1; }
-  .analytics-chart-grid text,
-  .analytics-chart-unit { fill: var(--text-muted); font-family: var(--font-sans); font-size: 11px; text-anchor: end; }
-  .analytics-chart-unit { text-anchor: start; }
-  .analytics-chart-bars rect { fill: var(--surface-muted); }
-  .analytics-score-line { fill: none; stroke: var(--primary); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.5; }
-  .analytics-score-point { fill: var(--surface); stroke: var(--primary); stroke-width: 2.5; }
-  .analytics-chart-label { fill: var(--text-muted); font-family: var(--font-sans); font-size: 10px; text-anchor: middle; }
-  .analytics-annotation line { stroke: var(--primary); stroke-dasharray: 2 3; stroke-width: 1; }
-  .analytics-annotation rect { fill: var(--surface); stroke: var(--primary-border); stroke-width: 1; }
-  .analytics-annotation text { fill: var(--primary-ink); font-family: var(--font-sans); font-size: 9px; font-weight: 600; text-anchor: middle; }
-  .analytics-chart-empty { display: flex; min-height: 208px; align-items: center; justify-content: center; padding: 20px; border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 13px; text-align: center; }
-  .analytics-table-wrap { width: 100%; overflow-x: auto; }
-  .analytics-table { width: 100%; border-collapse: collapse; text-align: left; }
-  .analytics-table th { height: 38px; border-bottom: 1px solid var(--ds-border); color: var(--text-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
-  .analytics-table td { height: 58px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .analytics-table tbody tr:last-child td { border-bottom: 1px solid var(--ds-border); }
-  .analytics-table th:not(:first-child),
-  .analytics-table td:not(:first-child) { padding-left: 12px; text-align: right; }
-  .analytics-table td:first-child { max-width: 170px; }
-  .analytics-table td strong { display: block; overflow: hidden; color: var(--text-strong); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-  .analytics-table td small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 10px; }
-  @keyframes analytics-loading { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
-  @media (prefers-reduced-motion: reduce) {
-    .analytics-loading-line::after { animation: none; }
+  /* ========================================================
+     ADMIN OVERVIEW / DASHBOARD — LIGHT AI EDUCATION
+     ======================================================== */
+  .overview-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+  }
+
+  /* Toolbar Controls */
+  .analytics-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .analytics-time-filter {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px;
+    background: #F1F5F9;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    gap: 2px;
+  }
+  .analytics-time-filter button {
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #64748B;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .analytics-time-filter button:hover {
+    color: #0F172A;
+    background: rgba(255, 255, 255, 0.6);
+  }
+  .analytics-time-filter button.active {
+    color: #2563EB;
+    background: #FFFFFF;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  }
+  .analytics-exam-filter select {
+    height: 38px;
+    min-width: 160px;
+    max-width: 260px;
+    padding: 0 32px 0 12px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #0F172A;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .analytics-exam-filter select:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  }
+  .overview-refresh-button {
+    height: 38px;
+  }
+
+  /* Real-Data KPI Summary Cards */
+  .overview-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .overview-kpi-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 20px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    transition: all 0.2s ease;
+  }
+  .overview-kpi-card.is-interactive {
+    cursor: pointer;
+  }
+  .overview-kpi-card.is-interactive:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+    transform: translateY(-1px);
+  }
+  .overview-kpi-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .overview-kpi-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .overview-kpi-icon.icon-blue {
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #DBEAFE;
+  }
+  .overview-kpi-icon.icon-teal {
+    background: #F0F9FF;
+    color: #0284C7;
+    border: 1px solid #E0F2FE;
+  }
+  .overview-kpi-icon.icon-green {
+    background: #F0FDF4;
+    color: #16A34A;
+    border: 1px solid #DCFCE7;
+  }
+  .overview-kpi-icon.icon-purple {
+    background: #F5F3FF;
+    color: #7C3AED;
+    border: 1px solid #EDE9FE;
+  }
+  .overview-kpi-action {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2563EB;
+    transition: transform 0.15s ease;
+  }
+  .overview-kpi-card.is-interactive:hover .overview-kpi-action {
+    transform: translateX(2px);
+  }
+  .overview-kpi-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .overview-kpi-label {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #64748B;
+  }
+  .overview-kpi-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: #0F172A;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .overview-kpi-unit {
+    font-size: 14px;
+    font-weight: 500;
+    color: #64748B;
+  }
+  .overview-kpi-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #64748B;
+    margin-top: 2px;
+  }
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .status-dot.online {
+    background: #16A34A;
+    box-shadow: 0 0 0 2px #DCFCE7;
+  }
+  .overview-delta-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .overview-delta-badge.delta-positive {
+    background: #F0FDF4;
+    color: #16A34A;
+    border: 1px solid #DCFCE7;
+  }
+  .overview-delta-badge.delta-negative {
+    background: #FEF2F2;
+    color: #DC2626;
+    border: 1px solid #FEE2E2;
+  }
+  .overview-delta-badge.delta-neutral {
+    background: #F1F5F9;
+    color: #64748B;
+    border: 1px solid #E2E8F0;
+  }
+
+  /* Status Cards (Loading & Error) */
+  .overview-status-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 14px;
+    padding: 44px 24px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+  }
+  .overview-status-card .status-text h3 {
+    margin: 0 0 6px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #0F172A;
+  }
+  .overview-status-card .status-text p {
+    margin: 0;
+    font-size: 13px;
+    color: #64748B;
+  }
+  .overview-error-state {
+    background: #FEF2F2;
+    border-color: #FECACA;
+    flex-direction: row;
+    justify-content: space-between;
+    text-align: left;
+    padding: 24px 28px;
+  }
+  .overview-error-state .error-info {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .overview-error-state .error-icon {
+    color: #DC2626;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .overview-error-state h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #991B1B;
+  }
+  .overview-error-state p {
+    margin: 0;
+    font-size: 13px;
+    color: #B91C1C;
+  }
+
+  /* Insight & Notice Banners */
+  .overview-insight-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 18px;
+    background: #F5F3FF;
+    border: 1px solid #EDE9FE;
+    border-radius: 10px;
+  }
+  .insight-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    background: #EDE9FE;
+    color: #7C3AED;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .insight-content {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: #0F172A;
+    line-height: 1.5;
+    flex: 1;
+  }
+  .insight-period {
+    font-size: 12px;
+    font-weight: 500;
+    color: #7C3AED;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .overview-notice-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 18px;
+    background: #EFF6FF;
+    border: 1px solid #DBEAFE;
+    border-radius: 10px;
+  }
+  .notice-icon {
+    color: #2563EB;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .notice-content strong {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #1E40AF;
+    margin-bottom: 2px;
+  }
+  .notice-content p {
+    margin: 0;
+    font-size: 13px;
+    color: #3B82F6;
+    line-height: 1.45;
+  }
+
+  /* 2-Column Analytics Details */
+  .overview-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(340px, 1fr);
+    gap: 20px;
+  }
+  .overview-card {
+    display: flex;
+    flex-direction: column;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    overflow: hidden;
+  }
+  .overview-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid #F1F5F9;
+  }
+  .overview-card-title {
+    margin: 0;
+    font-size: 15.5px;
+    font-weight: 600;
+    color: #0F172A;
+    line-height: 1.3;
+  }
+  .overview-card-subtitle {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: #64748B;
+  }
+  .overview-badge-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 12px;
+    background: #EFF6FF;
+    color: #2563EB;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .overview-card-body {
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .overview-card-body.p-0 {
+    padding: 0;
+  }
+  .overview-chart-legend {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 12px;
+    color: #64748B;
+  }
+  .overview-chart-legend .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .overview-chart-legend .legend-color {
+    display: inline-block;
+    border-radius: 2px;
+  }
+  .overview-chart-legend .line-color {
+    width: 16px;
+    height: 3px;
+    background: #2563EB;
+  }
+  .overview-chart-legend .bar-color {
+    width: 10px;
+    height: 10px;
+    background: #CBD5E1;
+  }
+
+  .overview-empty-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 44px 20px;
+    color: #64748B;
+    margin: auto;
+  }
+  .overview-empty-box .empty-icon {
+    color: #94A3B8;
+    margin-bottom: 12px;
+  }
+  .overview-empty-box .empty-icon.icon-success {
+    color: #16A34A;
+  }
+  .overview-empty-box h4 {
+    margin: 0 0 6px;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #0F172A;
+  }
+  .overview-empty-box p {
+    margin: 0;
+    font-size: 12.5px;
+    color: #64748B;
+    max-width: 340px;
+    line-height: 1.5;
+  }
+
+  /* SVG Chart */
+  .overview-chart-wrap {
+    width: 100%;
+    overflow: hidden;
+  }
+  .analytics-chart {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  .analytics-chart-grid line {
+    stroke: #F1F5F9;
+    stroke-width: 1;
+  }
+  .analytics-chart-grid text {
+    fill: #94A3B8;
+    font-family: inherit;
+    font-size: 11px;
+    text-anchor: end;
+  }
+  .analytics-chart-unit {
+    fill: #64748B;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    text-anchor: start;
+  }
+  .analytics-chart-bars rect {
+    fill: #E2E8F0;
+    transition: fill 0.15s ease;
+  }
+  .analytics-chart-bars rect:hover {
+    fill: #CBD5E1;
+  }
+  .analytics-score-line {
+    fill: none;
+    stroke: #2563EB;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.5;
+  }
+  .analytics-score-point {
+    fill: #FFFFFF;
+    stroke: #2563EB;
+    stroke-width: 2.5;
+    cursor: pointer;
+    transition: r 0.15s ease;
+  }
+  .analytics-score-point:hover {
+    r: 6;
+  }
+  .analytics-chart-label {
+    fill: #64748B;
+    font-family: inherit;
+    font-size: 11px;
+    text-anchor: middle;
+  }
+  .analytics-annotation line {
+    stroke: #2563EB;
+    stroke-dasharray: 2 3;
+    stroke-width: 1;
+  }
+  .analytics-annotation rect {
+    fill: #FFFFFF;
+    stroke: #93C5FD;
+    stroke-width: 1;
+  }
+  .analytics-annotation text {
+    fill: #2563EB;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    text-anchor: middle;
+  }
+
+  /* Table for Learners to Support */
+  .overview-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+  }
+  .overview-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+  }
+  .overview-table th {
+    padding: 10px 16px;
+    background: #F8FAFC;
+    color: #64748B;
+    font-size: 11.5px;
+    font-weight: 600;
+    border-bottom: 1px solid #E2E8F0;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .overview-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #F1F5F9;
+    color: #334155;
+    font-size: 13px;
+    vertical-align: middle;
+  }
+  .overview-table tr:last-child td {
+    border-bottom: none;
+  }
+  .overview-table tr:hover td {
+    background: #F8FAFC;
+  }
+  .learner-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 140px;
+  }
+  .learner-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: #EFF6FF;
+    color: #2563EB;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    border: 1px solid #DBEAFE;
+  }
+  .learner-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .learner-name {
+    font-weight: 600;
+    color: #0F172A;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 140px;
+  }
+  .learner-date {
+    font-size: 11px;
+    color: #94A3B8;
+  }
+  .attempts-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 6px;
+    background: #F1F5F9;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .score-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .score-badge.score-low {
+    background: #FEF2F2;
+    color: #DC2626;
+    border: 1px solid #FEE2E2;
+  }
+  .score-badge.score-medium {
+    background: #FFFBEB;
+    color: #D97706;
+    border: 1px solid #FEF3C7;
+  }
+  .score-badge.score-high {
+    background: #F0FDF4;
+    color: #16A34A;
+    border: 1px solid #DCFCE7;
+  }
+  .overview-action-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    color: #2563EB;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .overview-action-btn:hover {
+    background: #EFF6FF;
+    border-color: #BFDBFE;
+  }
+
+  /* 3 System Operations Pillars */
+  .overview-pillars-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 4px;
+  }
+  .overview-pillar-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 20px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .overview-pillar-card:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+    transform: translateY(-1px);
+  }
+  .pillar-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .pillar-icon {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .pillar-icon.pillar-icon-blue {
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #DBEAFE;
+  }
+  .pillar-icon.pillar-icon-emerald {
+    background: #F0FDF4;
+    color: #16A34A;
+    border: 1px solid #DCFCE7;
+  }
+  .pillar-icon.pillar-icon-purple {
+    background: #F5F3FF;
+    color: #7C3AED;
+    border: 1px solid #EDE9FE;
+  }
+  .pillar-title {
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #0F172A;
+  }
+  .pillar-desc {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: #64748B;
+  }
+  .pillar-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px 12px;
+    background: #F8FAFC;
+    border-radius: 8px;
+    border: 1px solid #F1F5F9;
+  }
+  .pillar-stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: center;
+  }
+  .pillar-stat-item .stat-number {
+    font-size: 15px;
+    font-weight: 700;
+    color: #0F172A;
+    font-variant-numeric: tabular-nums;
+  }
+  .pillar-stat-item .stat-label {
+    font-size: 11px;
+    color: #64748B;
+    white-space: nowrap;
+  }
+  .pillar-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2563EB;
+    margin-top: auto;
+    padding-top: 4px;
+  }
+  .pillar-footer .arrow-icon {
+    font-size: 14px;
+    transition: transform 0.15s ease;
+  }
+  .overview-pillar-card:hover .pillar-footer .arrow-icon {
+    transform: translateX(3px);
   }
   .admin-primary-button,
   .admin-secondary-button {
@@ -3394,12 +6462,12 @@
     white-space: nowrap;
   }
   .admin-primary-button {
-    background: #0F766E;
+    background: #2563EB;
     color: #FFFFFF;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   }
   .admin-primary-button:hover:not(:disabled) {
-    background: #115E59;
+    background: #1D4ED8;
   }
   .admin-primary-button:disabled {
     opacity: 0.6;
@@ -3447,7 +6515,7 @@
     place-items: center;
     border-radius: 8px;
     background: #F1F5F9;
-    color: #0F766E;
+    color: #2563EB;
     border: 1px solid #E2E8F0;
   }
   .admin-stat-icon.coral,
@@ -3488,7 +6556,7 @@
     gap: 4px;
     border: 0;
     background: none;
-    color: #0F766E;
+    color: #2563EB;
     font-weight: 500;
     cursor: pointer;
   }
@@ -3504,410 +6572,912 @@
     background: #FFFFFF;
     box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
   }
-  .knowledge-layout {
+  /* KNOWLEDGE BASE & RAG STYLES — LIGHT AI EDUCATION */
+  .admin-knowledge-section {
     display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-direction: column;
     gap: 20px;
   }
-  .knowledge-layout > .knowledge-import { flex: 1.5 1 540px; }
-  .knowledge-layout > .knowledge-library-column { flex: 1 1 360px; }
-  .knowledge-page { display: grid; gap: 20px; }
-  .knowledge-page-heading { display: grid; gap: 4px; min-width: 0; }
-  .knowledge-breadcrumb { display: flex; align-items: center; gap: 6px; color: #64748B; font-size: 13px; }
-  .knowledge-breadcrumb strong { color: #0F766E; font-weight: 600; }
-  .knowledge-page-heading h1 { margin: 0; color: #0F172A; font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -0.02em; }
-  .knowledge-page-heading p { margin: 0; max-width: 680px; color: #64748B; font-size: 13.5px; }
-  .knowledge-summary {
+  .knowledge-hero-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 24px 28px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+  }
+  .knowledge-hero-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 800px;
+  }
+  .knowledge-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    background: #F5F3FF;
+    border: 1px solid #DDD6FE;
+    border-radius: 20px;
+    color: #7C3AED;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    width: fit-content;
+  }
+  .knowledge-hero-title {
+    margin: 0;
+    color: #0F172A;
+    font-size: 22px;
+    line-height: 28px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .knowledge-hero-desc {
+    margin: 0;
+    color: #64748B;
+    font-size: 13.5px;
+    line-height: 20px;
+  }
+  .knowledge-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .knowledge-btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 40px;
+    padding: 0 16px;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    color: #334155;
+    font-size: 13.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .knowledge-btn-secondary:hover:not(:disabled) {
+    background: #F8FAFC;
+    border-color: #94A3B8;
+    color: #0F172A;
+  }
+  .knowledge-btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .knowledge-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 18px;
+    background: #2563EB;
+    border: 1px solid #2563EB;
+    border-radius: 8px;
+    color: #FFFFFF;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+    transition: all 0.15s ease;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .knowledge-btn-primary:hover:not(:disabled) {
+    background: #1D4ED8;
+    border-color: #1D4ED8;
+  }
+  .knowledge-btn-primary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .knowledge-metrics-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
     gap: 16px;
   }
-  .knowledge-summary article {
+  .knowledge-stat-card {
     display: flex;
-    min-width: 0;
-    min-height: 104px;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 16px 18px;
-    border: 1px solid #E2E8F0;
-    border-radius: 10px;
+    flex-direction: column;
+    padding: 18px 20px;
     background: #FFFFFF;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-    transition: all 0.15s ease;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  .knowledge-summary article:hover {
+  .knowledge-stat-card:hover {
     border-color: #CBD5E1;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  }
+  .knowledge-stat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .knowledge-stat-label {
+    color: #64748B;
+    font-size: 13px;
+    font-weight: 500;
   }
   .knowledge-stat-icon {
     display: grid;
-    width: 38px;
-    height: 38px;
-    flex: 0 0 auto;
-    place-items: center;
-    border-radius: 8px;
-    border: 1px solid #E2E8F0;
-    background: #F1F5F9;
-    color: #0F766E;
-  }
-  .knowledge-stat > div { display: grid; min-width: 0; gap: 2px; }
-  .knowledge-stat > div > span { color: #64748B; font-size: 12.5px; font-weight: 500; }
-  .knowledge-stat strong { color: #0F172A; font-size: 24px; line-height: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .knowledge-stat small { color: #94A3B8; font-size: 11.5px; }
-  .stat-blue,
-  .stat-teal,
-  .stat-amber,
-  .stat-violet {
-    border-color: #E2E8F0 !important;
-    background: #FFFFFF !important;
-  }
-  .stat-blue .knowledge-stat-icon { background: #EFF6FF; color: #2563EB; border-color: #DBEAFE; }
-  .stat-teal .knowledge-stat-icon { background: #ECFDF5; color: #0F766E; border-color: #A7F3D0; }
-  .stat-amber .knowledge-stat-icon { background: #FFFBEB; color: #D97706; border-color: #FDE68A; }
-  .stat-violet .knowledge-stat-icon { background: #F5F3FF; color: #7C3AED; border-color: #DDD6FE; }
-  .knowledge-card {
-    min-width: 0;
-    overflow: hidden;
-    border: 1px solid #E2E8F0;
-    border-radius: 12px;
-    background: #FFFFFF;
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
-  }
-  .knowledge-card-heading {
-    display: flex;
-    min-height: 64px;
-    align-items: center;
-    gap: 12px;
-    padding: 16px 20px;
-    border-bottom: 1px solid #F1F5F9;
-  }
-  .knowledge-heading-icon {
-    display: grid;
     width: 36px;
     height: 36px;
-    flex: 0 0 auto;
     place-items: center;
     border-radius: 8px;
-    color: #0F766E;
+    flex-shrink: 0;
+  }
+  .knowledge-stat-icon.icon-teal,
+  .knowledge-stat-icon.icon-blue {
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #BFDBFE;
+  }
+  .knowledge-stat-icon.icon-emerald {
     background: #ECFDF5;
+    color: #10B981;
     border: 1px solid #A7F3D0;
   }
-  .knowledge-card-heading h2 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 600; }
-  .knowledge-card-heading p { margin: 2px 0 0; color: #64748B; font-size: 12.5px; }
-  .knowledge-import,
-  .knowledge-list { min-width: 0; padding: 0; }
-  .knowledge-import { display: flex; flex-direction: column; gap: 16px; }
-  .knowledge-import > :not(.knowledge-card-heading):not(.knowledge-form-footer) { margin-right: 20px; margin-left: 20px; }
-  .knowledge-import > .knowledge-card-heading { margin: 0; }
-  .knowledge-import .knowledge-dropzone {
-    position: relative;
-    display: flex;
-    min-height: 150px;
-    align-items: center;
-    flex-direction: column;
-    justify-content: center;
-    gap: 8px;
-    padding: 24px 20px;
-    border: 1.5px dashed #CBD5E1;
-    border-radius: 10px;
-    color: #334155;
-    background: #F8FAFC;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.15s ease;
+  .knowledge-stat-icon.icon-amber {
+    background: #FFFBEB;
+    color: #D97706;
+    border: 1px solid #FDE68A;
   }
-  .knowledge-import .knowledge-dropzone:hover,
-  .knowledge-import .knowledge-dropzone.is-dragging {
-    border-color: #0F766E;
-    background: #F0FDF4;
+  .knowledge-stat-icon.icon-purple {
+    background: #F5F3FF;
+    color: #7C3AED;
+    border: 1px solid #DDD6FE;
   }
-  .knowledge-dropzone input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
-  .knowledge-upload-icon {
-    display: grid;
-    width: 44px;
-    height: 44px;
-    place-items: center;
-    border-radius: 10px;
-    color: #0F766E;
-    background: #FFFFFF;
-    border: 1px solid #E2E8F0;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  }
-  .knowledge-dropzone strong { font-size: 13.5px; font-weight: 600; color: #0F172A; }
-  .knowledge-dropzone small { color: #64748B; font-size: 12px; }
-  .knowledge-field { display: grid; min-width: 0; gap: 6px; color: #334155; font-size: 13px; font-weight: 600; }
-  .knowledge-import .knowledge-field input,
-  .knowledge-import .knowledge-field select {
-    width: 100%;
-    min-width: 0;
-    height: 38px;
-    box-sizing: border-box;
-    padding: 0 12px;
-    border: 1px solid #E2E8F0;
-    border-radius: 8px;
+  .knowledge-stat-value {
     color: #0F172A;
-    background: #FFFFFF;
-    font: inherit;
-    font-size: 13.5px;
-    transition: all 0.15s ease;
+    font-size: 26px;
+    line-height: 32px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 4px;
   }
-  .knowledge-import .knowledge-field input:focus-visible,
-  .knowledge-import .knowledge-field select:focus-visible {
-    border-color: #0F766E;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+  .knowledge-stat-hint {
+    color: #94A3B8;
+    font-size: 12px;
   }
-  .knowledge-field-error { color: #DC2626 !important; font-size: 12px !important; font-weight: 400 !important; }
-  .required-mark { color: #DC2626; }
-  .knowledge-upload-list { display: grid; gap: 8px; max-height: 320px; overflow-y: auto; }
-  .knowledge-upload-item {
+  .knowledge-stat-hint strong {
+    color: #2563EB;
+  }
+  .knowledge-workspace-grid {
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr) minmax(180px, .85fr) 36px;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
+    grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .knowledge-panel {
+    background: #FFFFFF;
     border: 1px solid #E2E8F0;
-    border-radius: 8px;
-    background: #FFFFFF;
-  }
-  .queued-file-icon {
-    display: grid;
-    width: 36px;
-    height: 36px;
-    place-items: center;
-    border-radius: 8px;
-    color: #0F766E;
-    background: #ECFDF5;
-  }
-  .queued-file-info { display: grid; min-width: 0; gap: 2px; }
-  .queued-file-info strong { overflow-wrap: anywhere; color: #0F172A; font-size: 13px; font-weight: 600; }
-  .queued-file-info small { color: #64748B; font-size: 11.5px; }
-  .knowledge-import .queued-title { font-size: 13px; }
-  .knowledge-import .queued-title input { height: 36px; font-size: 13px; }
-  .knowledge-form-footer {
+    border-radius: 12px;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .knowledge-panel-header {
+    display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-top: 4px;
-    padding: 14px 20px;
-    border-top: 1px solid #F1F5F9;
-    background: #F8FAFC;
-  }
-  .knowledge-form-hint { display: inline-flex; align-items: center; gap: 8px; color: #64748B; font-size: 12px; }
-  .knowledge-form-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
-  .knowledge-clear {
-    display: inline-flex;
-    height: 36px;
-    align-items: center;
-    padding: 0 14px;
-    border: 1px solid #E2E8F0;
-    border-radius: 7px;
-    color: #334155;
+    padding: 16px 20px;
+    border-bottom: 1px solid #F1F5F9;
     background: #FFFFFF;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
   }
-  .knowledge-clear:hover { background: #F1F5F9; border-color: #CBD5E1; color: #0F172A; }
-  .knowledge-submit {
-    display: inline-flex;
-    height: 36px;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    padding: 0 16px;
-    border: 0;
-    border-radius: 7px;
-    color: #FFFFFF;
-    background: #0F766E;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 500;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-    cursor: pointer;
-    transition: background 0.15s ease;
-  }
-  .knowledge-submit:hover:not(:disabled) { background: #115E59; }
-  .knowledge-submit:disabled { cursor: not-allowed; opacity: .6; }
-  .knowledge-notice {
+  .knowledge-panel-title-group {
     display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 10px;
-    margin: 0 20px;
-    padding: 8px 12px;
-    border-radius: 7px;
-    color: #065F46;
-    background: #ECFDF5;
-    border: 1px solid #A7F3D0;
-    font-size: 13px;
-  }
-  .knowledge-notice > span { flex: 1; min-width: 0; }
-  .knowledge-notice-close {
-    display: grid;
-    width: 26px;
-    height: 26px;
-    flex: 0 0 auto;
-    place-items: center;
-    border: 0;
-    border-radius: 6px;
-    color: #065F46;
-    background: transparent;
-    cursor: pointer;
-  }
-  .knowledge-notice-close:hover { background: rgba(6, 95, 70, 0.1); }
-  .knowledge-library-column { display: grid; flex: 1 1 360px; gap: 20px; min-width: 0; }
-  .knowledge-library-column .knowledge-card-heading { justify-content: space-between; }
-  .library-heading > div { min-width: 0; }
-  .knowledge-total-badge {
-    display: grid;
-    min-width: 26px;
-    height: 22px;
-    padding: 0 7px;
-    place-items: center;
-    border-radius: 6px;
-    color: #0F766E;
-    background: #ECFDF5;
-    border: 1px solid #A7F3D0;
-    font-size: 11.5px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-  .knowledge-library-tools { display: grid; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #F1F5F9; }
-  .knowledge-search {
-    display: flex;
-    height: 36px;
-    align-items: center;
-    gap: 9px;
-    padding: 0 12px;
-    border: 1px solid #E2E8F0;
-    border-radius: 7px;
-    color: #64748B;
-    background: #FFFFFF;
-    transition: all 0.15s ease;
-  }
-  .knowledge-search:focus-within {
-    border-color: #0F766E;
-    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
-  }
-  .knowledge-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: #0F172A; background: transparent; font: inherit; font-size: 13px; }
-  .knowledge-search input::placeholder { color: #94A3B8; }
-  .knowledge-filter { display: flex; gap: 3px; padding: 3px; border-radius: 7px; background: #F1F5F9; }
-  .knowledge-filter button {
-    display: inline-flex;
-    min-width: 0;
-    height: 32px;
-    flex: 1;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 0 8px;
-    border: 0;
-    border-radius: 6px;
-    color: #64748B;
-    background: transparent;
-    font: inherit;
-    font-size: 12.5px;
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .knowledge-filter button[aria-pressed='true'] { color: #0F172A; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
-  .knowledge-filter button span { display: grid; min-width: 18px; height: 18px; padding: 0 5px; place-items: center; border-radius: 4px; color: #64748B; background: #E2E8F0; font-size: 10.5px; font-variant-numeric: tabular-nums; }
-  .knowledge-filter button[aria-pressed='true'] span { color: #0F766E; background: #ECFDF5; }
-  .knowledge-document-list { display: grid; gap: 8px; margin: 0; padding: 14px 18px 18px; list-style: none; }
-  .knowledge-document {
-    display: grid;
-    grid-template-columns: 36px minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
-    border: 1px solid #E2E8F0;
-    border-radius: 8px;
-    background: #FFFFFF;
-    transition: all 0.15s ease;
   }
-  .knowledge-document:hover { border-color: #CBD5E1; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); }
-  .knowledge-document:last-child { border-bottom: 1px solid #E2E8F0; }
-  .knowledge-document-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 8px; color: #0F766E; background: #ECFDF5; font-size: 11px; font-weight: 700; }
-  .knowledge-document.is-inactive { background: #F8FAFC; }
-  .knowledge-document.is-inactive .knowledge-document-icon { color: #94A3B8; background: #F1F5F9; }
-  .knowledge-document-info { display: grid; min-width: 0; gap: 2px; }
-  .knowledge-document-info > strong { min-width: 0; overflow-wrap: anywhere; color: #0F172A; font-size: 13.5px; line-height: 19px; font-weight: 600; }
-  .knowledge-document.is-inactive .knowledge-document-info > strong { color: #94A3B8; }
-  .knowledge-file-name { overflow-wrap: anywhere; color: #64748B; font-size: 12px; }
-  .knowledge-document-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 3px; color: #64748B; font-size: 11.5px; }
-  .knowledge-exam-tag { display: inline-flex; align-items: center; gap: 5px; color: #64748B; font-weight: 400; }
-  .knowledge-skill-field { display: grid; gap: 6px; }
-  .knowledge-skill-heading { display: flex; align-items: center; gap: 7px; color: #334155; font-size: 13px; font-weight: 600; }
-  .knowledge-skill-heading small { color: #94A3B8; font-size: 12px; font-weight: 400; }
-  .knowledge-skill-choice { display: flex; flex-wrap: wrap; gap: 6px; }
-  .knowledge-skill-chip {
-    display: inline-flex;
-    height: 32px;
-    align-items: center;
-    gap: 6px;
-    padding: 0 12px;
+  .knowledge-panel-icon-box {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 8px;
+    color: #2563EB;
+    flex-shrink: 0;
+  }
+  .knowledge-panel-icon-box.icon-box-library {
+    background: #EFF6FF;
+    border-color: #BFDBFE;
+    color: #2563EB;
+  }
+  .knowledge-panel-title {
+    margin: 0;
+    color: #0F172A;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .knowledge-panel-subtitle {
+    margin: 2px 0 0;
+    color: #64748B;
+    font-size: 12px;
+  }
+  .knowledge-count-badge {
+    padding: 4px 10px;
+    background: #F1F5F9;
     border: 1px solid #E2E8F0;
-    border-radius: 6px;
+    border-radius: 20px;
     color: #475569;
-    background: #FFFFFF;
-    font: inherit;
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .knowledge-upload-form {
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    gap: 18px;
+  }
+  .knowledge-dropzone {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px 20px;
+    background: #F8FAFC;
+    border: 1.5px dashed #CBD5E1;
+    border-radius: 12px;
+    text-align: center;
     cursor: pointer;
     transition: all 0.15s ease;
   }
-  .knowledge-skill-chip:hover { background: #F8FAFC; border-color: #CBD5E1; color: #0F172A; }
-  .knowledge-skill-chip.selected { color: #0F766E; border-color: #0F766E; background: #ECFDF5; font-weight: 600; }
-  .knowledge-skill-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #0F766E; }
-  .knowledge-skill-tag { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 5px; color: #0F766E; background: #ECFDF5; font-size: 11px; font-weight: 500; }
-  .knowledge-document.is-inactive .knowledge-skill-tag { color: #94A3B8; background: #F1F5F9; }
-  .knowledge-document-actions { display: flex; align-items: center; gap: 4px; }
-  .knowledge-switch { position: relative; display: grid; width: 44px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
-  .knowledge-switch::before { position: absolute; width: 36px; height: 20px; border-radius: 999px; background: #CBD5E1; content: ''; transition: background 0.15s ease; }
-  .knowledge-switch[aria-checked='true']::before { background: #0F766E; }
-  .knowledge-switch > span { position: absolute; top: 10px; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); transition: transform 0.15s ease; }
-  .knowledge-switch[aria-checked='true'] > span { transform: translateX(16px); }
-  .knowledge-switch-label { color: #64748B; font-size: 11.5px; font-weight: 500; white-space: nowrap; }
-  .knowledge-icon-button { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border: 1px solid #E2E8F0; border-radius: 6px; color: #64748B; background: #FFFFFF; cursor: pointer; transition: all 0.15s ease; }
-  .knowledge-icon-button:hover { color: #0F766E; background: #F8FAFC; border-color: #CBD5E1; }
-  .knowledge-icon-button.danger:hover { color: #DC2626; background: #FEF2F2; border-color: #FEE2E2; }
-  .knowledge-empty {
-    display: flex;
-    min-height: 180px;
-    align-items: center;
-    flex-direction: column;
-    justify-content: center;
-    gap: 8px;
-    padding: 32px 20px;
-    border: 1.5px dashed #E2E8F0;
-    border-radius: 10px;
-    color: #64748B;
-    background: #F8FAFC;
-    text-align: center;
+  .knowledge-dropzone:hover,
+  .knowledge-dropzone.is-dragging {
+    background: #EFF6FF;
+    border-color: #2563EB;
   }
-  .knowledge-empty > span {
+  .knowledge-dropzone input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+  }
+  .knowledge-dropzone-icon {
     display: grid;
     width: 44px;
     height: 44px;
-    margin-bottom: 4px;
     place-items: center;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
     border-radius: 10px;
-    color: #0F766E;
+    color: #2563EB;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+  .knowledge-dropzone-title {
+    color: #0F172A;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .knowledge-dropzone-subtitle {
+    color: #64748B;
+    font-size: 12px;
+  }
+  .knowledge-form-error {
+    margin: -10px 0 0;
+    color: #DC2626;
+    font-size: 12px;
+  }
+  .knowledge-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .knowledge-field-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .knowledge-field-label {
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .knowledge-field-sub {
+    color: #94A3B8;
+    font-size: 11.5px;
+  }
+  .required-star {
+    color: #DC2626;
+  }
+  .knowledge-select-input {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    color: #0F172A;
+    font-size: 13.5px;
+    outline: none;
+    transition: all 0.15s ease;
+  }
+  .knowledge-select-input:focus {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  }
+  .knowledge-select-input.has-error {
+    border-color: #DC2626;
+  }
+  .knowledge-topic-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .knowledge-topic-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 20px;
+    color: #475569;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-topic-chip:hover {
+    background: #F1F5F9;
+    border-color: #CBD5E1;
+    color: #0F172A;
+  }
+  .knowledge-topic-chip.active {
+    background: #EFF6FF;
+    border-color: #2563EB;
+    color: #2563EB;
+    font-weight: 600;
+  }
+  .knowledge-queue-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 6px;
+    border-top: 1px dashed #E2E8F0;
+  }
+  .knowledge-queue-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #475569;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .knowledge-queue-clear {
+    background: none;
+    border: none;
+    color: #DC2626;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .knowledge-queue-clear:hover {
+    text-decoration: underline;
+  }
+  .knowledge-queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .knowledge-queue-item {
+    display: grid;
+    grid-template-columns: 32px 140px minmax(0, 1fr) 28px;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+  }
+  .knowledge-queue-file-icon {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    background: #EFF6FF;
+    border-radius: 6px;
+    color: #2563EB;
+  }
+  .knowledge-queue-file-details {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .knowledge-queue-filename {
+    color: #0F172A;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .knowledge-queue-filesize {
+    color: #64748B;
+    font-size: 11px;
+  }
+  .knowledge-queue-title-input-wrap {
+    min-width: 0;
+  }
+  .knowledge-queue-title-input {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 6px;
+    color: #0F172A;
+    font-size: 12.5px;
+    outline: none;
+    transition: all 0.15s ease;
+  }
+  .knowledge-queue-title-input:focus {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  }
+  .knowledge-queue-title-input.has-error {
+    border-color: #DC2626;
+  }
+  .knowledge-queue-remove-btn {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #94A3B8;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-queue-remove-btn:hover:not(:disabled) {
+    background: #FEE2E2;
+    color: #DC2626;
+  }
+  .knowledge-success-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
     background: #ECFDF5;
     border: 1px solid #A7F3D0;
+    border-radius: 8px;
+    color: #065F46;
+    font-size: 13px;
   }
-  .knowledge-empty strong { color: #0F172A; font-size: 14px; font-weight: 600; }
-  .knowledge-empty small { max-width: 300px; color: #64748B; font-size: 12.5px; }
-  .knowledge-empty-link { margin-top: 4px; color: #0F766E; font-size: 13px; font-weight: 500; text-underline-offset: 3px; }
-  .compact-empty { min-height: 110px; }
+  .knowledge-success-banner span {
+    flex: 1;
+  }
+  .knowledge-banner-close {
+    background: none;
+    border: none;
+    color: #065F46;
+    cursor: pointer;
+    padding: 2px;
+  }
+  .knowledge-form-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 14px;
+    border-top: 1px solid #F1F5F9;
+  }
+  .knowledge-footer-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: #64748B;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .knowledge-footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .knowledge-library-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid #F1F5F9;
+    background: #F8FAFC;
+  }
+  .knowledge-search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+  .knowledge-search-icon {
+    position: absolute;
+    left: 12px;
+    color: #94A3B8;
+    pointer-events: none;
+  }
+  .knowledge-search-input {
+    width: 100%;
+    height: 38px;
+    padding: 0 14px 0 36px;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    color: #0F172A;
+    font-size: 13px;
+    outline: none;
+    transition: all 0.15s ease;
+  }
+  .knowledge-search-input:focus {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  }
+  .knowledge-filters-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .knowledge-filter-pills {
+    display: inline-flex;
+    background: #E2E8F0;
+    padding: 3px;
+    border-radius: 8px;
+    gap: 2px;
+  }
+  .knowledge-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #475569;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-filter-pill.active {
+    background: #FFFFFF;
+    color: #0F172A;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+  .pill-count {
+    padding: 1px 6px;
+    background: #F1F5F9;
+    border-radius: 10px;
+    font-size: 11px;
+    color: #64748B;
+  }
+  .knowledge-filter-pill.active .pill-count {
+    background: #EFF6FF;
+    color: #2563EB;
+  }
+  .knowledge-program-filter-wrap {
+    margin-left: auto;
+  }
+  .knowledge-program-select {
+    height: 32px;
+    padding: 0 10px;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 6px;
+    color: #334155;
+    font-size: 12.5px;
+    outline: none;
+  }
+  .knowledge-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40px 24px;
+    gap: 10px;
+  }
+  .knowledge-empty-state.compact {
+    padding: 30px 20px;
+  }
+  .knowledge-empty-icon {
+    display: grid;
+    width: 52px;
+    height: 52px;
+    place-items: center;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 12px;
+    color: #2563EB;
+    margin-bottom: 4px;
+  }
+  .knowledge-empty-title {
+    margin: 0;
+    color: #0F172A;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .knowledge-empty-desc {
+    margin: 0;
+    max-width: 380px;
+    color: #64748B;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .knowledge-empty-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 7px 14px;
+    background: #EFF6FF;
+    border: 1px solid #2563EB;
+    border-radius: 8px;
+    color: #2563EB;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+  .knowledge-empty-action:hover {
+    background: #2563EB;
+    color: #FFFFFF;
+  }
+  .knowledge-documents-container {
+    display: flex;
+    flex-direction: column;
+  }
+  .knowledge-document-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px 20px;
+  }
+  .knowledge-doc-card {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    transition: all 0.15s ease;
+  }
+  .knowledge-doc-card:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+  .knowledge-doc-card.is-disabled {
+    background: #F8FAFC;
+    opacity: 0.85;
+  }
+  .knowledge-doc-type-badge {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 8px;
+    color: #2563EB;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .knowledge-doc-card.is-disabled .knowledge-doc-type-badge {
+    background: #F1F5F9;
+    border-color: #E2E8F0;
+    color: #94A3B8;
+  }
+  .knowledge-doc-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .knowledge-doc-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .knowledge-doc-title {
+    margin: 0;
+    color: #0F172A;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .knowledge-doc-card.is-disabled .knowledge-doc-title {
+    color: #64748B;
+  }
+  .knowledge-doc-filename {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #64748B;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .knowledge-doc-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .doc-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .doc-badge.badge-program {
+    background: #EFF6FF;
+    color: #1D4ED8;
+    border: 1px solid #BFDBFE;
+  }
+  .doc-badge.badge-topic {
+    background: #F0FDF4;
+    color: #15803D;
+    border: 1px solid #BBF7D0;
+  }
+  .doc-badge.badge-chunks {
+    background: #F5F3FF;
+    color: #7C3AED;
+    border: 1px solid #DDD6FE;
+    font-weight: 600;
+  }
+  .doc-badge.badge-date {
+    background: #F1F5F9;
+    color: #64748B;
+  }
+  .knowledge-doc-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .knowledge-toggle-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .knowledge-ios-switch {
+    position: relative;
+    width: 38px;
+    height: 22px;
+    background: #CBD5E1;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    padding: 2px;
+  }
+  .knowledge-ios-switch[aria-checked='true'] {
+    background: #2563EB;
+  }
+  .switch-handle {
+    display: block;
+    width: 18px;
+    height: 18px;
+    background: #FFFFFF;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease;
+  }
+  .knowledge-ios-switch[aria-checked='true'] .switch-handle {
+    transform: translateX(16px);
+  }
+  .knowledge-toggle-label {
+    color: #94A3B8;
+    font-size: 12px;
+    font-weight: 500;
+    min-width: 58px;
+    white-space: nowrap;
+  }
+  .knowledge-toggle-label.active {
+    color: #2563EB;
+    font-weight: 600;
+  }
+  .knowledge-more-btn {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    background: transparent;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    color: #64748B;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-more-btn:hover {
+    background: #F1F5F9;
+    color: #0F172A;
+    border-color: #CBD5E1;
+  }
+  .knowledge-pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 20px;
+    border-top: 1px solid #F1F5F9;
+    background: #F8FAFC;
+    flex-wrap: wrap;
+  }
+  .pagination-info {
+    color: #64748B;
+    font-size: 12.5px;
+  }
+  .pagination-info strong {
+    color: #0F172A;
+  }
+  .pagination-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .knowledge-page-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 30px;
+    padding: 0 10px;
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 6px;
+    color: #475569;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .knowledge-page-btn:hover:not(:disabled) {
+    background: #F1F5F9;
+    color: #0F172A;
+  }
+  .knowledge-page-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .knowledge-page-current {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #0F172A;
+    padding: 0 4px;
+  }
   .admin-overlay-form { display: grid; gap: 20px; }
   .overlay-form-error { margin: 0; padding: 10px 14px; border: 1px solid #efc9c3; border-radius: var(--radius-lg); color: var(--danger); background: #fff7f6; font-size: 12.5px; }
   .admin-overlay-field { display: grid; min-width: 0; gap: 6px; color: var(--text-strong); font-size: 13px; font-weight: 600; }
@@ -3922,10 +7492,11 @@
   .overlay-loading-state { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: 10px; color: var(--text-muted); }
   .overlay-spinner { flex: 0 0 auto; animation: overlay-spin 800ms linear infinite; }
   @keyframes overlay-spin { to { transform: rotate(360deg); } }
-  .knowledge-preview-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-  .knowledge-preview-chunk { display: grid; grid-template-columns: 36px minmax(0,1fr); align-items: start; gap: 12px; padding: 14px; border: 1px solid var(--border-item); border-radius: var(--radius-xl); background: var(--surface); }
-  .knowledge-preview-chunk > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: var(--blue-ink); background: var(--blue-soft); font-size: 13px; font-weight: 700; }
-  .knowledge-preview-chunk p { min-width: 0; margin: 2px 0 0; color: var(--text-secondary); font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .knowledge-preview-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .knowledge-preview-chunk { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 12px; padding: 14px 16px; border: 1px solid #E2E8F0; border-radius: 10px; background: #F8FAFC; transition: all 0.15s ease; }
+  .knowledge-preview-chunk:hover { background: #FFFFFF; border-color: #CBD5E1; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04); }
+  .knowledge-preview-chunk > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: #2563EB; background: #EFF6FF; border: 1px solid #BFDBFE; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .knowledge-preview-chunk p { min-width: 0; margin: 2px 0 0; color: #1E293B; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
   .knowledge-edit-form { display: grid; gap: 20px; }
   .admin-panel-heading {
     display: flex;
@@ -3970,20 +7541,22 @@
   }
   .account-avatar {
     display: grid;
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     flex: 0 0 auto;
     place-items: center;
     border-radius: 50%;
-    background: var(--blue-soft);
-    color: var(--blue-ink);
-    font-size: 14px;
+    background: #EFF6FF;
+    color: #1D4ED8;
+    font-size: 13px;
     font-style: normal;
     font-weight: 700;
+    border: 1px solid #DBEAFE;
   }
   .account-avatar.administrator {
-    background: var(--violet-soft);
-    color: var(--violet-ink);
+    background: #F5F3FF;
+    color: #7C3AED;
+    border-color: #DDD6FE;
   }
   .admin-list article > div {
     display: grid;
@@ -4006,25 +7579,43 @@
   .account-state {
     display: inline-flex;
     align-items: center;
+    gap: 6px;
     height: 24px;
-    padding: 0 8px;
-    border-radius: 6px;
-    background: #ECFDF5;
-    color: #065F46;
-    border: 1px solid #A7F3D0;
+    padding: 0 10px;
+    border-radius: 999px;
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
   }
+  .state-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .account-state.enabled {
+    background: #F0FDF4;
+    color: #166534;
+    border: 1px solid #BBF7D0;
+  }
+  .account-state.enabled .state-dot {
+    background: #16A34A;
+  }
   .account-state.disabled {
-    background: #F1F5F9;
-    color: #475569;
-    border-color: #E2E8F0;
+    background: #FEF2F2;
+    color: #991B1B;
+    border: 1px solid #FECACA;
+  }
+  .account-state.disabled .state-dot {
+    background: #DC2626;
   }
   .account-state.pending {
     background: #FFFBEB;
     color: #92400E;
-    border-color: #FDE68A;
+    border: 1px solid #FDE68A;
+  }
+  .account-state.pending .state-dot {
+    background: #D97706;
   }
   .account-plan {
     display: inline-flex;
@@ -4038,9 +7629,9 @@
     font-weight: 500;
   }
   .account-plan.premium {
-    color: #0F766E;
-    background: #ECFDF5;
-    border: 1px solid #A7F3D0;
+    color: #7C3AED;
+    background: #F5F3FF;
+    border: 1px solid #DDD6FE;
   }
   .admin-empty {
     display: flex;
@@ -4165,17 +7756,33 @@
     font-weight: 600;
   }
   .role-select {
-    min-width: 120px;
+    min-width: 125px;
     height: 32px;
     padding: 0 8px;
-    border: 1px solid #E2E8F0;
+    border: 1px solid #CBD5E1;
     border-radius: 6px;
     background: #FFFFFF;
     color: #334155;
     font: inherit;
     font-size: 12.5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .role-select:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  }
+  .plan-select.plan-premium-selected {
+    background: #FAF5FF;
+    border-color: #DDD6FE;
+    color: #6D28D9;
+    font-weight: 600;
   }
   .table-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     height: 30px;
     padding: 0 10px;
     border: 1px solid #E2E8F0;
@@ -4187,93 +7794,1138 @@
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s ease;
+    white-space: nowrap;
   }
   .table-action:hover {
-    background: #F1F5F9;
+    background: #F8FAFC;
     color: #0F172A;
     border-color: #CBD5E1;
   }
   .table-action.danger {
     color: #DC2626;
-    border-color: #FEE2E2;
+    border-color: #FECACA;
     background: #FEF2F2;
   }
   .table-action.danger:hover {
     background: #FEE2E2;
+    color: #B91C1C;
     border-color: #FCA5A5;
   }
-  .account-actions-cell { display: flex; align-items: center; gap: 6px; }
-  .learner-report { display: grid; gap: 20px; min-width: 0; }
-  .learner-report-toolbar {
+  .table-action.primary-action {
+    color: #2563EB;
+    border-color: #BFDBFE;
+    background: #EFF6FF;
+  }
+  .table-action.primary-action:hover {
+    background: #DBEAFE;
+    color: #1D4ED8;
+    border-color: #93C5FD;
+  }
+  .account-actions-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ========================================================
+     ADMIN ACCOUNT MANAGEMENT MODULE (LIGHT AI EDUCATION)
+     ======================================================== */
+  .admin-accounts-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+  }
+  .account-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px;
+  }
+  .account-kpi-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  .account-kpi-card:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+  }
+  .account-kpi-icon {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 10px;
+  }
+  .account-kpi-icon.icon-total {
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #DBEAFE;
+  }
+  .account-kpi-icon.icon-students {
+    background: #F0F9FF;
+    color: #0284C7;
+    border: 1px solid #E0F2FE;
+  }
+  .account-kpi-icon.icon-active {
+    background: #F0FDF4;
+    color: #16A34A;
+    border: 1px solid #DCFCE7;
+  }
+  .account-kpi-icon.icon-premium {
+    background: #F5F3FF;
+    color: #7C3AED;
+    border: 1px solid #EDE9FE;
+  }
+  .account-kpi-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+  }
+  .account-kpi-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #64748B;
+  }
+  .account-kpi-value {
+    font-size: 22px;
+    line-height: 26px;
+    font-weight: 700;
+    color: #0F172A;
+    font-variant-numeric: tabular-nums;
+  }
+  .account-kpi-hint {
+    font-size: 11px;
+    color: #94A3B8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .account-main-panel {
+    padding: 20px 24px;
+    border-radius: 12px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+  }
+  .account-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 0;
+  }
+  .account-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .account-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid #F1F5F9;
+  }
+  .account-search-wrap {
+    position: relative;
+    flex: 1 1 240px;
+    min-width: 200px;
+  }
+  .account-search-icon {
+    position: absolute;
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+    color: #94A3B8;
+    pointer-events: none;
+  }
+  .account-search-input {
+    width: 100%;
+    height: 36px;
+    padding: 0 28px 0 34px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #0F172A;
+    font: inherit;
+    font-size: 13px;
+    transition: all 0.15s ease;
+  }
+  .account-search-input:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  }
+  .account-search-clear {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    display: grid;
+    width: 20px;
+    height: 20px;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: #F1F5F9;
+    color: #64748B;
+    cursor: pointer;
+  }
+  .account-search-clear:hover {
+    background: #E2E8F0;
+    color: #0F172A;
+  }
+  .account-filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .account-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .filter-label {
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 500;
+  }
+  .filter-select {
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: #0F172A;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .filter-select:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  }
+  .account-reset-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 36px;
+    padding: 0 11px;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #F8FAFC;
+    color: #475569;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .account-reset-filter-btn:hover {
+    background: #F1F5F9;
+    color: #0F172A;
+    border-color: #CBD5E1;
+  }
+  .account-meta-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0 14px;
+    font-size: 12.5px;
+    color: #64748B;
+  }
+  .account-meta-summary strong {
+    color: #0F172A;
+    font-weight: 600;
+  }
+  .table-account-details {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+  }
+  .account-username {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #0F172A;
+  }
+  .account-id {
+    font-size: 11px;
+    color: #94A3B8;
+  }
+  .row-disabled {
+    background: #F8FAFC;
+    opacity: 0.75;
+  }
+  .row-disabled:hover {
+    background: #F1F5F9 !important;
+  }
+  .account-mobile-grid {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .account-mobile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    background: #FFFFFF;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  }
+  .account-mobile-card.card-disabled {
+    background: #F8FAFC;
+    opacity: 0.75;
+  }
+  .account-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .account-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 0;
+    border-top: 1px solid #F1F5F9;
+    border-bottom: 1px solid #F1F5F9;
+  }
+  .card-field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .card-field-label {
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 500;
+  }
+  .account-card-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .mobile-card-btn {
+    flex: 1;
+    justify-content: center;
+    height: 34px;
+    font-size: 12.5px;
+  }
+  .account-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 16px;
+    margin-top: 14px;
+    border-top: 1px solid #F1F5F9;
+  }
+  .pagination-size {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: #64748B;
+  }
+  .pagination-select {
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: #0F172A;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .pagination-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pagination-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: #334155;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .pagination-btn:hover:not(:disabled) {
+    background: #F8FAFC;
+    color: #0F172A;
+    border-color: #CBD5E1;
+  }
+  .pagination-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .pagination-status {
+    font-size: 12.5px;
+    color: #64748B;
+  }
+  .pagination-status strong {
+    color: #0F172A;
+  }
+  /* RESULTS & LEARNER PROGRESS STYLES */
+  .admin-results-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .results-hero-panel {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 20px;
-    padding: 16px 20px;
+    padding: 24px 28px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
   }
-  .learner-report-toolbar h2,
-  .learner-skill-panel h2 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 600; }
-  .learner-report-toolbar p,
-  .learner-skill-panel > div:first-child p { margin: 2px 0 0; color: #64748B; font-size: 13px; }
-  .learner-report-filters { display: flex; align-items: center; gap: 10px; }
-  .learner-report-filters label { display: flex; align-items: center; gap: 6px; color: #475569; font-size: 13px; font-weight: 500; }
-  .learner-report-filters select { height: 34px; max-width: 220px; padding: 0 28px 0 10px; border: 1px solid #E2E8F0; border-radius: 6px; background: #FFFFFF; color: #0F172A; font: inherit; font-size: 13px; }
-  .learner-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-  .learner-summary-card {
-    display: grid;
-    align-content: start;
+  .results-hero-content {
+    max-width: 680px;
+  }
+  .results-hero-badge {
+    display: inline-flex;
+    align-items: center;
     gap: 6px;
-    min-width: 0;
-    min-height: 104px;
-    padding: 16px 18px;
-    border: 1px solid #E2E8F0 !important;
-    border-radius: 10px;
-    background: #FFFFFF !important;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    padding: 3px 10px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background: #EFF6FF;
+    color: #2563EB;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
   }
-  .learner-summary-card > span { color: #64748B; font-size: 12.5px; font-weight: 500; }
-  .learner-summary-card strong { color: #0F172A; font-size: 24px; line-height: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .learner-summary-card small { color: #94A3B8; font-size: 11.5px; line-height: 16px; }
-  .learner-summary-card.blue,
-  .learner-summary-card.teal,
-  .learner-summary-card.violet,
-  .learner-summary-card.amber { background: #FFFFFF; border-color: #E2E8F0; }
-  .learner-history-panel { min-width: 0; padding: 0; overflow: hidden; }
-  .learner-history-panel .admin-panel-heading { padding: 16px 20px; }
-  .learner-history-table { min-width: 860px; }
-  .learner-history-table td strong { display: block; color: #0F172A; font-size: 13px; font-weight: 600; }
-  .table-secondary { display: block; margin-top: 2px; color: #64748B; font-size: 11.5px; }
-  .attempt-state { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; background: #F1F5F9; color: #475569; font-size: 12px; font-weight: 500; }
-  .attempt-state.submitted { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
-  .attempt-state.graded { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
-  .attempt-state.in_progress { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
-  .learner-skill-panel { display: grid; gap: 16px; padding: 18px 20px; }
-  .learner-trend-panel { display: grid; gap: 16px; padding: 18px 20px; }
-  .learner-trend-panel h2 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 600; }
-  .learner-trend-panel > div:first-child p { margin: 2px 0 0; color: #64748B; font-size: 13px; }
-  .learner-trend-chart { display: flex; min-height: 160px; align-items: flex-end; gap: clamp(10px, 2vw, 24px); overflow-x: auto; padding: 12px 8px 0; border-bottom: 1px solid #E2E8F0; }
-  .learner-trend-point { display: grid; min-width: 40px; height: 150px; flex: 1; grid-template-rows: 20px minmax(14px, 1fr) 24px; justify-items: center; align-items: end; gap: 4px; }
-  .learner-trend-point strong { color: #64748B; font-size: 11px; font-variant-numeric: tabular-nums; }
-  .learner-trend-point i { width: min(32px, 70%); min-height: 8px; align-self: end; border-radius: 4px 4px 2px 2px; background: #0F766E; }
-  .learner-trend-point small { align-self: center; color: #94A3B8; font-size: 10.5px; }
-  .skill-progress-list { display: grid; gap: 12px; }
-  .skill-progress-row { display: grid; grid-template-columns: minmax(100px, 180px) minmax(60px, 1fr) 48px; align-items: center; gap: 14px; color: #475569; font-size: 13px; }
-  .skill-progress-row strong { color: #0F172A; font-variant-numeric: tabular-nums; text-align: right; }
-  .skill-progress-track { height: 8px; overflow: hidden; border-radius: 999px; background: #F1F5F9; }
-  .skill-progress-track i { display: block; height: 100%; border-radius: inherit; background: #0F766E; }
-  .learner-progress-empty { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 12px 14px; border: 1px dashed #E2E8F0; border-radius: 8px; background: #F8FAFC; color: #64748B; font-size: 13px; }
-  .learner-progress-empty svg { flex: 0 0 auto; color: #0F766E; }
-  .learner-report-error { padding: 10px 14px; border: 1px solid #FECACA; border-radius: 8px; background: #FEF2F2; color: #991B1B; font-size: 13px; }
+  .results-hero-content h2 {
+    margin: 0 0 6px;
+    color: #0F172A;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .results-hero-content p {
+    margin: 0;
+    color: #64748B;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .results-hero-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .results-filter-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .results-filter-control .control-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .results-select {
+    height: 38px;
+    max-width: 240px;
+    padding: 0 12px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #0F172A;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .results-select:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  }
+  .admin-alert-error {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border: 1px solid #FECACA;
+    border-radius: 8px;
+    background: #FEF2F2;
+    color: #991B1B;
+    font-size: 13px;
+  }
+  .results-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .results-stat-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    transition: transform 140ms ease, box-shadow 140ms ease;
+  }
+  .results-stat-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+  }
+  .results-stat-icon {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 10px;
+  }
+  .results-stat-card.blue .results-stat-icon {
+    background: #EFF6FF;
+    color: #2563EB;
+  }
+  .results-stat-card.emerald .results-stat-icon {
+    background: #ECFDF5;
+    color: #059669;
+  }
+  .results-stat-card.purple .results-stat-icon {
+    background: #FAF5FF;
+    color: #7C3AED;
+  }
+  .results-stat-card.amber .results-stat-icon {
+    background: #FFFBEB;
+    color: #D97706;
+  }
+  .results-stat-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .results-stat-info span {
+    color: #64748B;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .results-stat-info strong {
+    color: #0F172A;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .results-stat-info small {
+    color: #94A3B8;
+    font-size: 11.5px;
+  }
+  .results-history-panel {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .results-history-heading {
+    padding: 18px 24px;
+  }
+  .results-table-filters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .results-search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 11px;
+    min-height: 36px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #64748B;
+  }
+  .results-search-box input {
+    border: 0;
+    outline: 0;
+    font: inherit;
+    font-size: 13px;
+    color: #0F172A;
+    width: 200px;
+  }
+  .results-select-filter {
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #334155;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .results-desktop-table {
+    display: block;
+  }
+  .results-mobile-grid {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .results-exam-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .results-exam-cell strong {
+    color: #0F172A;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .results-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .results-status-pill.graded {
+    background: #ECFDF5;
+    color: #065F46;
+    border: 1px solid #A7F3D0;
+  }
+  .results-status-pill.submitted {
+    background: #EFF6FF;
+    color: #1D4ED8;
+    border: 1px solid #BFDBFE;
+  }
+  .results-status-pill.in_progress {
+    background: #FFFBEB;
+    color: #92400E;
+    border: 1px solid #FDE68A;
+  }
+  .results-status-pill.published {
+    background: #ECFDF5;
+    color: #065F46;
+    border: 1px solid #A7F3D0;
+  }
+  .results-status-pill.draft {
+    background: #F1F5F9;
+    color: #475569;
+    border: 1px solid #E2E8F0;
+  }
+  .results-score-value {
+    color: #0F172A;
+    font-size: 13.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .results-band-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: #FAF5FF;
+    color: #7C3AED;
+    border: 1px solid #E9D5FF;
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+  .results-violation-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: #FEF2F2;
+    color: #DC2626;
+    border: 1px solid #FECACA;
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .results-clean-badge {
+    color: #94A3B8;
+    font-size: 12px;
+  }
+  .results-analytics-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+  .results-skill-panel,
+  .results-trend-panel {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .results-skill-panel .admin-panel-heading,
+  .results-trend-panel .admin-panel-heading {
+    padding: 0;
+  }
+  .skill-progress-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .skill-progress-row {
+    display: grid;
+    grid-template-columns: minmax(90px, 150px) minmax(80px, 1fr) 48px;
+    align-items: center;
+    gap: 12px;
+  }
+  .skill-label-wrap {
+    min-width: 0;
+  }
+  .skill-name {
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+  .skill-progress-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: #F1F5F9;
+  }
+  .skill-progress-track i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #059669;
+    transition: width 0.3s ease;
+  }
+  .skill-percent-value {
+    color: #0F172A;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .learner-progress-empty {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 80px;
+    padding: 16px;
+    border: 1px dashed #E2E8F0;
+    border-radius: 8px;
+    background: #F8FAFC;
+    color: #64748B;
+    font-size: 13px;
+    justify-content: center;
+  }
+  .learner-progress-empty svg {
+    color: #94A3B8;
+  }
+  .learner-trend-chart {
+    display: flex;
+    min-height: 170px;
+    align-items: flex-end;
+    gap: clamp(10px, 2vw, 22px);
+    overflow-x: auto;
+    padding: 16px 8px 4px;
+    border-bottom: 1px solid #E2E8F0;
+  }
+  .learner-trend-point {
+    display: grid;
+    min-width: 42px;
+    height: 160px;
+    flex: 1;
+    grid-template-rows: 20px minmax(14px, 1fr) 24px;
+    justify-items: center;
+    align-items: end;
+    gap: 4px;
+  }
+  .learner-trend-point strong {
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .learner-trend-point i {
+    width: min(32px, 75%);
+    min-height: 8px;
+    align-self: end;
+    border-radius: 4px 4px 2px 2px;
+    background: #2563EB;
+    transition: height 0.3s ease;
+  }
+  .learner-trend-point:hover i {
+    background: #1D4ED8;
+  }
+  .learner-trend-point small {
+    align-self: center;
+    color: #94A3B8;
+    font-size: 10.5px;
+  }
   .attempt-result-detail { display: grid; gap: 16px; }
   .attempt-result-score { display: grid; gap: 4px; padding: 16px; border: 1px solid #A7F3D0; border-radius: 10px; background: #ECFDF5; }
   .attempt-result-score span { color: #065F46; font-size: 12.5px; font-weight: 500; }
   .attempt-result-score strong { color: #0F172A; font-size: 26px; line-height: 32px; font-variant-numeric: tabular-nums; font-weight: 700; }
-  .attempt-result-score small { color: #0F766E; font-size: 12px; font-weight: 600; }
+  .attempt-result-score small { color: #059669; font-size: 12px; font-weight: 600; }
   .attempt-result-detail dl { display: grid; margin: 0; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden; }
   .attempt-result-detail dl > div { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 14px; border-bottom: 1px solid #F1F5F9; }
   .attempt-result-detail dl > div:last-child { border: 0; }
   .attempt-result-detail dt { color: #64748B; font-size: 13px; }
   .attempt-result-detail dd { margin: 0; color: #0F172A; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* PROGRAMS & EXAMS MODULE STYLES */
+  .admin-programs-section,
+  .admin-exams-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .programs-hero-panel,
+  .exams-hero-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 24px 28px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+  }
+  .programs-hero-content,
+  .exams-hero-content {
+    max-width: 680px;
+  }
+  .programs-hero-badge,
+  .exams-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background: #EFF6FF;
+    color: #2563EB;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .programs-hero-content h2,
+  .exams-hero-content h2 {
+    margin: 0 0 6px;
+    color: #0F172A;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .programs-hero-content p,
+  .exams-hero-content p {
+    margin: 0;
+    color: #64748B;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .programs-hero-actions,
+  .exams-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .programs-metrics-grid,
+  .exams-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .programs-stat-card,
+  .exams-stat-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    transition: transform 140ms ease, box-shadow 140ms ease;
+  }
+  .programs-stat-card:hover,
+  .exams-stat-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+  }
+  .programs-stat-icon,
+  .exams-stat-icon {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 10px;
+  }
+  .programs-stat-card.blue .programs-stat-icon,
+  .exams-stat-card.blue .exams-stat-icon {
+    background: #EFF6FF;
+    color: #2563EB;
+  }
+  .programs-stat-card.emerald .programs-stat-icon,
+  .exams-stat-card.emerald .exams-stat-icon {
+    background: #ECFDF5;
+    color: #059669;
+  }
+  .programs-stat-card.purple .programs-stat-icon,
+  .exams-stat-card.purple .exams-stat-icon {
+    background: #FAF5FF;
+    color: #7C3AED;
+  }
+  .exams-stat-card.amber .exams-stat-icon {
+    background: #FFFBEB;
+    color: #D97706;
+  }
+  .programs-stat-info,
+  .exams-stat-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .programs-stat-info span,
+  .exams-stat-info span {
+    color: #64748B;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .programs-stat-info strong,
+  .exams-stat-info strong {
+    color: #0F172A;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .programs-stat-info small,
+  .exams-stat-info small {
+    color: #94A3B8;
+    font-size: 11.5px;
+  }
+  .programs-table-filters,
+  .exams-table-filters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .programs-search-box,
+  .exams-search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 11px;
+    min-height: 36px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #64748B;
+  }
+  .programs-search-box input,
+  .exams-search-box input {
+    border: 0;
+    outline: 0;
+    font: inherit;
+    font-size: 13px;
+    color: #0F172A;
+    width: 210px;
+  }
+  .exams-select-filter {
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #334155;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .programs-desktop-table,
+  .exams-desktop-table {
+    display: block;
+  }
+  .programs-mobile-grid,
+  .exams-mobile-grid {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .program-title-cell strong {
+    color: #0F172A;
+    font-size: 13.5px;
+    font-weight: 700;
+  }
+  .program-code-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #DBEAFE;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .program-score-pill {
+    color: #0F172A;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .program-passing-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #F8FAFC;
+    color: #334155;
+    border: 1px solid #E2E8F0;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .program-skills-tags {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .skill-chip-tag {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #F1F5F9;
+    color: #475569;
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .exam-program-cell {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .exam-prog-name {
+    color: #0F172A;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .exam-topic-name {
+    color: #64748B;
+    font-size: 12.5px;
+  }
+  .exam-duration-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #F8FAFC;
+    color: #334155;
+    border: 1px solid #E2E8F0;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .preset-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  .preset-card-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    background: #FFFFFF;
+    cursor: pointer;
+    text-align: left;
+    transition: all 140ms ease;
+  }
+  .preset-card-btn:hover {
+    border-color: #2563EB;
+    background: #EFF6FF;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+  }
+  .preset-card-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    background: #EFF6FF;
+    color: #2563EB;
+  }
+  .preset-card-btn:hover .preset-card-icon {
+    background: #2563EB;
+    color: #FFFFFF;
+  }
+  .preset-card-text strong {
+    display: block;
+    color: #0F172A;
+    font-size: 13.5px;
+    font-weight: 700;
+  }
+  .preset-card-text small {
+    display: block;
+    color: #64748B;
+    font-size: 11.5px;
+    margin-top: 2px;
+  }
   .secondary-text {
     display: block;
     margin-top: 4px;
@@ -4301,13 +8953,22 @@
     .admin-overview-grid {
       grid-template-columns: minmax(0, 1fr);
     }
-    .analytics-detail-grid { grid-template-columns: minmax(0, 1fr); gap: 30px; }
-    .analytics-learners-section { max-width: none; }
+    .overview-kpi-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .overview-detail-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 20px;
+    }
+    .overview-pillars-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
   @media (max-width: 800px) {
     .admin-page-heading { align-items: flex-start; flex-direction: column; }
     .analytics-controls { width: 100%; justify-content: flex-start; }
-    .analytics-detail-grid { gap: 26px; }
+    .overview-pillars-grid { grid-template-columns: minmax(0, 1fr); }
+    .overview-insight-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
     .learner-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .learner-report-toolbar { align-items: stretch; flex-direction: column; }
     .learner-report-filters { flex-wrap: wrap; }
@@ -4320,20 +8981,16 @@
     .knowledge-page { gap: 14px; }
   }
   @media (max-width: 520px) {
-    .analytics-controls { align-items: stretch; flex-direction: column; gap: 8px; }
+    .overview-kpi-grid { grid-template-columns: minmax(0, 1fr); }
+    .analytics-controls { align-items: stretch; flex-direction: column; gap: 8px; width: 100%; }
     .analytics-time-filter { width: 100%; justify-content: stretch; }
     .analytics-time-filter button { min-width: 0; flex: 1; }
     .analytics-exam-filter select { width: 100%; max-width: none; }
-    .analytics-observation { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-    .analytics-observation p { font-size: 13px; }
-    .analytics-lead { grid-template-columns: minmax(0, 1fr); gap: 18px; padding-top: 22px; }
-    .analytics-primary-metric > strong { font-size: 50px; }
-    .analytics-supporting-metrics > div { padding: 10px 0; }
-    .analytics-section-heading { flex-direction: column; gap: 8px; }
-    .analytics-legend { padding: 0; }
+    .overview-refresh-button { width: 100%; }
+    .overview-card-header { flex-direction: column; gap: 10px; }
+    .overview-chart-legend { width: 100%; justify-content: flex-start; }
     .analytics-chart-label.label-hidden-mobile { display: none; }
-    .analytics-table { min-width: 330px; }
-    .analytics-error { align-items: flex-start; flex-direction: column; }
+    .overview-error-state { flex-direction: column; align-items: stretch; gap: 14px; }
     .learner-summary-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
     .learner-summary-card { min-height: auto; }
     .learner-report-filters { display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -4351,15 +9008,19 @@
     .knowledge-form-footer { align-items: flex-start; flex-direction: column; }
     .knowledge-submit { width: 100%; }
   }
-  @media (max-width: 767px) {
+  @media (max-width: 1024px) {
     .admin-sidebar {
       z-index: 45;
-      width: min(264px, 86vw);
+      width: min(280px, 86vw);
       transform: translateX(-100%);
-      transition: transform 0.2s ease;
+      transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 4px 0 24px rgba(15, 23, 42, 0.12);
     }
     .admin-sidebar.admin-sidebar-open {
       transform: translateX(0);
+    }
+    .admin-sidebar-close {
+      display: grid;
     }
     .admin-workspace {
       width: 100%;
@@ -4368,23 +9029,22 @@
     .admin-menu-button {
       display: grid;
       flex: 0 0 auto;
-      border: 1px solid #e1e7ec;
-      background: #fff;
     }
     .admin-scrim {
       position: fixed;
       z-index: 40;
       inset: 0;
       display: block;
-      background: rgba(19, 34, 48, 0.3);
+      background: rgba(15, 23, 42, 0.35);
+      backdrop-filter: blur(2px);
     }
     .admin-topbar {
-      gap: 9px;
-      padding: 0 clamp(16px, 3vw, 40px);
+      gap: 12px;
+      padding: 0 clamp(16px, 3vw, 32px);
     }
     .admin-search {
       width: auto;
-      flex: 1;
+      flex: 1 1 200px;
     }
     .admin-top-actions {
       gap: 8px;
@@ -4394,10 +9054,14 @@
     }
   }
   @media (max-width: 640px) {
+    .breadcrumb-badge { display: none; }
+    .admin-breadcrumb { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+    .admin-preview-learner-link span { display: none; }
+    .admin-preview-learner-link { padding: 6px 8px; }
     .admin-profile div,
     .admin-profile > svg { display: none; }
-    .admin-topbar { gap: 8px; padding-right: 16px; padding-left: 16px; }
-    .admin-top-actions { gap: 2px; }
+    .admin-topbar { gap: 8px; padding-right: 14px; padding-left: 14px; }
+    .admin-top-actions { gap: 4px; }
   }
   @media (max-width: 520px) {
     .admin-content {
@@ -4880,6 +9544,18 @@
     gap: 6px;
   }
 
+  .billing-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .billing-mobile-grid {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+
   /* USER PAYMENTS DRAWER */
   .user-payments-list {
     display: flex;
@@ -4912,12 +9588,130 @@
   @media (max-width: 768px) {
     .billing-hero-panel {
       flex-direction: column;
-      align-items: flex-start;
+      align-items: stretch;
+      padding: 18px;
+      gap: 16px;
+    }
+    .billing-hero-actions {
+      width: 100%;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .billing-hero-actions button {
+      width: 100%;
+      justify-content: center;
+    }
+    .billing-table-filters {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .billing-search-box {
+      width: 100%;
     }
     .billing-search-box input {
       width: 100%;
     }
+    .billing-select-filter {
+      width: 100%;
+    }
     .billing-tabs-nav {
+      width: 100%;
+    }
+    .account-desktop-table,
+    .billing-desktop-table,
+    .results-desktop-table,
+    .programs-desktop-table,
+    .exams-desktop-table {
+      display: none !important;
+    }
+    .account-mobile-grid,
+    .billing-mobile-grid,
+    .results-mobile-grid,
+    .programs-mobile-grid,
+    .exams-mobile-grid {
+      display: flex !important;
+    }
+    .results-hero-panel,
+    .programs-hero-panel,
+    .exams-hero-panel {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 18px;
+      gap: 16px;
+    }
+    .results-hero-controls,
+    .programs-hero-actions,
+    .exams-hero-actions {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .results-filter-control {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .results-select {
+      max-width: none;
+      width: 100%;
+    }
+    .results-analytics-row {
+      grid-template-columns: 1fr;
+    }
+    .billing-metrics-grid {
+      grid-template-columns: 1fr;
+    }
+    .billing-plans-grid {
+      grid-template-columns: 1fr;
+    }
+    .knowledge-workspace-grid {
+      grid-template-columns: 1fr;
+    }
+    .knowledge-hero-panel {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 18px;
+      gap: 16px;
+    }
+    .knowledge-hero-actions {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .knowledge-hero-actions button,
+    .knowledge-hero-actions a {
+      width: 100%;
+      justify-content: center;
+    }
+    .knowledge-metrics-grid {
+      grid-template-columns: 1fr;
+    }
+    .knowledge-queue-item {
+      grid-template-columns: 32px 1fr 28px;
+    }
+    .knowledge-queue-title-input-wrap {
+      grid-column: 1 / -1;
+    }
+    .knowledge-doc-card {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .knowledge-doc-controls {
+      justify-content: space-between;
+      border-top: 1px solid #F1F5F9;
+      padding-top: 8px;
+      width: 100%;
+    }
+    .knowledge-pagination-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .knowledge-pagination-bar .pagination-actions {
+      justify-content: space-between;
       width: 100%;
     }
   }

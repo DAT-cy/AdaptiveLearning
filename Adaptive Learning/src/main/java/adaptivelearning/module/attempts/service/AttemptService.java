@@ -6,6 +6,7 @@ import adaptivelearning.module.attempts.dto.request.ViolationRequest;
 import adaptivelearning.module.attempts.dto.response.AttemptDetailResponse;
 import adaptivelearning.module.attempts.dto.response.AttemptResponse;
 import adaptivelearning.module.attempts.dto.response.AttemptResultResponse;
+import adaptivelearning.module.attempts.service.AttemptSubmissionOutcome;
 
 import java.util.List;
 
@@ -19,11 +20,13 @@ public interface AttemptService {
 
     AttemptResultResponse submitAttempt(Long attemptId, Long userId, SubmitAttemptRequest request);
 
+    AttemptSubmissionOutcome submitAttemptWithOutcome(Long attemptId, Long userId, SubmitAttemptRequest request);
+
     AttemptResultResponse getResult(Long attemptId);
 
     List<AttemptResponse> getHistory(Long userId);
 
-    void recordViolation(Long attemptId, ViolationRequest request);
+    void recordViolation(Long attemptId, Long userId, boolean admin, ViolationRequest request);
 
     void expireOverdueAttempts();
 }

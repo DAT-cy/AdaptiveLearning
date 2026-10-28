@@ -59,12 +59,51 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        brand: {
+          primary: {
+            DEFAULT: '#2563EB',
+            hover: '#1D4ED8',
+            soft: '#EFF6FF',
+            ink: '#1D4ED8',
+          },
+          secondary: {
+            DEFAULT: '#1D4ED8',
+            hover: '#1E40AF',
+            soft: '#DBEAFE',
+          },
+        },
+        ai: {
+          accent: {
+            DEFAULT: '#7C3AED',
+            hover: '#6D28D9',
+            soft: '#F5F3FF',
+            border: '#DDD6FE',
+          },
+        },
+        surface: {
+          app: '#F8FAFC',
+          card: '#FFFFFF',
+          muted: '#F1F5F9',
+        },
+        status: {
+          success: '#16A34A',
+          warning: '#D97706',
+          danger: '#DC2626',
+        },
       },
       borderRadius: {
-      	xl: "calc(var(--radius) + 4px)",
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        '3xl': "var(--radius-3xl, 24px)",
+        '2xl': "var(--radius-2xl, 20px)",
+        xl: "var(--radius-xl, calc(var(--radius) + 4px))",
+        lg: "var(--radius-lg, var(--radius))",
+        md: "var(--radius-md, calc(var(--radius) - 2px))",
+        sm: "var(--radius-sm, calc(var(--radius) - 4px))",
+      },
+      boxShadow: {
+        card: "var(--shadow-card)",
+        "card-hover": "var(--shadow-card-hover)",
+        overlay: "var(--shadow-overlay)",
+        "focus-ring": "var(--shadow-focus-ring)",
       },
       keyframes: {
         "accordion-down": {

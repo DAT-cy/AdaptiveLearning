@@ -1,0 +1,10 @@
+version: 1
+name: pybkt
+slug: pybkt
+protocol: http
+port: 4600
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

@@ -11,7 +11,6 @@ import adaptivelearning.shared.enums.PaymentEventStatus;
 import adaptivelearning.shared.enums.PaymentProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
@@ -59,8 +58,7 @@ public class StripePaymentStrategy implements PaymentStrategy {
         if (user.getUsername().contains("@")) form.add("customer_email", user.getUsername());
         form.add("line_items[0][quantity]", "1");
         form.add("line_items[0][price_data][currency]", payment.getCurrency().toLowerCase());
-        form.add("line_items[0][price_data][unit_amount]", payment.getAmount()
-                .movePointRight(2).setScale(0, RoundingMode.UNNECESSARY).toPlainString());
+        form.add("line_items[0][price_data][unit_amount]", payment.getAmount().toBigIntegerExact().toString());
         form.add("line_items[0][price_data][product_data][name]", "Adaptive Learning Premium");
         form.add("metadata[paymentId]", payment.getPaymentId().toString());
         form.add("success_url", billingProperties.appUrl() + "/payment/success?paymentId=" + payment.getPaymentId()
@@ -102,7 +100,7 @@ public class StripePaymentStrategy implements PaymentStrategy {
             };
             if (status == PaymentEventStatus.SUCCEEDED && object.has("amount_total")) {
                 return event(eventId, sessionId, transactionId, paymentId, status,
-                        object.path("amount_total").decimalValue().movePointLeft(2),
+                        object.path("amount_total").decimalValue(),
                         object.path("currency").asText(null), root.toString());
             }
             return event(eventId, sessionId, transactionId, paymentId, status,

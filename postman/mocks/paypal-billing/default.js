@@ -16,6 +16,7 @@ const server = http.createServer(async (req, res) => {
     const order = {
       id: `ORDER-${Date.now()}`,
       customId: request.purchase_units?.[0]?.custom_id,
+      amount: request.purchase_units?.[0]?.amount,
       status: "APPROVAL_PENDING",
     };
     await pm.state.set(`paypal.order.${order.id}`, order);
@@ -23,6 +24,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({
       id: order.id,
       status: order.status,
+      amount: order.amount,
       links: [{ rel: "approve", href: `https://www.sandbox.paypal.mock/checkoutnow?token=${order.id}` }],
     }));
   }
@@ -42,7 +44,7 @@ const server = http.createServer(async (req, res) => {
       status: "COMPLETED",
       purchase_units: [{
         custom_id: order.customId,
-        payments: { captures: [{ id: captureId, status: "COMPLETED", amount: { value: "19.99", currency_code: "USD" } }] },
+        payments: { captures: [{ id: captureId, status: "COMPLETED", amount: order.amount }] },
       }],
     }));
   }

@@ -17,9 +17,11 @@ const layout = computed(
   <ConfirmProvider>
     <TooltipProvider :delay-duration="400" :skip-delay-duration="300">
       <component :is="layout">
-        <KeepAlive :max="keepAliveMaxNum">
-          <router-view />
-        </KeepAlive>
+        <router-view v-slot="{ Component }">
+          <KeepAlive :max="keepAliveMaxNum">
+            <component :is="Component" />
+          </KeepAlive>
+        </router-view>
       </component>
       <Toaster />
       <Loading />

@@ -6,12 +6,14 @@ import adaptivelearning.module.users.service.impl.UserDetailServiceImpl;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.UnsupportedJwtException;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
@@ -75,8 +77,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             response.sendError(ErrorCode.JWT_UNSUPPORTED.getStatus(), ErrorCode.JWT_UNSUPPORTED.getMessage());
         }
         catch (CommonException e) {
-            response.sendError(ErrorCode.INTER_SERVER_ERROR.getStatus(), ErrorCode.INTER_SERVER_ERROR.getMessage());
+            response.sendError(ErrorCode.JWT_INVALID.getStatus(), ErrorCode.JWT_INVALID.getMessage());
+        }
+        catch (AuthenticationException | JwtException | IllegalArgumentException e) {
+            response.sendError(ErrorCode.JWT_INVALID.getStatus(), ErrorCode.JWT_INVALID.getMessage());
         }
 
     }
-} 
+}

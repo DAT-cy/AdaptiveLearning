@@ -45,6 +45,15 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public StudyDocumentResponse uploadDocument(Long userId, DocumentUploadRequest request) {
+        if (request.getTitle() == null || request.getTitle().isBlank()
+                || request.getTitle().trim().length() > 200
+                || request.getContent() == null || request.getContent().isBlank()
+                || request.getContent().length() > 500_000) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        if (request.getCertificateId() != null && !certificates.existsById(request.getCertificateId())) {
+            throw new CommonException(ErrorCode.ENTITY_NOT_FOUND);
+        }
         StudyDocument document = documents.save(StudyDocument.builder()
                 .userId(userId)
                 .certificateId(request.getCertificateId())
@@ -76,6 +85,7 @@ public class RagServiceImpl implements RagService {
     public SearchResponse search(Long userId, Long documentId, String query) {
         owned(userId, documentId);
         String normalized = query == null ? "" : query.trim();
+        if (normalized.length() > 2000) throw new CommonException(ErrorCode.BAD_REQUEST);
         List<DocumentChunk> found = Arrays.stream(normalized.split("\\s+"))
                 .filter(token -> !token.isBlank())
                 .flatMap(token -> chunks.search(documentId, token).stream())
@@ -98,7 +108,17 @@ public class RagServiceImpl implements RagService {
     @Override
     public StudyDocumentResponse uploadKnowledgeDocument(
             Long adminId, KnowledgeBaseUploadRequest request) {
+        if (request.getFileName() == null || request.getFileName().isBlank()) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
         String fileName = request.getFileName().trim();
+        if (request.getTitle() == null || request.getTitle().isBlank()
+                || request.getTitle().trim().length() > 200
+                || request.getContent() == null || request.getContent().isBlank()
+                || request.getContent().length() > 500_000
+                || request.getCertificateId() == null || !certificates.existsById(request.getCertificateId())) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
         String lowerName = fileName.toLowerCase(Locale.ROOT);
         if (!lowerName.endsWith(".txt") && !lowerName.endsWith(".md")) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
@@ -131,31 +151,30 @@ public class RagServiceImpl implements RagService {
     public StudyDocumentResponse uploadKnowledgePdf(
             Long adminId, String title, Long certificateId, Long topicId, MultipartFile file) {
         if (title == null || title.isBlank() || title.trim().length() > 200) {
-            throw new IllegalArgumentException("Tiêu đề tài liệu phải có từ 1 đến 200 ký tự.");
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         }
         if (certificateId == null || !certificates.existsById(certificateId)) {
-            throw new IllegalArgumentException("Kỳ thi được chọn không tồn tại.");
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         }
         if (topicId != null) {
             var topic = topics.findById(topicId)
                     .filter(item -> certificateId.equals(item.getCertificateId()) && item.isActive())
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Kỹ năng không thuộc kỳ thi đã chọn hoặc đang tắt."));
+                    .orElseThrow(() -> new CommonException(ErrorCode.BAD_REQUEST));
         }
         if (file == null || file.isEmpty() || file.getSize() > 20L * 1024 * 1024) {
-            throw new IllegalArgumentException("PDF phải có dung lượng từ 1 byte đến 20 MB.");
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         }
 
         String fileName = safeFileName(file.getOriginalFilename());
         if (!fileName.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
-            throw new IllegalArgumentException("Chỉ chấp nhận tệp PDF.");
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         }
 
         final String text;
         try {
             text = PdfTextExtractor.extract(file.getBytes());
         } catch (java.io.IOException exception) {
-            throw new IllegalArgumentException("Không thể đọc tệp PDF.");
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         }
 
         StudyDocument document = documents.save(StudyDocument.builder()
@@ -176,8 +195,13 @@ public class RagServiceImpl implements RagService {
     @Override
     public StudyDocumentResponse updateKnowledgeDocument(
             Long id, KnowledgeDocumentUpdateRequest request) {
+        if (request.getTitle() == null || request.getTitle().isBlank() || request.getTitle().trim().length() > 200
+                || request.getContent() == null || request.getContent().isBlank()
+                || request.getContent().length() > 500_000 || request.getCertificateId() == null) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
         if (!certificates.existsById(request.getCertificateId())) {
-            throw new IllegalArgumentException("Kỳ thi được chọn không tồn tại.");
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         }
         validateKnowledgeTopic(request.getCertificateId(), request.getTopicId());
 
@@ -197,8 +221,7 @@ public class RagServiceImpl implements RagService {
         if (topicId == null) return;
         topics.findById(topicId)
                 .filter(topic -> certificateId.equals(topic.getCertificateId()) && topic.isActive())
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Kỹ năng không thuộc kỳ thi đã chọn hoặc đang tắt."));
+                .orElseThrow(() -> new CommonException(ErrorCode.BAD_REQUEST));
     }
 
     @Override
@@ -314,6 +337,7 @@ public class RagServiceImpl implements RagService {
         if (value == null) return Set.of();
         return Arrays.stream(value.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{Nd}]+"))
                 .filter(term -> term.length() > 2)
+                .limit(100)
                 .collect(Collectors.toSet());
     }
 
@@ -328,7 +352,7 @@ public class RagServiceImpl implements RagService {
 
     private String safeFileName(String fileName) {
         if (fileName == null || fileName.isBlank()) {
-            throw new IllegalArgumentException("Thiếu tên tệp PDF.");
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         }
         String normalized = fileName.replace('\\', '/');
         return normalized.substring(normalized.lastIndexOf('/') + 1);

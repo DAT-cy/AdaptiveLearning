@@ -33,7 +33,7 @@ export const adminService = {
   generateExamFromTemplate: (id, payload) =>
     data(Axios.post(`/api/v1/exam-templates/${id}/generate`, payload)),
   deactivateExamTemplate: (id) =>
-    data(Axios.delete(`/api/v1/exam-templates/${id}`)),
+    data(Axios.del(`/api/v1/exam-templates/${id}`)),
   questions: (filters = {}) => data(Axios.get('/api/v1/questions', filters)),
   knowledgeDocuments: () => data(Axios.get('/api/v1/admin/knowledge-base')),
   knowledgeDocument: (id) =>
@@ -54,7 +54,7 @@ export const adminService = {
       })
     ),
   deleteKnowledgeDocument: (id) =>
-    data(Axios.delete(`/api/v1/admin/knowledge-base/${id}`)),
+    data(Axios.del(`/api/v1/admin/knowledge-base/${id}`)),
   topics: (certificateId) =>
     data(Axios.get(`/api/v1/topics/certificate/${certificateId}`)),
   createQuestion: (payload) => data(Axios.post('/api/v1/questions', payload)),
@@ -62,7 +62,7 @@ export const adminService = {
     data(Axios.put(`/api/v1/questions/${id}`, payload)),
   generateQuestions: (payload) =>
     data(
-      Axios.post('/api/v1/content-generation', payload, { timeout: 120000 })
+      Axios.post('/api/v1/content-generation', payload, { timeout: 150000 })
     ),
   applyGeneratedQuestions: (id) =>
     data(Axios.post(`/api/v1/content-generation/${id}/apply`)),
@@ -74,5 +74,5 @@ export const adminService = {
     data(Axios.post('/api/v1/certificates', payload)),
   updateCertificate: (id, payload) =>
     data(Axios.put(`/api/v1/certificates/${id}`, payload)),
-  deleteCertificate: (id) => data(Axios.delete(`/api/v1/certificates/${id}`)),
+  deleteCertificate: (id) => data(Axios.del(`/api/v1/certificates/${id}`)),
 }

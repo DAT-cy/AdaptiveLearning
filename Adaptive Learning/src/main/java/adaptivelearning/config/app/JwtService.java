@@ -12,6 +12,8 @@ import java.security.Key;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import jakarta.annotation.PostConstruct;
 import java.util.function.Function;
 
 @Service
@@ -20,6 +22,13 @@ public class JwtService {
     private String secretKey;
     @Value("${jwt.expiration}")
     private long jwtExpiration;
+
+    @PostConstruct
+    void validateSecret() {
+        if (secretKey == null || secretKey.length() < 32) {
+            throw new IllegalStateException("JWT_SECRET must contain at least 32 characters");
+        }
+    }
 
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
@@ -72,7 +81,7 @@ public class JwtService {
     }
 
     private Key getSignInKey() {
-        return Keys.hmacShaKeyFor(secretKey.getBytes());
+        return Keys.hmacShaKeyFor(secretKey.getBytes(StandardCharsets.UTF_8));
     }
 
     public String generateTokenRegister(UserDetails userDetails) {

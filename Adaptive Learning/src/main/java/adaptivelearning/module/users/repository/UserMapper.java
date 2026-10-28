@@ -13,10 +13,12 @@ import java.util.List;
 @Mapper
 public interface UserMapper {
     Optional<User> findByUsername(String username);
+    Optional<User> findByUsernameForUpdate(@Param("username") String username);
     Optional<User> findById(@Param("userId") Long userId);
     List<User> findAllForAdmin();
     int countAdminUsers();
     void insertUser(User user);
+    int insertUnverifiedUserIfAbsent(@Param("user") User user);
     int updateRole(@Param("userId") Long userId, @Param("role") Role role);
     int updateEnabled(@Param("userId") Long userId, @Param("enabled") boolean enabled);
     int updateEmailVerified(@Param("username") String username, @Param("verified") boolean verified);

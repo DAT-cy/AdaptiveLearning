@@ -19,9 +19,14 @@ import adaptivelearning.module.attempts.entity.ExamAttempt;
 import adaptivelearning.module.attempts.repository.AttemptAnswerRepository;
 import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
 import adaptivelearning.module.exams.entity.Exam;
+import adaptivelearning.module.exams.entity.ExamQuestion;
 import adaptivelearning.module.exams.repository.ExamRepository;
+import adaptivelearning.module.exams.repository.ExamQuestionRepository;
+import adaptivelearning.module.questions.entity.Question;
+import adaptivelearning.module.questions.repository.QuestionRepository;
 import adaptivelearning.module.topics.entity.Topic;
 import adaptivelearning.module.topics.repository.TopicRepository;
+import adaptivelearning.shared.enums.TopicType;
 import adaptivelearning.module.users.entity.User;
 import adaptivelearning.module.users.repository.UserMapper;
 import adaptivelearning.shared.enums.RecommendationStatus;
@@ -30,6 +35,7 @@ import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -55,6 +61,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     private final LearningProgressRepository progressRepository;
     private final ObjectMapper objectMapper;
     private final ExamRepository examRepository;
+    private final ExamQuestionRepository examQuestionRepository;
+    private final QuestionRepository questionRepository;
     private final TopicRepository topicRepository;
     private final UserMapper userMapper;
 
@@ -195,42 +203,121 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public GapAnalysisResponse analyzeAttempt(Long attemptId) {
+    public GapAnalysisResponse analyzeAttempt(Long attemptId, Long userId, boolean admin) {
         ExamAttempt attempt = attemptRepository.findById(attemptId)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        requireOwner(attempt.getUserId(), userId, admin);
+        if (attempt.getSubmittedAt() == null) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        Exam exam = examRepository.findById(attempt.getExamId())
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        List<ExamQuestion> examQuestions = examQuestionRepository.findByExamId(attempt.getExamId());
+        if (examQuestions.isEmpty()) throw new CommonException(ErrorCode.BAD_REQUEST);
+        Map<Long, Question> questionsById = questionMap(examQuestions);
+        Map<Long, Topic> topicsById = topicRepository.findByCertificateId(exam.getCertificateId()).stream()
+                .collect(java.util.stream.Collectors.toMap(Topic::getTopicId, topic -> topic));
+        Map<Long, AttemptAnswer> answersByQuestion = answerRepository.findByAttemptId(attemptId).stream()
+                .collect(java.util.stream.Collectors.toMap(AttemptAnswer::getQuestionId, answer -> answer,
+                        (first, last) -> last));
 
-        List<AttemptAnswer> answers = answerRepository.findByAttemptId(attemptId);
+        Map<String, long[]> skillCounts = new LinkedHashMap<>();
+        Map<String, long[]> topicCounts = new LinkedHashMap<>();
+        Map<String, long[]> difficultyCounts = new LinkedHashMap<>();
+        long eligible = 0;
+        long correct = 0;
+        for (Long questionId : examQuestions.stream().map(ExamQuestion::getQuestionId).distinct().toList()) {
+            AttemptAnswer answer = answersByQuestion.get(questionId);
+            Question question = questionsById.get(questionId);
+            if (answer == null || question == null || answer.getIsCorrect() == null
+                    || "ESSAY".equalsIgnoreCase(question.getQuestionType())) {
+                continue;
+            }
 
-        long correctCount = answers.stream()
-                .filter(a -> Boolean.TRUE.equals(a.getIsCorrect()))
-                .count();
-        double overallAccuracy = answers.isEmpty()
-                ? 0.0
-                : (correctCount * 100.0 / answers.size());
+            Topic topic = topicsById.get(question.getTopicId());
+            String topicName = topic == null ? "TOPIC_" + question.getTopicId() : topic.getName();
+            String skillName = resolveSkillName(topic, topicsById, question.getTopicId());
+            String difficulty = question.getDifficulty() == null ? "UNKNOWN" : question.getDifficulty().name();
+            boolean isCorrect = Boolean.TRUE.equals(answer.getIsCorrect());
+            eligible++;
+            if (isCorrect) correct++;
+            incrementAccuracy(skillCounts, skillName, isCorrect);
+            incrementAccuracy(topicCounts, topicName, isCorrect);
+            incrementAccuracy(difficultyCounts, difficulty, isCorrect);
+        }
+        Double overallAccuracy = eligible == 0 ? null : accuracyPercent(correct, eligible);
+        List<String> weakTopics = topicCounts.entrySet().stream()
+                .filter(entry -> accuracyPercent(entry.getValue()) < THRESHOLD_DEVELOPING)
+                .map(Map.Entry::getKey).toList();
+        List<String> strongTopics = topicCounts.entrySet().stream()
+                .filter(entry -> accuracyPercent(entry.getValue()) > THRESHOLD_STRONG)
+                .map(Map.Entry::getKey).toList();
 
         GapAnalysis analysis = gapAnalysisRepository.findByAttemptId(attemptId)
                 .orElseGet(GapAnalysis::new);
         analysis.setAttemptId(attemptId);
         analysis.setUserId(attempt.getUserId());
-        analysis.setCertificateId(0L);
+        analysis.setCertificateId(exam.getCertificateId());
         analysis.setOverallAccuracy(overallAccuracy);
         analysis.setGeneratedAt(LocalDateTime.now());
-        analysis.setAccuracyBySkillJson("{}");
-        analysis.setAccuracyByTopicJson("{}");
-        analysis.setAccuracyByDifficultyJson("{}");
-        analysis.setWeakTopicsJson(overallAccuracy < THRESHOLD_DEVELOPING ? "[\"overall\"]" : "[]");
-        analysis.setStrongTopicsJson(overallAccuracy > THRESHOLD_STRONG ? "[\"overall\"]" : "[]");
+        analysis.setAccuracyBySkillJson(toJson(toAccuracyPercentages(skillCounts)));
+        analysis.setAccuracyByTopicJson(toJson(toAccuracyPercentages(topicCounts)));
+        analysis.setAccuracyByDifficultyJson(toJson(toAccuracyPercentages(difficultyCounts)));
+        analysis.setWeakTopicsJson(toJson(weakTopics));
+        analysis.setStrongTopicsJson(toJson(strongTopics));
 
         GapAnalysis saved = gapAnalysisRepository.save(analysis);
-        generateRecommendations(attempt.getUserId(), overallAccuracy, saved.getGapAnalysisId());
+        if (overallAccuracy != null && !recommendationRepository.existsByGapAnalysisId(saved.getGapAnalysisId())) {
+            generateRecommendations(attempt.getUserId(), overallAccuracy, saved.getGapAnalysisId());
+        }
 
         log.info("Completed gap analysis for attempt {}, accuracy={}", attemptId, overallAccuracy);
         return toGapAnalysisResponse(saved);
     }
 
+    private Map<Long, Question> questionMap(List<ExamQuestion> examQuestions) {
+        List<Long> ids = examQuestions.stream().map(ExamQuestion::getQuestionId).distinct().toList();
+        return questionRepository.findAllById(ids).stream()
+                .collect(java.util.stream.Collectors.toMap(Question::getQuestionId, question -> question));
+    }
+
+    private String resolveSkillName(Topic topic, Map<Long, Topic> topicsById, Long topicId) {
+        if (topic == null) return "TOPIC_" + topicId;
+        Topic current = topic;
+        java.util.Set<Long> visited = new java.util.HashSet<>();
+        while (current != null && visited.add(current.getTopicId())) {
+            if (current.getType() == TopicType.SKILL) return current.getName();
+            current = current.getParentId() == null ? null : topicsById.get(current.getParentId());
+        }
+        return topic.getName();
+    }
+
+    private void incrementAccuracy(Map<String, long[]> counts, String key, boolean correct) {
+        long[] values = counts.computeIfAbsent(key, ignored -> new long[2]);
+        values[1]++;
+        if (correct) values[0]++;
+    }
+
+    private Map<String, Double> toAccuracyPercentages(Map<String, long[]> counts) {
+        Map<String, Double> percentages = new LinkedHashMap<>();
+        counts.forEach((key, values) -> percentages.put(key, accuracyPercent(values)));
+        return percentages;
+    }
+
+    private double accuracyPercent(long[] counts) {
+        return accuracyPercent(counts[0], counts[1]);
+    }
+
+    private double accuracyPercent(long correct, long total) {
+        return total == 0 ? 0 : roundOne(correct * 100.0 / total);
+    }
+
     @Override
     @Transactional(readOnly = true)
-    public GapAnalysisResponse getAnalysisByAttempt(Long attemptId) {
+    public GapAnalysisResponse getAnalysisByAttempt(Long attemptId, Long userId, boolean admin) {
+        ExamAttempt attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        requireOwner(attempt.getUserId(), userId, admin);
         return gapAnalysisRepository.findByAttemptId(attemptId)
                 .map(this::toGapAnalysisResponse)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
@@ -276,6 +363,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                         .filter(java.util.Objects::nonNull).distinct().toList())
                 .stream().collect(java.util.stream.Collectors.toMap(Topic::getTopicId, topic -> topic));
         var masteryByTopic = scoredAttempts.stream()
+                .filter(attempt -> examsById.get(attempt.getExamId()).getTopicId() != null)
                 .collect(java.util.stream.Collectors.groupingBy(
                         attempt -> examsById.get(attempt.getExamId()).getTopicId(),
                         java.util.stream.Collectors.averagingDouble(
@@ -325,13 +413,13 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public RecommendationResponse startRecommendation(Long recommendationId) {
-        return updateRecommendationStatus(recommendationId, RecommendationStatus.STARTED);
+    public RecommendationResponse startRecommendation(Long recommendationId, Long userId, boolean admin) {
+        return updateRecommendationStatus(recommendationId, RecommendationStatus.STARTED, userId, admin);
     }
 
     @Override
-    public RecommendationResponse completeRecommendation(Long recommendationId) {
-        return updateRecommendationStatus(recommendationId, RecommendationStatus.COMPLETED);
+    public RecommendationResponse completeRecommendation(Long recommendationId, Long userId, boolean admin) {
+        return updateRecommendationStatus(recommendationId, RecommendationStatus.COMPLETED, userId, admin);
     }
 
     private void generateRecommendations(Long userId, double accuracy, Long gapAnalysisId) {
@@ -359,11 +447,18 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
     }
 
-    private RecommendationResponse updateRecommendationStatus(Long id, RecommendationStatus status) {
+    private RecommendationResponse updateRecommendationStatus(Long id, RecommendationStatus status, Long userId, boolean admin) {
         Recommendation recommendation = recommendationRepository.findById(id)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        requireOwner(recommendation.getUserId(), userId, admin);
         recommendation.setStatus(status);
         return toRecommendationResponse(recommendationRepository.save(recommendation));
+    }
+
+    private void requireOwner(Long resourceUserId, Long userId, boolean admin) {
+        if (!admin && !java.util.Objects.equals(resourceUserId, userId)) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
     }
 
     private GapAnalysisResponse toGapAnalysisResponse(GapAnalysis a) {

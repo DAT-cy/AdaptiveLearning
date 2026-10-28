@@ -10,6 +10,7 @@ import adaptivelearning.module.billing.entity.PaymentWebhookEvent;
 import adaptivelearning.module.billing.payment.PaymentStrategy;
 import adaptivelearning.module.billing.repository.PaymentRepository;
 import adaptivelearning.module.billing.repository.PaymentWebhookEventRepository;
+import adaptivelearning.module.notifications.service.NotificationService;
 import adaptivelearning.module.users.entity.User;
 import adaptivelearning.module.users.repository.UserMapper;
 import adaptivelearning.shared.enums.PaymentEventStatus;
@@ -31,6 +32,7 @@ public class PaymentService {
     private final BillingProperties billingProperties;
     private final PaymentStrategyRegistry strategyRegistry;
     private final EntitlementService entitlementService;
+    private final NotificationService notificationService;
 
     public CheckoutResponse checkout(Long userId, String providerValue) {
         User user = requireUser(userId);
@@ -40,7 +42,9 @@ public class PaymentService {
         BigDecimal price = billingProperties.premiumPrice();
         if (price == null) throw new CommonException(ErrorCode.PAYMENT_CONFIGURATION_MISSING);
         String currency = billingProperties.premiumCurrency();
-        if (!"USD".equals(currency)) throw new CommonException(ErrorCode.PAYMENT_CONFIGURATION_MISSING);
+        if (!"VND".equals(currency) || price.stripTrailingZeros().scale() > 0) {
+            throw new CommonException(ErrorCode.PAYMENT_CONFIGURATION_MISSING);
+        }
 
         PaymentProvider provider;
         try {
@@ -151,8 +155,11 @@ public class PaymentService {
         switch (event.status()) {
             case SUCCEEDED -> {
                 if (payment.getStatus() != PaymentStatus.REFUNDED) {
+                    boolean firstSuccess = payment.getStatus() != PaymentStatus.SUCCEEDED;
                     payment.setStatus(PaymentStatus.SUCCEEDED);
-                    entitlementService.grantPremium(payment.getUserId());
+                    if (firstSuccess) entitlementService.grantPremium(payment.getUserId());
+                    paymentRepository.save(payment);
+                    if (firstSuccess) notificationService.createPaymentSucceeded(payment);
                 }
             }
             case FAILED -> {

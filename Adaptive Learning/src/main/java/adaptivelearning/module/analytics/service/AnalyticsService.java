@@ -8,10 +8,10 @@ import java.util.List;
 
 public interface AnalyticsService {
     AdminAnalyticsResponse getAdminOverview(String period, Long certificateId);
-    GapAnalysisResponse analyzeAttempt(Long attemptId);
-    GapAnalysisResponse getAnalysisByAttempt(Long attemptId);
+    GapAnalysisResponse analyzeAttempt(Long attemptId, Long userId, boolean admin);
+    GapAnalysisResponse getAnalysisByAttempt(Long attemptId, Long userId, boolean admin);
     ProgressResponse getProgressOverview(Long userId, Long certificateId);
     List<RecommendationResponse> getRecommendations(Long userId);
-    RecommendationResponse startRecommendation(Long recommendationId);
-    RecommendationResponse completeRecommendation(Long recommendationId);
+    RecommendationResponse startRecommendation(Long recommendationId, Long userId, boolean admin);
+    RecommendationResponse completeRecommendation(Long recommendationId, Long userId, boolean admin);
 }

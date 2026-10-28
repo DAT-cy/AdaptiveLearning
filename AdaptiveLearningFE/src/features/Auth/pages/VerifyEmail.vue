@@ -1,23 +1,33 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
+  AlertCircle,
   ArrowRight,
   BarChart3,
   BookOpen,
   Brain,
-  Check,
+  CheckCircle2,
+  Clock,
   GraduationCap,
-  LockKeyhole,
+  Loader2,
+  Mail,
   MailCheck,
-  Target,
+  RotateCw,
+  ShieldCheck,
+  Sparkles,
 } from 'lucide-vue-next'
 import { userService } from '@/services/userService'
+import { Badge } from '@/components/ui/badge'
+import { EMAIL_RESEND_COOLDOWN_MS } from '../constants'
 
 const route = useRoute()
 const router = useRouter()
 const email = ref(String(route.query.email || ''))
 const code = ref('')
+const otpDigits = ref(['', '', '', '', '', ''])
+const inputRefs = ref([])
+
 const expiresAt = ref(Number(new Date(route.query.expiresAt || 0)) || 0)
 const resendAvailableAt = ref(Number(new Date(route.query.resendAvailableAt || 0)) || 0)
 const now = ref(Date.now())
@@ -40,22 +50,123 @@ function formatCountdown(seconds) {
   return `${minutes}:${remainder}`
 }
 
+function syncCode() {
+  code.value = otpDigits.value.join('')
+}
+
+watch(code, (newVal) => {
+  const chars = (newVal || '').split('')
+  for (let i = 0; i < 6; i++) {
+    otpDigits.value[i] = chars[i] || ''
+  }
+})
+
+function onInput(index, event) {
+  error.value = ''
+  const val = (event?.target?.value || '').replace(/\D/g, '')
+
+  // Hỗ trợ trường hợp trình duyệt tự điền cả chuỗi OTP vào ô đầu tiên
+  if (val.length > 1) {
+    const digits = val.slice(0, 6).split('')
+    digits.forEach((d, i) => {
+      if (index + i < 6) {
+        otpDigits.value[index + i] = d
+      }
+    })
+    syncCode()
+    const nextIdx = Math.min(index + digits.length, 5)
+    inputRefs.value[nextIdx]?.focus()
+    return
+  }
+
+  otpDigits.value[index] = val
+  syncCode()
+
+  if (val && index < 5) {
+    inputRefs.value[index + 1]?.focus()
+  }
+}
+
+function onKeydown(index, event) {
+  if (event.key === 'Backspace') {
+    if (!otpDigits.value[index] && index > 0) {
+      event.preventDefault()
+      otpDigits.value[index - 1] = ''
+      syncCode()
+      inputRefs.value[index - 1]?.focus()
+    } else {
+      otpDigits.value[index] = ''
+      syncCode()
+    }
+  } else if (event.key === 'ArrowLeft' && index > 0) {
+    event.preventDefault()
+    inputRefs.value[index - 1]?.focus()
+  } else if (event.key === 'ArrowRight' && index < 5) {
+    event.preventDefault()
+    inputRefs.value[index + 1]?.focus()
+  }
+}
+
+function onPaste(event) {
+  event.preventDefault()
+  error.value = ''
+  const pasted = (event.clipboardData || window.clipboardData)?.getData('text') || ''
+  const digits = pasted.replace(/\D/g, '').slice(0, 6)
+  if (!digits) return
+
+  for (let i = 0; i < 6; i++) {
+    otpDigits.value[i] = digits[i] || ''
+  }
+  syncCode()
+  const targetIndex = Math.min(digits.length, 5)
+  inputRefs.value[targetIndex]?.focus()
+}
+
 function errorMessage(exception) {
-  const responseCode = exception?.response?.data?.responseCode
-  if (responseCode === 'AUTH-ERR-421') return 'Mã chưa chính xác. Hãy kiểm tra email và thử lại.'
-  if (responseCode === 'AUTH-ERR-422') return 'Mã đã hết hạn. Hãy gửi mã mới.'
-  if (responseCode === 'AUTH-ERR-424') return 'Đã đạt giới hạn thử hoặc gửi mã. Vui lòng chờ rồi thử lại.'
+  const payload = exception?.response?.data
+  const validationMessage =
+    payload && typeof payload === 'object'
+      ? Object.values(payload).find((value) => typeof value === 'string')
+      : null
+  const responseCode = payload?.responseCode
+  if (responseCode === 'AUTH-ERR-421') return 'Mã xác minh chưa chính xác. Vui lòng kiểm tra lại email.'
+  if (responseCode === 'AUTH-ERR-422') return 'Mã xác minh đã hết hạn. Vui lòng bấm gửi lại mã mới.'
+  if (responseCode === 'AUTH-ERR-424') return 'Đã đạt giới hạn thử hoặc gửi mã. Vui lòng chờ vài phút rồi thử lại.'
   if (responseCode === 'AUTH-ERR-425') return 'Dịch vụ email chưa được cấu hình. Vui lòng thử lại sau.'
-  return exception?.response?.data?.responseMessage || 'Không thể xác minh email. Vui lòng thử lại.'
+  const status = exception?.response?.status
+  if (status === 400) return payload?.responseMessage || 'Mã OTP hoặc thông tin xác minh không hợp lệ.'
+  if (status === 401) return 'Yêu cầu không được xác thực. Vui lòng tải lại trang rồi thử lại.'
+  if (status === 409) return 'Tài khoản chưa ở trạng thái có thể xác minh.'
+  if (status === 412 || status === 429) return 'Bạn đã yêu cầu hoặc nhập sai quá nhiều lần. Vui lòng chờ rồi thử lại.'
+  if (status >= 500) return 'Dịch vụ xác minh đang gặp sự cố. Vui lòng thử lại sau.'
+  if (!exception?.response) {
+    if (exception?.code === 'ECONNABORTED' || /timeout/i.test(exception?.message || '')) {
+      return 'Máy chủ phản hồi quá thời gian chờ. Vui lòng thử lại.'
+    }
+    if (exception?.message && exception.message !== 'Network Error') return exception.message
+    return 'Không thể kết nối máy chủ. Hãy kiểm tra kết nối rồi thử lại.'
+  }
+  return (
+    payload?.responseMessage ||
+    payload?.message ||
+    validationMessage ||
+    'Không thể xác minh email. Vui lòng thử lại.'
+  )
 }
 
 async function submitCode() {
+  if (code.value.length !== 6 || loading.value) return
   error.value = ''
   notice.value = ''
   loading.value = true
   try {
-    await userService.verifyEmail({ email: email.value, code: code.value })
+    const result = await userService.verifyEmail({ email: email.value, code: code.value })
+    if (result?.verified !== true) {
+      throw new Error('Máy chủ chưa xác nhận email đã được xác minh.')
+    }
     verified.value = true
+    code.value = ''
+    otpDigits.value = ['', '', '', '', '', '']
   } catch (exception) {
     error.value = errorMessage(exception)
   } finally {
@@ -64,18 +175,33 @@ async function submitCode() {
 }
 
 async function resendCode() {
-  if (!canResend.value) return
+  if (!canResend.value || verified.value) return
   error.value = ''
   notice.value = ''
   resending.value = true
   try {
     const result = await userService.resendVerification({ email: email.value })
+    if (
+      result?.verified !== false ||
+      !Number.isFinite(Date.parse(result?.expiresAt)) ||
+      !Number.isFinite(Date.parse(result?.resendAvailableAt))
+    ) {
+      throw new Error('Máy chủ chưa xác nhận yêu cầu gửi lại mã.')
+    }
     expiresAt.value = new Date(result.expiresAt).getTime()
     resendAvailableAt.value = new Date(result.resendAvailableAt).getTime()
     code.value = ''
-    notice.value = 'Nếu địa chỉ này đang chờ xác minh, mã mới đã được gửi.'
+    otpDigits.value = ['', '', '', '', '', '']
+    inputRefs.value[0]?.focus()
+    notice.value = 'Nếu email cần xác minh, mã mới sẽ được gửi tới hộp thư của bạn.'
   } catch (exception) {
     error.value = errorMessage(exception)
+    if (exception?.response?.data?.responseCode === 'AUTH-ERR-424'
+      || exception?.response?.status === 412
+      || exception?.response?.status === 429) {
+      resendAvailableAt.value = Date.now() + EMAIL_RESEND_COOLDOWN_MS
+      now.value = Date.now()
+    }
   } finally {
     resending.value = false
   }
@@ -89,871 +215,837 @@ onMounted(() => {
   clock = window.setInterval(() => {
     now.value = Date.now()
   }, 1000)
+  inputRefs.value[0]?.focus()
 })
-onUnmounted(() => window.clearInterval(clock))
+
+onUnmounted(() => {
+  if (clock) window.clearInterval(clock)
+})
 </script>
 
 <template>
-  <main class="login-page">
-    <!-- CỘT GIỚI THIỆU ĐỒNG BỘ -->
+  <main class="verify-page">
+    <!-- CỘT TRÁI: GIỚI THIỆU HỌC TẬP THÍCH ỨNG AI (DESKTOP) -->
     <section class="intro-panel" aria-label="Giới thiệu Adaptive Learning">
-      <RouterLink class="brand-lockup" to="/login" aria-label="Adaptive Learning">
-        <span class="brand-icon"><GraduationCap :size="31" :stroke-width="2.1" /></span>
-        <span>Adaptive Learning</span>
-      </RouterLink>
+      <div class="intro-inner">
+        <!-- Brand Header -->
+        <RouterLink class="brand-lockup" to="/login" aria-label="Về trang đăng nhập">
+          <span class="brand-icon">
+            <GraduationCap :size="24" :stroke-width="2.2" />
+          </span>
+          <span class="brand-text">Adaptive Learning</span>
+        </RouterLink>
 
-      <div class="intro-copy">
-        <p class="intro-kicker">BẢO MẬT TÀI KHOẢN</p>
-        <h1>Xác minh email<br class="desktop-break"> để kích hoạt tài khoản</h1>
-        <p class="intro-description">
-          Chỉ một bước đơn giản để đảm bảo an toàn thông tin và kích hoạt đầy đủ lộ trình học tập được cá nhân hóa bởi AI.
-        </p>
-      </div>
+        <!-- Hero Content -->
+        <div class="intro-content">
+          <Badge variant="ai" class="intro-badge">
+            <Sparkles :size="13" class="text-ai-accent" />
+            BẢO MẬT TÀI KHOẢN HỌC VIÊN
+          </Badge>
 
-      <div class="benefit-list">
-        <div class="benefit"><span class="benefit-icon target-icon"><Target :size="21" /></span><span>Cá nhân hóa<br>lộ trình học</span></div>
-        <div class="benefit"><span class="benefit-icon progress-icon"><BarChart3 :size="21" /></span><span>Theo dõi tiến độ<br>thực tế</span></div>
-        <div class="benefit"><span class="benefit-icon ai-icon"><Brain :size="21" /></span><span>Ứng dụng AI<br>thông minh</span></div>
-      </div>
+          <h1 class="intro-title">
+            Xác minh email<br class="hidden xl:inline" />
+            kích hoạt tài khoản
+          </h1>
 
-      <div class="study-visual" aria-label="Minh họa lộ trình học tập">
-        <div class="visual-orbit orbit-one"></div><div class="visual-orbit orbit-two"></div>
-        <div class="visual-note"><span class="note-spark">✦</span><span>Bảo mật tài khoản<br><strong>An toàn & Tin cậy</strong></span></div>
-        <div class="visual-path"><span><BookOpen :size="19" /></span><i></i><b><Check :size="13" :stroke-width="3" /></b><i></i><strong><BarChart3 :size="22" /></strong></div>
-        <div class="laptop-scene">
-          <div class="laptop-screen">
-            <div class="screen-top"><span class="mini-logo"><GraduationCap :size="13" /> AdaptiveLearn</span><span class="screen-avatar">A</span></div>
-            <div class="screen-welcome">Xác thực tài khoản <span>Bước 2/2</span></div>
-            <div class="screen-progress"><span><i></i></span><small>Kích hoạt <b>95%</b></small></div>
-            <div class="screen-courses">
-              <div><span class="course-check"><Check :size="8" :stroke-width="3" /></span><span><b>Tạo thông tin</b><small>Hoàn thành</small></span><em>100%</em></div>
-              <div><span class="course-dot"></span><span><b>Xác minh hộp thư</b><small>Đang chờ</small></span><em>Mã OTP</em></div>
+          <p class="intro-desc">
+            Chỉ một bước đơn giản để đảm bảo an toàn thông tin và kích hoạt đầy đủ lộ trình học tập được cá nhân hóa bởi trí tuệ nhân tạo.
+          </p>
+        </div>
+
+        <!-- 3 Feature Highlight Cards -->
+        <div class="features-list">
+          <div class="feature-item">
+            <div class="feature-icon bg-violet-50 text-ai-accent border border-violet-200/60">
+              <Brain :size="20" />
+            </div>
+            <div class="feature-text">
+              <h3>Kích hoạt lộ trình AI</h3>
+              <p>Hệ thống tự động khởi tạo ma trận kỹ năng ban đầu cho tài khoản của bạn.</p>
             </div>
           </div>
-          <div class="laptop-base"></div>
+
+          <div class="feature-item">
+            <div class="feature-icon bg-blue-50 text-brand-primary border border-blue-200/60">
+              <BookOpen :size="20" />
+            </div>
+            <div class="feature-text">
+              <h3>Mở khóa kho đề thi</h3>
+              <p>Truy cập toàn bộ câu hỏi trắc nghiệm, tự luận và các đề thi thử chuẩn hóa.</p>
+            </div>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-icon bg-sky-50 text-brand-secondary border border-sky-200/60">
+              <BarChart3 :size="20" />
+            </div>
+            <div class="feature-text">
+              <h3>Bảo mật và an toàn</h3>
+              <p>Bảo vệ lịch sử làm bài, chứng nhận điểm số và thông tin cá nhân tuyệt đối.</p>
+            </div>
+          </div>
         </div>
-        <div class="visual-book"></div>
-        <div class="visual-plant"><i></i><i></i><i></i><b></b></div>
+
+        <!-- Metric Proof Strip -->
+        <div class="stats-strip">
+          <div class="stat-unit">
+            <strong>98.5%</strong>
+            <span>Học viên tiến bộ</span>
+          </div>
+          <div class="stat-separator"></div>
+          <div class="stat-unit">
+            <strong>50.000+</strong>
+            <span>Lượt làm bài thi</span>
+          </div>
+          <div class="stat-separator"></div>
+          <div class="stat-unit">
+            <strong>24/7</strong>
+            <span>Gia sư AI đồng hành</span>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- CỘT FORM XÁC THỰC -->
-    <section class="form-panel" aria-labelledby="verify-title">
-      <div class="login-card">
-        <span class="card-brand-icon"><GraduationCap :size="38" :stroke-width="2" /></span>
-        <template v-if="!verified">
-          <h2 id="verify-title">Xác thực email</h2>
-          <p class="card-subtitle">
-            Mã gồm 6 chữ số đã được gửi tới<br>
-            <strong class="email-highlight">{{ email }}</strong>
-          </p>
+    <!-- CỘT PHẢI: FORM NHẬP MÃ OTP HOẶC TRẠNG THÁI THÀNH CÔNG -->
+    <section class="form-panel" aria-labelledby="verify-heading">
+      <div class="verify-card-wrapper">
+        <!-- Header di động -->
+        <div class="mobile-brand-header">
+          <span class="brand-icon">
+            <GraduationCap :size="22" :stroke-width="2.2" />
+          </span>
+          <span class="brand-text">Adaptive Learning</span>
+        </div>
 
-          <form class="login-form" @submit.prevent="submitCode">
-            <div class="field-item">
-              <label class="field-label" for="verification-code">Nhập mã OTP (6 số)</label>
-              <input
-                id="verification-code"
-                v-model="code"
-                class="otp-input"
-                type="text"
-                inputmode="numeric"
-                autocomplete="one-time-code"
-                pattern="[0-9]{6}"
-                maxlength="6"
-                minlength="6"
-                placeholder="• • • • • •"
-                required
-                aria-describedby="code-timer"
-              />
+        <!-- TRẠNG THÁI CHƯA XÁC MINH -->
+        <template v-if="!verified">
+          <div class="verify-header">
+            <div class="header-icon-wrap">
+              <Mail :size="26" class="text-brand-primary" />
+            </div>
+            <h2 id="verify-heading" class="verify-title">Xác thực địa chỉ email</h2>
+            <p class="verify-subtitle">
+              Mã bảo mật gồm 6 chữ số đã được gửi tới hộp thư:
+            </p>
+            <div class="email-chip">
+              <strong>{{ email }}</strong>
+            </div>
+          </div>
+
+          <!-- Form OTP -->
+          <form class="verify-form" @submit.prevent="submitCode">
+            <!-- Khu vực 6 ô nhập OTP -->
+            <div class="otp-section">
+              <label class="otp-label" for="otp-digit-0">Nhập mã OTP gồm 6 chữ số</label>
+              <div class="otp-boxes-grid" @paste="onPaste">
+                <input
+                  v-for="(_, index) in 6"
+                  :id="`otp-digit-${index}`"
+                  :key="index"
+                  :ref="(el) => (inputRefs[index] = el)"
+                  v-model="otpDigits[index]"
+                  type="text"
+                  inputmode="numeric"
+                  pattern="[0-9]*"
+                  maxlength="1"
+                  :autocomplete="index === 0 ? 'one-time-code' : 'off'"
+                  class="otp-box"
+                  :class="{
+                    'is-filled': otpDigits[index] !== '',
+                    'is-error': !!error,
+                    'is-expired': codeExpired,
+                  }"
+                  :disabled="loading"
+                  :aria-label="`Ký tự OTP số ${index + 1}`"
+                  @input="onInput(index, $event)"
+                  @keydown="onKeydown(index, $event)"
+                  @focus="$event.target.select()"
+                />
+              </div>
             </div>
 
-            <p id="code-timer" class="code-timer" :class="{ expired: codeExpired }">
-              {{ codeExpired ? 'Mã xác minh đã hết hạn. Vui lòng bấm gửi lại.' : hasExpiry ? `Mã còn hiệu lực trong ${formatCountdown(expiresIn)}` : 'Vui lòng kiểm tra hòm thư đến hoặc thư rác.' }}
-            </p>
+            <!-- Đồng hồ đếm ngược / Trạng thái hết hạn -->
+            <div
+              class="timer-badge"
+              :class="{
+                'is-expired': codeExpired,
+                'is-warning': expiresIn > 0 && expiresIn <= 60,
+              }"
+            >
+              <Clock :size="15" />
+              <span v-if="codeExpired">
+                Mã xác minh đã hết hạn. Vui lòng bấm gửi lại mã mới bên dưới.
+              </span>
+              <span v-else-if="hasExpiry">
+                Mã còn hiệu lực trong <strong>{{ formatCountdown(expiresIn) }}</strong>
+              </span>
+              <span v-else>
+                Vui lòng kiểm tra hòm thư đến hoặc mục thư rác (spam).
+              </span>
+            </div>
 
-            <p v-if="error" class="form-error-banner" role="alert">{{ error }}</p>
-            <p v-if="notice" class="form-notice-banner" role="status">{{ notice }}</p>
+            <!-- Banner Lỗi -->
+            <div v-if="error" class="verify-error-banner" role="alert">
+              <AlertCircle :size="18" class="error-banner-icon" />
+              <p class="error-banner-text">{{ error }}</p>
+            </div>
 
-            <button class="submit-button" type="submit" :disabled="loading || code.length !== 6 || codeExpired">
-              {{ loading ? 'Đang xác minh…' : 'Kích hoạt tài khoản' }}
-              <ArrowRight :size="19" />
+            <!-- Banner Thông báo (gửi lại mã) -->
+            <div v-if="notice" class="verify-notice-banner" role="status">
+              <CheckCircle2 :size="18" class="notice-banner-icon" />
+              <p class="notice-banner-text">{{ notice }}</p>
+            </div>
+
+            <!-- Nút Kích hoạt -->
+            <button
+              class="submit-action-btn"
+              type="submit"
+              :disabled="loading || code.length !== 6"
+            >
+              <Loader2 v-if="loading" class="animate-spin" :size="18" />
+              <span v-else>KÍCH HOẠT TÀI KHOẢN</span>
+              <ArrowRight v-if="!loading" :size="18" />
             </button>
           </form>
 
+          <!-- Tác vụ phụ: Gửi lại mã & Đổi email -->
           <div class="verify-footer-actions">
-            <button type="button" class="resend-btn" :disabled="!canResend" @click="resendCode">
-              {{ resending ? 'Đang gửi mã…' : resendIn ? `Gửi lại mã (${formatCountdown(resendIn)})` : 'Gửi lại mã OTP' }}
+            <button
+              type="button"
+              class="resend-action-btn"
+              :disabled="!canResend"
+              @click="resendCode"
+            >
+              <Loader2 v-if="resending" class="animate-spin" :size="15" />
+              <RotateCw v-else :size="15" />
+              <span>
+                {{
+                  resending
+                    ? 'Đang gửi mã mới…'
+                    : resendIn
+                    ? `Gửi lại mã (${formatCountdown(resendIn)})`
+                    : 'Gửi lại mã OTP'
+                }}
+              </span>
             </button>
-            <RouterLink to="/register" class="change-email-link">Đổi địa chỉ email khác</RouterLink>
+
+            <RouterLink to="/register" class="change-email-link">
+              Đổi địa chỉ email khác
+            </RouterLink>
           </div>
         </template>
 
-        <div v-else class="verified-state">
-          <div class="success-icon-wrap"><MailCheck :size="36" /></div>
-          <h2>Xác minh thành công!</h2>
-          <p class="card-subtitle">Email của bạn đã được xác thực thành công. Bạn có thể đăng nhập ngay bây giờ.</p>
-          <RouterLink to="/login" class="submit-button">
-            Đăng nhập ngay
-            <ArrowRight :size="19" />
+        <!-- TRẠNG THÁI XÁC MINH THÀNH CÔNG -->
+        <div v-else class="verified-state" role="status">
+          <div class="success-icon-wrap">
+            <MailCheck :size="40" class="text-brand-primary" />
+          </div>
+
+          <h2 class="verified-title">Xác minh email thành công!</h2>
+          <p class="verified-subtitle">
+            Tài khoản của bạn đã được kích hoạt hoàn tất. Lộ trình học tập thích ứng cùng gia sư AI đã sẵn sàng chào đón bạn.
+          </p>
+
+          <RouterLink to="/login" class="submit-action-btn success-action-link">
+            <span>ĐĂNG NHẬP NGAY</span>
+            <ArrowRight :size="18" />
           </RouterLink>
         </div>
-      </div>
 
-      <p class="secure-note"><LockKeyhole :size="13" /> Kết nối được bảo vệ an toàn với SSL/TLS</p>
+        <!-- Trust / Security Indicator -->
+        <div class="trust-indicator">
+          <ShieldCheck :size="15" class="text-brand-primary" />
+          <span>Hệ thống bảo vệ dữ liệu học tập an toàn</span>
+        </div>
+      </div>
     </section>
   </main>
 </template>
 
 <style scoped>
-.login-page {
+.verify-page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(470px, 0.98fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(460px, 0.85fr);
   min-height: 100vh;
-  overflow: hidden;
-  color: #101d49;
-  background: #f4f8fe;
+  width: 100%;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
   font-family: var(--font-sans);
 }
 
+/* ==========================================================================
+   CỘT TRÁI: INTRO PANEL (ĐỒNG BỘ VỚI LOGIN & REGISTER)
+   ========================================================================== */
 .intro-panel {
   position: relative;
   display: flex;
-  min-height: 100vh;
   flex-direction: column;
-  padding: 42px max(46px, calc((100vw - 1360px) / 2));
-  padding-right: 40px;
+  justify-content: center;
+  padding: 48px clamp(36px, 5vw, 72px);
+  background: linear-gradient(145deg, #F0FDFA 0%, #F8FAFC 55%, #F5F3FF 100%);
+  border-right: 1px solid var(--border-subtle);
   overflow: hidden;
-  background:
-    radial-gradient(ellipse at 5% 88%, rgba(102, 170, 255, 0.22), transparent 36%),
-    radial-gradient(ellipse at 73% 70%, rgba(189, 215, 255, 0.4), transparent 37%),
-    linear-gradient(137deg, #edf6ff 2%, #f7faff 58%, #e9f2ff 100%);
 }
 
 .intro-panel::before {
   position: absolute;
-  right: -18%;
-  bottom: -37%;
-  width: 88%;
-  height: 74%;
+  top: -15%;
+  right: -10%;
+  width: 480px;
+  height: 480px;
   border-radius: 50%;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(165, 199, 255, 0.38));
-  content: '';
-  transform: rotate(-22deg);
-}
-
-.intro-panel::after {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 20%;
-  background: linear-gradient(0deg, rgba(194, 220, 255, 0.24), transparent);
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.06) 0%, transparent 70%);
   content: '';
   pointer-events: none;
 }
 
-.brand-lockup {
-  z-index: 1;
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  gap: 10px;
-  color: #101d49;
-  text-decoration: none;
-  font-size: 22px;
-  font-weight: 750;
+.intro-panel::after {
+  position: absolute;
+  bottom: -20%;
+  left: -10%;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(15, 118, 110, 0.07) 0%, transparent 70%);
+  content: '';
+  pointer-events: none;
 }
 
-.brand-icon,
-.card-brand-icon {
-  display: grid;
-  place-items: center;
-  color: #2864f5;
+.intro-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 540px;
+}
+
+/* Brand Lockup */
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 36px;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+
+.brand-lockup:hover {
+  opacity: 0.9;
 }
 
 .brand-icon {
-  width: 48px;
-  height: 44px;
-  filter: drop-shadow(0 5px 8px rgba(42, 100, 245, 0.15));
-}
-
-.intro-copy {
-  z-index: 1;
-  width: min(100%, 560px);
-  margin-top: 60px;
-}
-
-.intro-kicker {
-  margin: 0 0 13px;
-  color: #3267cc;
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 1.1px;
-}
-
-.intro-copy h1 {
-  margin: 0;
-  color: #101d49;
-  font-size: clamp(31px, 3vw, 43px);
-  line-height: 1.27;
-  font-weight: 750;
-}
-
-.intro-description {
-  max-width: 520px;
-  margin: 17px 0 0;
-  color: #5b7199;
-  font-size: 16px;
-  line-height: 1.7;
-}
-
-.benefit-list {
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  margin-top: 31px;
-}
-
-.benefit {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 18px;
-  color: #506b96;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.benefit:first-child {
-  padding-left: 0;
-}
-
-.benefit + .benefit {
-  border-left: 1px solid #d3e0f2;
-}
-
-.benefit-icon {
   display: grid;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 auto;
   place-items: center;
-  border-radius: 50%;
-}
-
-.target-icon {
-  color: #286ef1;
-  background: #dceaff;
-}
-
-.progress-icon {
-  color: #19ae8a;
-  background: #def7f0;
-}
-
-.ai-icon {
-  color: #8357ed;
-  background: #eee6ff;
-}
-
-.study-visual {
-  position: relative;
-  z-index: 1;
-  width: min(100%, 640px);
-  min-height: 350px;
-  flex: 1;
-  margin: 26px auto -42px;
-}
-
-.visual-orbit {
-  position: absolute;
-  border-radius: 50%;
-  border: 1px solid rgba(160, 191, 241, 0.24);
-}
-
-.orbit-one {
-  right: 1%;
-  bottom: 7%;
-  width: 59%;
-  aspect-ratio: 1;
-}
-
-.orbit-two {
-  right: 8%;
-  bottom: 14%;
-  width: 44%;
-  aspect-ratio: 1;
-  border-style: dashed;
-}
-
-.laptop-scene {
-  position: absolute;
-  z-index: 2;
-  right: 14%;
-  bottom: 3%;
-  width: 56%;
-}
-
-.laptop-screen {
-  position: relative;
-  min-height: 172px;
-  padding: 13px 14px;
-  border: 7px solid #15274f;
-  border-bottom-width: 10px;
-  border-radius: 9px 9px 3px 3px;
-  background: #fff;
-  box-shadow: 0 15px 30px rgba(37, 72, 142, 0.18);
-  transform: perspective(700px) rotateY(-5deg) rotateX(2deg);
-}
-
-.laptop-base {
-  width: 111%;
-  height: 12px;
-  margin-left: -5.5%;
-  border-radius: 2px 2px 14px 14px;
-  background: linear-gradient(#627cae, #304b7f);
-  box-shadow: 0 9px 15px rgba(35, 73, 142, 0.16);
-}
-
-.screen-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 9px;
-  border-bottom: 1px solid #edf1f7;
-  color: #64789e;
-  font-size: 7px;
-}
-
-.mini-logo {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  color: #2864f5;
-  font-weight: 700;
-}
-
-.screen-avatar {
-  display: grid;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  border-radius: 50%;
-  color: white;
-  background: #31b698;
-  font-size: 7px;
-}
-
-.screen-welcome {
-  display: flex;
-  justify-content: space-between;
-  margin: 11px 0 7px;
-  color: #172858;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.screen-welcome span {
-  color: #8092af;
-  font-size: 7px;
-  font-weight: 500;
-}
-
-.screen-progress {
-  padding: 7px;
-  border-radius: 5px;
-  background: #f3f7ff;
-}
-
-.screen-progress > span {
-  display: block;
-  height: 5px;
-  margin-bottom: 6px;
-  overflow: hidden;
-  border-radius: 4px;
-  background: #dbe6f7;
-}
-
-.screen-progress i {
-  display: block;
-  width: 68%;
-  height: 100%;
-  border-radius: 4px;
-  background: #31b698;
-}
-
-.screen-progress small {
-  display: flex;
-  justify-content: space-between;
-  color: #8090aa;
-  font-size: 7px;
-}
-
-.screen-progress b {
-  color: #148e6e;
-}
-
-.screen-courses {
-  display: grid;
-  gap: 5px;
-  margin-top: 7px;
-}
-
-.screen-courses > div {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.screen-courses > div > span:nth-child(2) {
-  display: grid;
-  gap: 2px;
-  flex: 1;
-}
-
-.screen-courses b {
-  color: #3f5274;
-  font-size: 7px;
-}
-
-.screen-courses small {
-  color: #91a0b8;
-  font-size: 6px;
-}
-
-.screen-courses em {
-  color: #7183a1;
-  font-size: 7px;
-  font-style: normal;
-}
-
-.course-check {
-  display: grid;
-  width: 12px;
-  height: 12px;
-  place-items: center;
-  border-radius: 50%;
-  color: white;
-  background: #31b698;
-}
-
-.course-check svg {
-  width: 8px;
-  height: 8px;
-}
-
-.course-dot {
-  width: 12px;
-  height: 12px;
-  border: 2px solid #4580f5;
-  border-radius: 50%;
-}
-
-.visual-note {
-  position: absolute;
-  z-index: 4;
-  top: 25%;
-  right: 4%;
-  display: flex;
-  gap: 8px;
-  padding: 12px 15px;
-  border: 1px solid rgba(228, 236, 249, 0.9);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #61769d;
-  font-size: 10px;
-  line-height: 1.5;
-  box-shadow: 0 12px 28px rgba(58, 95, 163, 0.1);
-}
-
-.visual-note strong {
-  color: #334e82;
-  font-weight: 650;
-}
-
-.note-spark {
-  color: #3674f5;
-  font-size: 18px;
-}
-
-.visual-path {
-  position: absolute;
-  z-index: 3;
-  top: 39%;
-  left: 47%;
-  display: flex;
-  align-items: center;
-}
-
-.visual-path > span,
-.visual-path > b,
-.visual-path > strong {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 50%;
-  color: white;
-  background: #3778f5;
-  box-shadow: 0 8px 18px rgba(55, 120, 245, 0.2);
-}
-
-.visual-path svg {
-  width: 19px;
-  height: 19px;
-}
-
-.visual-path > i {
-  width: 27px;
-  border-top: 2px dashed #93b7fb;
-}
-
-.visual-path > b {
-  width: 24px;
-  height: 24px;
-  background: #2dbb98;
-}
-
-.visual-path > strong {
   width: 42px;
   height: 42px;
-  background: #7962e9;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #1D4ED8 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }
 
-.visual-book {
-  position: absolute;
-  z-index: 3;
-  right: 2%;
-  bottom: 3%;
-  width: 18%;
-  height: 20px;
-  border: 3px solid #4378d9;
-  border-radius: 3px;
-  background: #fff;
-  box-shadow: 0 -8px 0 -2px #8dc8fb, 0 -14px 0 -5px #4384de, 0 5px 10px rgba(30, 70, 140, 0.16);
+.brand-text {
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.4px;
+  color: var(--text-primary);
 }
 
-.visual-plant {
-  position: absolute;
-  left: 5%;
-  bottom: 3%;
-  width: 48px;
-  height: 92px;
+/* Intro Content */
+.intro-content {
+  margin-bottom: 32px;
 }
 
-.visual-plant b {
-  position: absolute;
-  bottom: 0;
-  left: 12px;
-  width: 26px;
-  height: 21px;
-  border-radius: 3px 3px 8px 8px;
-  background: #4d83d9;
+.intro-badge {
+  margin-bottom: 16px;
 }
 
-.visual-plant i {
-  position: absolute;
-  bottom: 21px;
-  left: 24px;
-  width: 15px;
-  height: 35px;
-  border-radius: 100% 0 100% 0;
-  background: #51b69a;
-  transform: rotate(-36deg);
-  transform-origin: bottom;
+.intro-title {
+  margin: 0 0 16px;
+  font-size: clamp(28px, 3.2vw, 38px);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.8px;
+  color: var(--text-primary);
 }
 
-.visual-plant i:nth-child(2) {
-  left: 22px;
-  height: 43px;
-  transform: rotate(35deg) scaleX(-1);
+.intro-desc {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 
-.visual-plant i:nth-child(3) {
-  left: 22px;
-  height: 30px;
-  transform: rotate(-4deg);
+/* Features List */
+.features-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 36px;
 }
 
-/* FORM PANEL & CARD */
+.feature-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  backdrop-filter: blur(8px);
+  transition: background-color 0.2s ease;
+}
+
+.feature-item:hover {
+  background-color: rgba(255, 255, 255, 0.95);
+}
+
+.feature-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.feature-text h3 {
+  margin: 0 0 3px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.feature-text p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* Stats Strip */
+.stats-strip {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.stat-unit {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-unit strong {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--brand-primary);
+  line-height: 1.2;
+}
+
+.stat-unit span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stat-separator {
+  width: 1px;
+  height: 28px;
+  background-color: var(--border-subtle);
+}
+
+/* ==========================================================================
+   CỘT PHẢI: FORM PANEL
+   ========================================================================== */
 .form-panel {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
-  padding: 30px clamp(24px, 5vw, 68px);
-  background: linear-gradient(145deg, #f8fbff, #eff6ff);
+  padding: 40px clamp(20px, 4vw, 56px);
+  background-color: #ffffff;
   overflow-y: auto;
 }
 
-.login-card {
-  width: min(100%, 500px);
-  padding: 34px 42px 30px;
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 18px 55px rgba(47, 89, 156, 0.1);
+.verify-card-wrapper {
+  width: 100%;
+  max-width: 440px;
+}
+
+/* Mobile Brand Header */
+.mobile-brand-header {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+/* Verify Header */
+.verify-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
+  margin-bottom: 24px;
 }
 
-.card-brand-icon {
-  margin: 0 auto 10px;
-  filter: drop-shadow(0 6px 10px rgba(42, 100, 245, 0.12));
+.header-icon-wrap {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background-color: #F0FDFA;
+  border: 1px solid #CCFBF1;
+  margin-bottom: 14px;
 }
 
-.login-card h2 {
-  margin: 0;
-  color: #101d49;
-  font-size: 25px;
-  letter-spacing: 0;
+.verify-title {
+  margin: 0 0 6px;
+  font-size: 24px;
   font-weight: 750;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
 }
 
-.card-subtitle {
-  margin: 8px 0 24px;
-  color: #6980a4;
-  font-size: 13px;
+.verify-subtitle {
+  margin: 0 0 8px;
+  font-size: 14px;
   line-height: 1.5;
+  color: var(--text-secondary);
 }
 
-.email-highlight {
-  color: #1a4cd2;
-  font-weight: 700;
+.email-chip {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  background-color: #F1F5F9;
+  border: 1px solid var(--border-subtle);
+  color: var(--brand-primary);
+  font-size: 13.5px;
   word-break: break-all;
 }
 
-.login-form {
-  display: grid;
-  gap: 14px;
-  text-align: left;
-}
-
-.field-item {
-  display: grid;
-  gap: 5px;
-}
-
-.field-label {
-  color: #435b80;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.otp-input {
-  width: 100%;
-  height: 54px;
-  text-align: center;
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: 10px;
-  border: 1.5px solid #d0dbe9;
-  border-radius: 8px;
-  color: #172858;
-  background: #fff;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.otp-input:focus {
-  border-color: #2864f5;
-  outline: 0;
-  box-shadow: 0 0 0 3px rgba(40, 100, 245, 0.12);
-}
-
-.code-timer {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: #697d9e;
-  text-align: center;
-}
-
-.code-timer.expired {
-  color: #e11d48;
-  font-weight: 600;
-}
-
-.form-error-banner {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: #fff0f0;
-  border: 1px solid #fecaca;
-  color: #dc2626;
-  font-size: 12px;
-  line-height: 1.5;
-  text-align: center;
-}
-
-.form-notice-banner {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  color: #1d4ed8;
-  font-size: 12px;
-  line-height: 1.5;
-  text-align: center;
-}
-
-.submit-button {
+/* Verify Form */
+.verify-form {
   display: flex;
-  height: 50px;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.otp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   align-items: center;
+}
+
+.otp-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 6 Ô Nhập OTP */
+.otp-boxes-grid {
+  display: flex;
+  gap: 10px;
   justify-content: center;
-  gap: 12px;
-  margin-top: 4px;
-  border: 0;
-  border-radius: 8px;
-  background: #2d68f3;
-  box-shadow: 0 7px 15px rgba(45, 104, 243, 0.18);
-  color: white;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 650;
-  cursor: pointer;
-  text-decoration: none;
-  transition: background 0.15s ease, transform 0.15s ease;
+  width: 100%;
 }
 
-.submit-button:hover:not(:disabled) {
-  background: #2059df;
+.otp-box {
+  width: clamp(42px, 11vw, 54px);
+  height: clamp(48px, 12vw, 60px);
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background-color: #ffffff;
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: all 0.15s ease;
+  caret-color: var(--brand-primary);
 }
 
-.submit-button:disabled {
+.otp-box:focus {
+  outline: none;
+  border-color: var(--brand-primary);
+  box-shadow: var(--shadow-focus-ring);
+  background-color: #ffffff;
+}
+
+.otp-box.is-filled {
+  border-color: var(--brand-primary);
+  background-color: #F0FDFA;
+}
+
+.otp-box.is-error {
+  border-color: #EF4444;
+  background-color: #FEF2F2;
+  color: #DC2626;
+}
+
+.otp-box.is-expired {
+  border-color: #E2E8F0;
+  background-color: #F8FAFC;
   opacity: 0.7;
   cursor: not-allowed;
 }
 
-.verify-footer-actions {
+/* Timer Badge */
+.timer-badge {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid #eef2f7;
-  font-size: 12.5px;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background-color: #F8FAFC;
+  border: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
-.resend-btn {
-  border: 0;
-  background: transparent;
-  color: #2864f5;
-  font-weight: 600;
+.timer-badge strong {
+  color: var(--brand-primary);
+  font-weight: 700;
+}
+
+.timer-badge.is-warning {
+  background-color: #FFFBEB;
+  border-color: #FDE68A;
+  color: #B45309;
+}
+
+.timer-badge.is-warning strong {
+  color: #B45309;
+}
+
+.timer-badge.is-expired {
+  background-color: #FEF2F2;
+  border-color: #FECACA;
+  color: #DC2626;
+  font-weight: 500;
+}
+
+/* Banners */
+.verify-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: #FEF2F2;
+  border: 1px solid #FECACA;
+}
+
+.error-banner-icon {
+  color: #DC2626;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.error-banner-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #991B1B;
+}
+
+.verify-notice-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: #F0FDF4;
+  border: 1px solid #BBF7D0;
+}
+
+.notice-banner-icon {
+  color: #16A34A;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.notice-banner-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #166534;
+}
+
+/* Submit Button */
+.submit-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 48px;
+  margin-top: 4px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #1D4ED8 100%);
+  color: #ffffff;
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
   cursor: pointer;
-  padding: 0;
-}
-
-.resend-btn:disabled {
-  color: #94a3b8;
-  cursor: not-allowed;
-}
-
-.change-email-link {
-  color: #64748b;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   text-decoration: none;
 }
 
-.change-email-link:hover {
+.submit-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+}
+
+.submit-action-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.submit-action-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Footer Actions */
+.verify-footer-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.resend-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--brand-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.resend-action-btn:hover:not(:disabled) {
+  color: var(--brand-primary-hover);
   text-decoration: underline;
 }
 
+.resend-action-btn:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.change-email-link {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.change-email-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+/* Verified State */
 .verified-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 10px 0;
+  padding: 16px 0;
 }
 
 .success-icon-wrap {
   display: grid;
   place-items: center;
-  width: 68px;
-  height: 68px;
+  width: 76px;
+  height: 76px;
   border-radius: 50%;
-  background: #ecfdf5;
-  color: #10b981;
-  margin-bottom: 16px;
+  background: linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%);
+  border: 2px solid #BBF7D0;
+  margin-bottom: 20px;
+  box-shadow: 0 8px 24px rgba(22, 163, 74, 0.15);
 }
 
-.secure-note {
+.verified-title {
+  margin: 0 0 10px;
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+
+.verified-subtitle {
+  margin: 0 0 24px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 360px;
+}
+
+.success-action-link {
+  margin-top: 8px;
+}
+
+/* Trust Indicator */
+.trust-indicator {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 15px 0 0;
-  color: #8a9bb4;
-  font-size: 11px;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
-@media (max-width: 980px) {
-  .login-page {
-    grid-template-columns: minmax(0, 0.9fr) minmax(420px, 1.1fr);
+/* ==========================================================================
+   RESPONSIVE (TABLET & MOBILE)
+   ========================================================================== */
+@media (max-width: 900px) {
+  .verify-page {
+    grid-template-columns: 1fr;
   }
-  .intro-panel {
-    padding-left: 32px;
-    padding-right: 24px;
-  }
-  .intro-copy {
-    margin-top: 50px;
-  }
-  .intro-copy h1 {
-    font-size: 33px;
-  }
-  .benefit {
-    padding: 0 10px;
-    gap: 7px;
-    font-size: 11px;
-  }
-  .benefit-icon {
-    width: 34px;
-    height: 34px;
-  }
-  .form-panel {
-    padding: 24px 20px;
-  }
-  .login-card {
-    padding: 28px 24px;
-  }
-}
 
-@media (max-width: 720px) {
-  .login-page {
-    display: block;
-    width: 100%;
-    min-width: 0;
-    overflow: hidden;
-    background: #f2f7ff;
-  }
   .intro-panel {
-    width: 100%;
-    min-width: 0;
-    min-height: 0;
-    box-sizing: border-box;
-    padding: 20px 23px 28px;
-  }
-  .intro-copy {
-    width: 100%;
-    min-width: 0;
-    margin-top: 30px;
-  }
-  .study-visual {
     display: none;
   }
+
   .form-panel {
-    width: 100%;
-    min-width: 0;
-    min-height: 0;
-    box-sizing: border-box;
-    padding: 24px 16px 28px;
-    background: #f2f7ff;
+    padding: 32px 20px;
+    align-items: flex-start;
   }
-  .login-card {
-    width: 100%;
-    max-width: 450px;
-    min-width: 0;
-    box-sizing: border-box;
-    padding: 24px 20px;
-    border-radius: 12px;
+
+  .mobile-brand-header {
+    display: flex;
+  }
+
+  .verify-card-wrapper {
+    max-width: 100%;
+  }
+
+  .otp-boxes-grid {
+    gap: 6px;
+  }
+
+  .otp-box {
+    width: 44px;
+    height: 52px;
+    font-size: 20px;
   }
 }
 </style>

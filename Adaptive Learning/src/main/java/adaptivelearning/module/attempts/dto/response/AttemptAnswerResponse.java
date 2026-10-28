@@ -19,7 +19,7 @@ public class AttemptAnswerResponse {
     @Schema(description = "Question ID", example = "10")
     private Long questionId;
 
-    @Schema(description = "User's answer as JSON", example = "{\"selected\":\"A\"}")
+    @Schema(description = "User's answer as a JSON scalar; for example, a selected option label", example = "\"A\"")
     private String userAnswerJson;
 
     @Schema(description = "Whether the answer is correct; null for essay/pending grading", nullable = true)

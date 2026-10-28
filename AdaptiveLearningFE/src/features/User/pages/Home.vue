@@ -1,12 +1,13 @@
 <script setup>
-import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
-  BarChart3, Bell, BookMarked, BookOpen, CheckCircle2, ChevronDown, CircleHelp, Crown,
+  BarChart3, Bell, BookMarked, BookOpen, Brain, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Crown,
   GraduationCap, Headphones, Info, KeyRound, LayoutDashboard, LockKeyhole, LogOut, Menu, Search, Settings, Sparkles, Target, User, X,
 } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import { learningService } from '@/services/learningService'
+import { notificationService } from '@/services/notificationService'
 import { homeContextKey } from '../composables/homeContext'
 import {
   DropdownMenu,
@@ -48,6 +49,12 @@ const pageError = ref('')
 const selectedCertificateId = ref('')
 const showPlanForm = ref(false)
 const creatingPlan = ref(false)
+const expandedPlanId = ref(null)
+const planTasks = ref([])
+const planSummary = ref(null)
+const planDetailsLoading = ref(false)
+const updatingTaskId = ref(null)
+const updatingPlanId = ref(null)
 const planForm = reactive({ title: '', targetScore: '', examDate: '', hoursPerWeek: 5 })
 const attempt = ref(null)
 const attemptQuestions = ref([])
@@ -55,6 +62,7 @@ const answers = reactive({})
 const result = ref(null)
 const secondsLeft = ref(0)
 const submitting = ref(false)
+const timerSubmitAttempted = ref(false)
 const saveState = ref('')
 const saveTimers = new Map()
 const conversations = ref([])
@@ -64,6 +72,21 @@ const tutorPrompt = ref('')
 const askingTutor = ref(false)
 const mobileMenuOpen = ref(false)
 const profileMenuOpen = ref(false)
+const sidebarCollapsed = ref(localStorage.getItem('adaptive-sidebar-collapsed') === 'true')
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem('adaptive-sidebar-collapsed', String(sidebarCollapsed.value))
+}
+
+const currentViewTitle = computed(() => {
+  const item = navigation.find((n) => n.id === activeView.value)
+  if (item) return item.label
+  if (activeView.value === 'taking') return 'Đang làm bài thi'
+  if (activeView.value === 'result') return 'Kết quả bài thi'
+  if (activeView.value === 'history') return 'Lịch sử làm bài'
+  return 'Adaptive Learning'
+})
 const userStatus = ref('ready')
 const statusLabel = computed(() => {
   if (userStatus.value === 'ready') return 'Sẵn sàng'
@@ -77,38 +100,98 @@ function cycleStatus() {
 }
 
 const notificationsMuted = ref(false)
+const notifications = ref([])
+const unreadNotificationCount = ref(0)
+const notificationPanelOpen = ref(false)
+const notificationsLoading = ref(false)
+const notificationsError = ref('')
+let notificationStreamController
+
 function toggleNotifications() {
   notificationsMuted.value = !notificationsMuted.value
   toast.info(notificationsMuted.value ? 'Đã tắt thông báo' : 'Đã bật thông báo')
 }
 
+async function loadNotifications() {
+  notificationsLoading.value = true
+  notificationsError.value = ''
+  try {
+    const inbox = await notificationService.inbox()
+    notifications.value = Array.isArray(inbox?.items) ? inbox.items : []
+    unreadNotificationCount.value = Number(inbox?.unreadCount) || 0
+  } catch (error) {
+    notificationsError.value = error?.response?.data?.responseMessage || 'Chưa tải được thông báo.'
+  } finally {
+    notificationsLoading.value = false
+  }
+}
+
+function receiveNotification(notification) {
+  if (!notification?.notificationId) return
+  if (notifications.value.some((item) => item.notificationId === notification.notificationId)) return
+  notifications.value = [notification, ...notifications.value].slice(0, 20)
+  if (!notification.read) unreadNotificationCount.value += 1
+}
+
+function waitForNotificationRetry(signal, milliseconds) {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const onAbort = () => {
+      window.clearTimeout(timer)
+      resolve()
+    }
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, milliseconds)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function connectNotificationStream(signal) {
+  let retryDelay = 1000
+  while (!signal.aborted) {
+    try {
+      await notificationService.listen(receiveNotification, signal)
+      retryDelay = 1000
+    } catch {
+      if (signal.aborted) return
+    }
+    if (!signal.aborted) {
+      await loadNotifications()
+      await waitForNotificationRetry(signal, retryDelay)
+      retryDelay = Math.min(retryDelay * 2, 30000)
+    }
+  }
+}
+
+async function openNotification(notification) {
+  notificationPanelOpen.value = false
+  if (!notification.read) {
+    try {
+      const updated = await notificationService.markRead(notification.notificationId)
+      notifications.value = notifications.value.map((item) =>
+        item.notificationId === updated.notificationId ? updated : item)
+      unreadNotificationCount.value = Math.max(0, unreadNotificationCount.value - 1)
+    } catch {
+      // Keep navigation available if marking the item read fails.
+    }
+  }
+  if (notification.type === 'PAYMENT_SUCCEEDED' && notification.paymentId) {
+    router.push({ path: '/payment/success', query: { paymentId: notification.paymentId } })
+  }
+}
+
+async function openRecommendationsFromBell() {
+  notificationPanelOpen.value = false
+  showView('dashboard')
+  await nextTick()
+  document.getElementById('recommendations')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
 const supportModalOpen = ref(false)
 const aboutModalOpen = ref(false)
 const passwordModalOpen = ref(false)
-const passwordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
-const passwordError = ref('')
-const changingPassword = ref(false)
-
-function handleChangePassword() {
-  if (!passwordForm.oldPassword || !passwordForm.newPassword) {
-    passwordError.value = 'Vui lòng nhập đầy đủ thông tin.'
-    return
-  }
-  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-    passwordError.value = 'Mật khẩu xác nhận không khớp.'
-    return
-  }
-  changingPassword.value = true
-  passwordError.value = ''
-  setTimeout(() => {
-    toast.success('Đổi mật khẩu thành công!')
-    passwordModalOpen.value = false
-    passwordForm.oldPassword = ''
-    passwordForm.newPassword = ''
-    passwordForm.confirmPassword = ''
-    changingPassword.value = false
-  }, 400)
-}
 
 let clock
 
@@ -130,7 +213,7 @@ watch(() => route.meta.view, (view) => {
 
 const navigation = [
   { id: 'dashboard', label: 'Trang chủ', icon: LayoutDashboard },
-  { id: 'plans', label: 'Lộ trình học', icon: BookMarked },
+  { id: 'plans', label: 'Kế hoạch học', icon: BookMarked },
   { id: 'courses', label: 'Khóa học', icon: BookOpen },
   { id: 'tests', label: 'Bài kiểm tra', icon: CheckCircle2 },
   { id: 'progress', label: 'Thống kê tiến độ', icon: BarChart3 },
@@ -150,8 +233,9 @@ const filteredExams = computed(() => publishedExams.value.filter((exam) => {
 const activePlans = computed(() => plans.value.filter((plan) => plan.status === 'ACTIVE'))
 const activePlan = computed(() => activePlans.value[0] || null)
 const activeRecommendations = computed(() => recommendations.value.filter((item) => item.status !== 'COMPLETED'))
+const activeAttempts = computed(() => history.value.filter((item) => item.status === 'IN_PROGRESS'))
 const scoreHistory = computed(() => history.value
-  .filter((item) => item.status === 'SUBMITTED' && item.score != null)
+  .filter((item) => ['GRADED', 'VIOLATED'].includes(item.status) && item.score != null)
   .slice(0, 7)
   .reverse())
 const scoreTrend = computed(() => scoreHistory.value.map((item, index) => ({
@@ -169,7 +253,8 @@ const averageScorePercent = computed(() => {
   if (progress.value?.averageScore == null || !maxScore) return 0
   return Math.max(0, Math.min(100, Number(progress.value.averageScore) / maxScore * 100))
 })
-const doneCount = computed(() => history.value.filter((item) => item.status === 'SUBMITTED').length)
+const doneCount = computed(() => history.value.filter((item) =>
+  ['GRADED', 'VIOLATED'].includes(item.status) && item.score != null).length)
 const completedPlanRatio = computed(() => activePlan.value?.taskCount
   ? Math.round((activePlan.value.completedCount / activePlan.value.taskCount) * 100)
   : 0)
@@ -194,15 +279,17 @@ provide(homeContextKey, reactive({
   activeView, searchQuery, exams, examTemplates, entitlements, creatingExamTemplateId, practiceExamNotice, isPremium,
   history, recommendations, certificates, plans,
   progress, loading, pageError, selectedCertificateId, showPlanForm, creatingPlan,
+  expandedPlanId, planTasks, planSummary, planDetailsLoading, updatingTaskId, updatingPlanId,
   planForm, attempt, attemptQuestions, answers, result, secondsLeft, submitting,
   saveState, conversations, currentConversation, messages, tutorPrompt, askingTutor,
   userStore, userName, greetingName, initials, publishedExams, filteredExams,
-  activePlans, activePlan, activeRecommendations, scoreTrend, averageScore,
+  activePlans, activePlan, activeRecommendations, activeAttempts, scoreTrend, averageScore,
   averageScorePercent, doneCount, completedPlanRatio, greeting, selectedCertificate,
   masterySkills, formattedTimeLeft,
   showView, loadProgress, formatDate, recommendationTitle, certificateProgress,
-  markRecommendationStarted, createPlan, selectConversation, askTutor, startExam, createPracticeExam,
-  parseOptions, saveAnswer, leaveAttempt, submitExam, logout, localizeStatus,
+  markRecommendationStarted, createPlan, loadPlanDetails, updatePlanTask, completePlan, archivePlan, selectConversation, askTutor, startExam, createPracticeExam,
+  parseOptions, saveAnswer, resumeAttempt, leaveAttempt, submitExam, logout, localizeStatus,
+  userStatus, notificationsMuted, cycleStatus, toggleNotifications,
 }))
 
 function asList(value) {
@@ -347,11 +434,90 @@ async function createPlan() {
     plans.value = [created, ...plans.value]
     Object.assign(planForm, { title: '', targetScore: '', examDate: '', hoursPerWeek: 5 })
     showPlanForm.value = false
+    await loadPlanDetails(created)
   } catch (error) {
-    pageError.value = error?.response?.data?.responseMessage || 'Không thể tạo lộ trình học.'
+    pageError.value = error?.response?.data?.responseMessage || 'Không thể tạo kế hoạch học.'
   } finally {
     creatingPlan.value = false
   }
+}
+
+async function loadPlanDetails(plan) {
+  if (expandedPlanId.value === plan.planId) {
+    expandedPlanId.value = null
+    planTasks.value = []
+    planSummary.value = null
+    return
+  }
+  expandedPlanId.value = plan.planId
+  planDetailsLoading.value = true
+  pageError.value = ''
+  try {
+    const [tasksResult, summaryResult] = await Promise.all([
+      learningService.planTasks(plan.planId),
+      learningService.planSummary(plan.planId),
+    ])
+    planTasks.value = asList(tasksResult)
+    planSummary.value = summaryResult || null
+  } catch (error) {
+    pageError.value = error?.response?.data?.responseMessage || 'Không thể tải nhiệm vụ của lộ trình.'
+    planTasks.value = []
+    planSummary.value = null
+  } finally {
+    planDetailsLoading.value = false
+  }
+}
+
+async function updatePlanTask(task, status) {
+  updatingTaskId.value = task.taskId
+  pageError.value = ''
+  try {
+    const updated = await learningService.updatePlanTask(task.taskId, { status })
+    planTasks.value = planTasks.value.map((item) => item.taskId === updated.taskId ? updated : item)
+    await refreshPlan(expandedPlanId.value)
+  } catch (error) {
+    pageError.value = error?.response?.data?.responseMessage || 'Không thể cập nhật nhiệm vụ.'
+  } finally {
+    updatingTaskId.value = null
+  }
+}
+
+async function completePlan(planId) {
+  updatingPlanId.value = planId
+  pageError.value = ''
+  try {
+    const updated = await learningService.completePlan(planId)
+    plans.value = plans.value.map((plan) => plan.planId === updated.planId ? updated : plan)
+  } catch (error) {
+    pageError.value = error?.response?.data?.responseMessage || 'Hoàn tất lộ trình thất bại. Hãy hoàn thành hoặc bỏ qua các nhiệm vụ còn lại.'
+  } finally {
+    updatingPlanId.value = null
+  }
+}
+
+async function archivePlan(planId) {
+  updatingPlanId.value = planId
+  pageError.value = ''
+  try {
+    const updated = await learningService.archivePlan(planId)
+    plans.value = plans.value.map((plan) => plan.planId === updated.planId ? updated : plan)
+    if (expandedPlanId.value === planId) expandedPlanId.value = null
+  } catch (error) {
+    pageError.value = error?.response?.data?.responseMessage || 'Không thể lưu trữ lộ trình.'
+  } finally {
+    updatingPlanId.value = null
+  }
+}
+
+async function refreshPlan(planId) {
+  const [tasksResult, summaryResult, plansResult] = await Promise.all([
+    learningService.planTasks(planId),
+    learningService.planSummary(planId),
+    learningService.plans(),
+  ])
+  planTasks.value = asList(tasksResult)
+  planSummary.value = summaryResult || null
+  plans.value = asList(plansResult)
 }
 
 async function loadConversations() {
@@ -404,6 +570,7 @@ function parseOptions(question) {
 function restoreAnswer(raw) {
   try {
     const value = JSON.parse(raw)
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
     return value?.selected ?? value?.text ?? value?.value ?? ''
   } catch { return raw || '' }
 }
@@ -412,35 +579,103 @@ function makeAnswer(question) {
   const value = typeof answers[question.questionId] === 'string' ? answers[question.questionId].trim() : answers[question.questionId]
   return {
     questionId: question.questionId,
-    userAnswerJson: JSON.stringify(parseOptions(question).length ? { selected: value } : { text: value }),
+    userAnswerJson: JSON.stringify(value ?? ''),
     timeSpentSeconds: question.estimatedTimeSeconds || 0,
   }
 }
 
+function clearAnswerTimers() {
+  for (const timer of saveTimers.values()) clearTimeout(timer)
+  saveTimers.clear()
+}
+
+async function finishExpiredAttempt() {
+  clearInterval(clock)
+  clearAnswerTimers()
+  attempt.value = null
+  attemptQuestions.value = []
+  activeView.value = 'tests'
+  await loadDashboard()
+  pageError.value = 'Lượt thi đã hết thời gian. Kết quả của lượt này chưa được chấm tự động.'
+}
+
+async function activateAttempt(attemptDetail, examDetail) {
+  if (attemptDetail.status !== 'IN_PROGRESS') {
+    throw new Error(`Lượt thi này không còn ở trạng thái đang làm (${localizeStatus(attemptDetail.status)}).`)
+  }
+  clearInterval(clock)
+  clearAnswerTimers()
+  attempt.value = attemptDetail
+  result.value = null
+  for (const key of Object.keys(answers)) delete answers[key]
+  attemptQuestions.value = await Promise.all((examDetail?.questions || []).map(async (mapping) => {
+    const question = await learningService.question(mapping.questionId)
+    return {
+      ...question,
+      questionOrder: mapping.questionOrder,
+      sectionName: mapping.sectionName,
+      points: mapping.pointsOverride ?? question.points,
+    }
+  }))
+  for (const item of attemptDetail.answers || []) answers[item.questionId] = restoreAnswer(item.userAnswerJson)
+  secondsLeft.value = Math.max(0, Number(attemptDetail.timeRemainingSeconds ?? 0))
+  timerSubmitAttempted.value = false
+  activeView.value = 'taking'
+  if (secondsLeft.value > 0) {
+    clock = setInterval(() => {
+      if (secondsLeft.value > 0) secondsLeft.value -= 1
+      if (!secondsLeft.value && attempt.value && !submitting.value && !timerSubmitAttempted.value) {
+        timerSubmitAttempted.value = true
+        submitExam()
+      }
+    }, 1000)
+  } else {
+    saveState.value = 'Thời gian làm bài đã hết.'
+  }
+}
+
 async function startExam(exam) {
+  if (loading.value || attempt.value) return
   loading.value = true
   pageError.value = ''
   result.value = null
+  clearAnswerTimers()
   for (const key of Object.keys(answers)) delete answers[key]
   try {
     const examDetail = await learningService.exam(exam.examId)
     const started = await learningService.startAttempt(exam.examId)
     attempt.value = started
-    attemptQuestions.value = await Promise.all((examDetail?.questions || []).map(async (mapping) => ({
-      ...await learningService.question(mapping.questionId),
-      questionOrder: mapping.questionOrder,
-      sectionName: mapping.sectionName,
-    })))
     const saved = await learningService.attempt(started.attemptId)
-    for (const item of saved?.answers || []) answers[item.questionId] = restoreAnswer(item.userAnswerJson)
-    secondsLeft.value = saved?.timeRemainingSeconds || (exam.durationMinutes || 0) * 60
-    activeView.value = 'taking'
-    clock = setInterval(() => {
-      if (secondsLeft.value > 0) secondsLeft.value -= 1
-      if (!secondsLeft.value && attempt.value && !submitting.value) submitExam()
-    }, 1000)
+    await activateAttempt(saved, examDetail)
   } catch (error) {
     pageError.value = error?.response?.data?.responseMessage || error?.message || 'Không thể bắt đầu bài thi.'
+    if (attempt.value) {
+      clearInterval(clock)
+      clearAnswerTimers()
+      attempt.value = null
+      attemptQuestions.value = []
+      await loadDashboard()
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+async function resumeAttempt(historyItem) {
+  if (loading.value || attempt.value) return
+  loading.value = true
+  pageError.value = ''
+  try {
+    const saved = await learningService.attempt(historyItem.attemptId)
+    const examDetail = await learningService.exam(saved.examId)
+    await activateAttempt(saved, examDetail)
+  } catch (error) {
+    pageError.value = error?.response?.data?.responseMessage || error?.message || 'Không thể tiếp tục bài thi.'
+    clearInterval(clock)
+    clearAnswerTimers()
+    attempt.value = null
+    attemptQuestions.value = []
+    await loadDashboard()
   } finally {
     loading.value = false
   }
@@ -450,11 +685,18 @@ function saveAnswer(question) {
   if (!attempt.value) return
   saveState.value = 'Đang lưu đáp án...'
   clearTimeout(saveTimers.get(question.questionId))
+  const attemptId = attempt.value.attemptId
   saveTimers.set(question.questionId, setTimeout(async () => {
     try {
-      await learningService.saveAnswer(attempt.value.attemptId, makeAnswer(question))
+      await learningService.saveAnswer(attemptId, makeAnswer(question))
       saveState.value = 'Đã lưu đáp án'
-    } catch { saveState.value = 'Đáp án sẽ được gửi khi nộp bài' }
+    } catch (error) {
+      if (error?.response?.data?.responseCode === 'ATTEMPT-ERR-410') {
+        await finishExpiredAttempt()
+        return
+      }
+      saveState.value = 'Đáp án sẽ được gửi khi nộp bài'
+    }
   }, 350))
 }
 
@@ -462,7 +704,7 @@ async function submitExam() {
   if (!attempt.value || submitting.value) return
   submitting.value = true
   pageError.value = ''
-  for (const timer of saveTimers.values()) clearTimeout(timer)
+  clearAnswerTimers()
   try {
     result.value = await learningService.submitAttempt(attempt.value.attemptId, attemptQuestions.value
       .filter((question) => answers[question.questionId] !== undefined && answers[question.questionId] !== '')
@@ -472,6 +714,10 @@ async function submitExam() {
     activeView.value = 'result'
     await loadDashboard()
   } catch (error) {
+    if (error?.response?.data?.responseCode === 'ATTEMPT-ERR-410') {
+      await finishExpiredAttempt()
+      return
+    }
     pageError.value = error?.response?.data?.responseMessage || 'Không thể nộp bài.'
   } finally { submitting.value = false }
 }
@@ -489,6 +735,7 @@ async function leaveAttempt() {
     if (!shouldLeave) return
   }
   clearInterval(clock)
+  clearAnswerTimers()
   attempt.value = null
   activeView.value = 'tests'
 }
@@ -498,101 +745,268 @@ function logout() {
   router.push('/login')
 }
 
-onMounted(loadDashboard)
+onMounted(() => {
+  void loadDashboard()
+  void loadNotifications().finally(() => {
+    notificationStreamController = new AbortController()
+    void connectNotificationStream(notificationStreamController.signal)
+  })
+})
 onUnmounted(() => {
   clearInterval(clock)
   for (const timer of saveTimers.values()) clearTimeout(timer)
+  notificationStreamController?.abort()
 })
 </script>
 
 <template>
   <main class="app-shell">
-    <aside class="sidebar" :class="{ 'sidebar-open': mobileMenuOpen }">
-      <a class="sidebar-brand" href="/home"><span class="brand-symbol"><GraduationCap :size="28" /></span><span>Adaptive Learning</span></a>
-      <nav class="side-nav" aria-label="Điều hướng chính">
-        <button v-for="item in navigation" :key="item.id" :class="['side-link', { selected: activeView === item.id || (item.id === 'tests' && ['taking', 'result'].includes(activeView)), 'side-link-locked': item.id === 'tutor' && !isPremium }]" :aria-label="item.id === 'tutor' && !isPremium ? 'Trợ lý AI, yêu cầu Premium' : item.label" @click="showView(item.id)"><component :is="item.icon" :size="19" :stroke-width="1.9" /><span>{{ item.label }}</span><LockKeyhole v-if="item.id === 'tutor' && !isPremium" :size="14" /></button>
-      </nav>
-      <div class="sidebar-quote"><span class="quote-icon"><Target :size="22" /></span><strong>Học hôm nay,<br>kiến tạo tương lai</strong><p>“Mỗi bước nhỏ đều là một tiến bộ lớn.”</p><div class="quote-mountain"><span></span><i></i><b>⚑</b></div></div>
-      <div class="sidebar-bottom"><span class="connection-dot"></span><span>Adaptive Learning</span><span class="version">Học tập cá nhân hóa</span></div>
+    <aside class="sidebar" :class="{ 'sidebar-open': mobileMenuOpen, 'sidebar-collapsed': sidebarCollapsed }">
+      <div class="sidebar-top">
+        <a class="sidebar-brand" href="/home" @click.prevent="showView('dashboard')">
+          <span class="brand-symbol">
+            <GraduationCap :size="24" :stroke-width="2.2" />
+          </span>
+          <div v-if="!sidebarCollapsed" class="brand-info">
+            <span class="brand-name">Adaptive Learning</span>
+            <span class="brand-badge">AI EdTech</span>
+          </div>
+        </a>
+        <button
+          class="mobile-close-btn"
+          aria-label="Đóng thanh điều hướng"
+          @click="mobileMenuOpen = false"
+        >
+          <X :size="18" />
+        </button>
+      </div>
+
+      <div class="nav-section-wrap">
+        <span v-if="!sidebarCollapsed" class="nav-section-title">HỌC TẬP & LUYỆN THI</span>
+        <nav class="side-nav" aria-label="Điều hướng chính">
+          <button
+            v-for="item in navigation"
+            :key="item.id"
+            :class="[
+              'side-link',
+              {
+                selected: activeView === item.id || (item.id === 'tests' && ['taking', 'result'].includes(activeView)),
+                'side-link-locked': item.id === 'tutor' && !isPremium,
+              },
+            ]"
+            :title="sidebarCollapsed ? item.label : undefined"
+            :aria-label="item.id === 'tutor' && !isPremium ? `${item.label}, yêu cầu Premium` : item.label"
+            @click="showView(item.id)"
+          >
+            <component :is="item.icon" :size="19" :stroke-width="2" class="side-link-icon" />
+            <span v-if="!sidebarCollapsed" class="side-link-text">{{ item.label }}</span>
+            <span v-if="item.id === 'tutor' && !sidebarCollapsed" class="ai-tag-pill">AI</span>
+            <LockKeyhole v-if="item.id === 'tutor' && !isPremium" :size="14" class="side-link-lock" />
+          </button>
+        </nav>
+      </div>
+
+      <!-- Card trợ lý AI cá nhân hóa -->
+      <div v-if="!sidebarCollapsed" class="sidebar-ai-card">
+        <div class="ai-card-badge">
+          <Sparkles :size="12" class="text-ai-accent" />
+          <span>Gia sư AI 24/7</span>
+        </div>
+        <strong class="ai-card-title">Học tập thích ứng thông minh</strong>
+        <p class="ai-card-desc">Tự động phát hiện lỗ hổng và giải đáp bài tập theo thời gian thực.</p>
+        <button
+          type="button"
+          class="ai-card-action-btn"
+          @click="showView('tutor')"
+        >
+          Trò chuyện ngay
+        </button>
+      </div>
+
+      <!-- Chân thanh sidebar: Nút thu gọn & Trạng thái hệ thống -->
+      <div class="sidebar-footer">
+        <button
+          type="button"
+          class="sidebar-collapse-btn"
+          :title="sidebarCollapsed ? 'Mở rộng thanh bên' : 'Thu gọn thanh bên'"
+          :aria-label="sidebarCollapsed ? 'Mở rộng thanh bên' : 'Thu gọn thanh bên'"
+          @click="toggleSidebar"
+        >
+
+          <ChevronRight v-if="sidebarCollapsed" :size="18" />
+          <ChevronLeft v-else :size="18" />
+          <span v-if="!sidebarCollapsed">Thu gọn thanh bên</span>
+        </button>
+
+        <div v-if="!sidebarCollapsed" class="sidebar-system-status">
+          <span class="status-live-indicator"></span>
+          <span>Adaptive AI • v2.4</span>
+        </div>
+      </div>
     </aside>
 
-    <section class="workspace">
+    <section class="workspace" :class="{ 'workspace-collapsed': sidebarCollapsed }">
       <header class="topbar">
-        <button class="mobile-menu-button" :aria-label="mobileMenuOpen ? 'Đóng menu' : 'Mở menu'" @click="mobileMenuOpen = !mobileMenuOpen"><X v-if="mobileMenuOpen" :size="20" /><Menu v-else :size="20" /></button>
-        <RouterLink v-if="!isPremium" to="/pricing" class="topbar-upgrade"><Crown :size="15" />Nâng cấp</RouterLink>
-        <label class="global-search"><Search :size="18" /><input v-model="searchQuery" type="search" placeholder="Tìm kiếm khóa học, bài học, kỹ năng..." aria-label="Tìm kiếm"></label>
-        <button class="notification-button" title="Xem gợi ý học tập" aria-label="Xem gợi ý học tập" @click="showView('dashboard'); $nextTick(() => document.getElementById('recommendations')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))"><Bell :size="19" /><span v-if="activeRecommendations.length" class="notification-dot"></span></button>
-        <DropdownMenu v-model:open="profileMenuOpen" align="end" :side-offset="8">
-          <template #trigger>
-            <button class="profile-header-btn" type="button" aria-label="Mở menu tài khoản">
-              <span class="profile-avatar-wrap">
-                <span class="avatar">{{ initials }}</span>
-                <span class="avatar-status-dot" :class="userStatus"></span>
-              </span>
-              <strong class="profile-header-name">{{ userName }}</strong>
-              <ChevronDown :size="15" class="profile-header-chevron" />
-            </button>
-          </template>
+        <div class="topbar-left">
+          <button
+            class="mobile-menu-button"
+            :aria-label="mobileMenuOpen ? 'Đóng menu' : 'Mở menu'"
+            @click="mobileMenuOpen = !mobileMenuOpen"
+          >
+            <X v-if="mobileMenuOpen" :size="20" />
+            <Menu v-else :size="20" />
+          </button>
 
-          <div class="user-custom-menu">
-            <!-- TRẠNG THÁI -->
-            <div class="menu-control-row">
-              <span class="menu-control-label">TRẠNG THÁI</span>
-              <button type="button" class="menu-status-badge" @click.stop="cycleStatus" title="Nhấp để đổi trạng thái">
-                <span class="status-live-dot" :class="userStatus"></span>
-                <span class="status-live-text">{{ statusLabel }}</span>
-                <ChevronDown :size="13" class="status-live-chevron" />
-              </button>
-            </div>
-
-            <!-- TẮT THÔNG BÁO -->
-            <div class="menu-control-row">
-              <span class="menu-control-label">TẮT THÔNG BÁO</span>
-              <button
-                type="button"
-                role="switch"
-                :aria-checked="notificationsMuted"
-                class="menu-switch"
-                :class="{ active: notificationsMuted }"
-                @click.stop="toggleNotifications"
-                aria-label="Bật hoặc tắt thông báo"
-              >
-                <span class="menu-switch-thumb"></span>
-              </button>
-            </div>
-
-            <DropdownMenuSeparator />
-
-            <!-- MENU ITEMS -->
-            <DropdownMenuItem @select="showView('settings')">
-              <template #icon><User :size="17" /></template>
-              {{ userStore.state.role === 'ROLE_ADMIN' ? 'Thông tin cán bộ' : 'Thông tin cá nhân' }}
-            </DropdownMenuItem>
-
-            <DropdownMenuItem @select="passwordModalOpen = true">
-              <template #icon><KeyRound :size="17" /></template>
-              Đổi mật khẩu
-            </DropdownMenuItem>
-
-            <DropdownMenuItem @select="supportModalOpen = true">
-              <template #icon><Headphones :size="17" /></template>
-              Hỗ trợ
-            </DropdownMenuItem>
-
-            <DropdownMenuItem @select="aboutModalOpen = true">
-              <template #icon><Info :size="17" /></template>
-              Giới thiệu
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            <!-- ĐĂNG XUẤT -->
-            <DropdownMenuItem destructive @select="logout">
-              <template #icon><LogOut :size="17" /></template>
-              Đăng xuất
-            </DropdownMenuItem>
+          <div class="topbar-breadcrumb">
+            <span class="breadcrumb-root">Học tập</span>
+            <span class="breadcrumb-separator">/</span>
+            <strong class="breadcrumb-active">{{ currentViewTitle }}</strong>
           </div>
-        </DropdownMenu>
+        </div>
+
+        <div class="topbar-center">
+          <label class="global-search">
+            <Search :size="17" class="search-icon" />
+            <input
+              v-model="searchQuery"
+              type="search"
+              placeholder="Tìm kiếm khóa học, bài thi, kỹ năng..."
+              aria-label="Tìm kiếm"
+            />
+          </label>
+        </div>
+
+        <div class="topbar-right">
+          <RouterLink v-if="!isPremium" to="/pricing" class="topbar-upgrade">
+            <Crown :size="15" />
+            <span>Nâng cấp</span>
+          </RouterLink>
+
+          <div class="notification-menu">
+            <button
+              class="notification-button"
+              title="Thông báo"
+              aria-label="Thông báo"
+              :aria-expanded="notificationPanelOpen"
+              @click="notificationPanelOpen = !notificationPanelOpen"
+            >
+              <Bell :size="18" />
+              <span v-if="unreadNotificationCount || activeRecommendations.length" class="notification-dot"></span>
+            </button>
+            <section v-if="notificationPanelOpen" class="notification-popover" aria-label="Thông báo" aria-live="polite">
+              <header class="notification-popover-header">
+                <h2>Thông báo</h2>
+                <span v-if="unreadNotificationCount">{{ unreadNotificationCount }} chưa đọc</span>
+              </header>
+              <p v-if="notificationsLoading" class="notification-empty" role="status">Đang tải thông báo…</p>
+              <p v-else-if="notificationsError" class="notification-empty notification-error" role="alert">{{ notificationsError }}</p>
+              <p v-else-if="!notifications.length" class="notification-empty">Bạn chưa có thông báo.</p>
+              <div v-else class="notification-list">
+                <button
+                  v-for="notification in notifications"
+                  :key="notification.notificationId"
+                  class="notification-entry"
+                  :class="{ 'notification-entry-unread': !notification.read }"
+                  type="button"
+                  @click="openNotification(notification)"
+                >
+                  <span class="notification-entry-icon"><CheckCircle2 :size="17" /></span>
+                  <span class="notification-entry-copy">
+                    <strong>{{ notification.title }}</strong>
+                    <span>{{ notification.message }}</span>
+                    <small>{{ formatDate(notification.createdAt) }}</small>
+                  </span>
+                  <span v-if="!notification.read" class="notification-unread-dot" aria-label="Chưa đọc"></span>
+                </button>
+              </div>
+              <button
+                v-if="activeRecommendations.length"
+                class="notification-recommendations"
+                type="button"
+                @click="openRecommendationsFromBell"
+              >
+                <Sparkles :size="16" />
+                <span>Gợi ý học tập</span>
+                <strong>{{ activeRecommendations.length }}</strong>
+              </button>
+            </section>
+          </div>
+
+          <DropdownMenu v-model:open="profileMenuOpen" align="end" :side-offset="8">
+            <template #trigger>
+              <button class="profile-header-btn" type="button" aria-label="Mở menu tài khoản">
+                <span class="profile-avatar-wrap">
+                  <span class="avatar">{{ initials }}</span>
+                  <span class="avatar-status-dot" :class="userStatus"></span>
+                </span>
+                <div class="profile-name-stack">
+                  <strong class="profile-header-name">{{ userName }}</strong>
+                  <span class="profile-role-tag">{{ userStore.state.role === 'ROLE_ADMIN' ? 'Quản trị viên' : 'Học viên' }}</span>
+                </div>
+                <ChevronDown :size="14" class="profile-header-chevron" />
+              </button>
+            </template>
+
+            <div class="user-custom-menu">
+              <!-- TRẠNG THÁI -->
+              <div class="menu-control-row">
+                <span class="menu-control-label">TRẠNG THÁI</span>
+                <button type="button" class="menu-status-badge" @click.stop="cycleStatus" title="Nhấp để đổi trạng thái">
+                  <span class="status-live-dot" :class="userStatus"></span>
+                  <span class="status-live-text">{{ statusLabel }}</span>
+                  <ChevronDown :size="13" class="status-live-chevron" />
+                </button>
+              </div>
+
+              <!-- TẮT THÔNG BÁO -->
+              <div class="menu-control-row">
+                <span class="menu-control-label">TẮT THÔNG BÁO</span>
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="notificationsMuted"
+                  class="menu-switch"
+                  :class="{ active: notificationsMuted }"
+                  @click.stop="toggleNotifications"
+                  aria-label="Bật hoặc tắt thông báo"
+                >
+                  <span class="menu-switch-thumb"></span>
+                </button>
+              </div>
+
+              <DropdownMenuSeparator />
+
+              <!-- MENU ITEMS -->
+              <DropdownMenuItem @select="showView('settings')">
+                <template #icon><User :size="17" /></template>
+                {{ userStore.state.role === 'ROLE_ADMIN' ? 'Thông tin cán bộ' : 'Thông tin cá nhân' }}
+              </DropdownMenuItem>
+
+              <DropdownMenuItem @select="passwordModalOpen = true">
+                <template #icon><KeyRound :size="17" /></template>
+                Đổi mật khẩu
+              </DropdownMenuItem>
+
+              <DropdownMenuItem @select="supportModalOpen = true">
+                <template #icon><Headphones :size="17" /></template>
+                Hỗ trợ
+              </DropdownMenuItem>
+
+              <DropdownMenuItem @select="aboutModalOpen = true">
+                <template #icon><Info :size="17" /></template>
+                Giới thiệu
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator />
+
+              <!-- ĐĂNG XUẤT -->
+              <DropdownMenuItem destructive @select="logout">
+                <template #icon><LogOut :size="17" /></template>
+                Đăng xuất
+              </DropdownMenuItem>
+            </div>
+          </DropdownMenu>
+        </div>
       </header>
 
       <div class="mobile-scrim" v-if="mobileMenuOpen" @click="mobileMenuOpen = false"></div>
@@ -647,38 +1061,615 @@ onUnmounted(() => {
     </Modal>
 
     <!-- Modal Đổi mật khẩu -->
-    <Modal v-model:open="passwordModalOpen" title="Đổi mật khẩu" description="Cập nhật mật khẩu để tăng cường bảo mật cho tài khoản của bạn" :icon="KeyRound">
-      <form class="password-form-stack" @submit.prevent="handleChangePassword">
-        <div v-if="passwordError" class="notice notice-danger">{{ passwordError }}</div>
-        <label class="form-field">
-          <span>Mật khẩu hiện tại</span>
-          <input v-model="passwordForm.oldPassword" type="password" placeholder="Nhập mật khẩu cũ" required />
-        </label>
-        <label class="form-field">
-          <span>Mật khẩu mới</span>
-          <input v-model="passwordForm.newPassword" type="password" placeholder="Tối thiểu 6 ký tự" required />
-        </label>
-        <label class="form-field">
-          <span>Nhập lại mật khẩu mới</span>
-          <input v-model="passwordForm.confirmPassword" type="password" placeholder="Xác nhận mật khẩu mới" required />
-        </label>
-        <div class="form-actions" style="margin-top: 12px;">
-          <button type="button" class="secondary-button" @click="passwordModalOpen = false">Hủy</button>
-          <button type="submit" class="primary-button" :disabled="changingPassword">Lưu mật khẩu mới</button>
-        </div>
-      </form>
+    <Modal v-model:open="passwordModalOpen" title="Đổi mật khẩu" description="Quản lý mật khẩu tài khoản" :icon="LockKeyhole">
+      <div class="modal-info-stack">
+        <p class="notice notice-danger" role="status">Tính năng đổi mật khẩu chưa được kết nối với API. Mật khẩu của bạn chưa thay đổi.</p>
+      </div>
+      <template #footer>
+        <button class="primary-button" @click="passwordModalOpen = false">Đóng</button>
+      </template>
     </Modal>
   </main>
 </template>
 
 <style>
-.app-shell { --ink: #101d49; --muted: #6e82a8; --line: #e6edf8; --blue: #2d68f3; --green: #23ad8c; display: flex; min-height: 100vh; color: var(--ink); background: #f5f8fd; font-family: var(--font-sans); }
-.sidebar { position: fixed; z-index: 10; inset: 0 auto 0 0; display: flex; width: 252px; flex-direction: column; padding: 20px 22px 16px; border-right: 1px solid #e7edf7; background: rgba(255,255,255,.94); }
-.sidebar-brand { display: flex; min-height: 43px; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; font-size: 16px; font-weight: 730; white-space: nowrap; }.brand-symbol { display: grid; width: 40px; height: 40px; place-items: center; color: var(--blue); }
-.side-nav { display: grid; gap: 5px; margin-top: 25px; }.side-link { display: flex; min-height: 47px; align-items: center; gap: 14px; padding: 0 13px; border: 0; border-radius: 8px; background: transparent; color: #596e97; font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background .15s, color .15s; }.side-link:hover { background: #f3f6fc; color: var(--blue); }.side-link.selected { background: #eaf1ff; color: #2868f4; font-weight: 600; }.side-link svg { flex: 0 0 auto; }
-.sidebar-quote { position: relative; min-height: 220px; margin-top: auto; padding: 18px 15px 0; overflow: hidden; border-radius: 10px; background: linear-gradient(155deg, #f0f5ff 2%, #e8f0ff 65%, #dce8ff); }.quote-icon { display: inline-grid; width: 28px; height: 28px; margin-right: 8px; vertical-align: middle; place-items: center; color: var(--blue); }.sidebar-quote strong { display: inline-block; vertical-align: middle; font-size: 12px; line-height: 1.5; }.sidebar-quote p { position: relative; z-index: 2; margin: 13px 0; color: #7589af; font-size: 11px; line-height: 1.55; }.quote-mountain { position: absolute; right: -8px; bottom: -28px; left: -7px; height: 112px; overflow: hidden; background: linear-gradient(145deg, rgba(196,216,255,.25), rgba(120,159,242,.3)); clip-path: polygon(0 80%, 23% 35%, 39% 66%, 61% 12%, 100% 75%, 100% 100%, 0 100%); }.quote-mountain span { position: absolute; bottom: 5px; left: 0; width: 100%; height: 47px; background: rgba(149,180,243,.32); clip-path: polygon(0 80%, 34% 20%, 50% 58%, 70% 4%, 100% 82%, 100% 100%, 0 100%); }.quote-mountain i { position: absolute; right: 33%; bottom: 55px; width: 2px; height: 27px; background: #5484ef; }.quote-mountain b { position: absolute; right: calc(33% - 8px); bottom: 74px; color: #5884ee; font-size: 17px; }.sidebar-bottom { display: grid; grid-template-columns: 8px 1fr; align-items: center; gap: 3px 8px; margin-top: 18px; padding: 8px 4px 0; color: #617599; font-size: 11px; }.connection-dot { width: 7px; height: 7px; border-radius: 50%; background: #27b58d; }.version { grid-column: 2; color: #91a0ba; font-size: 10px; }
-.workspace { width: calc(100% - 252px); min-width: 0; min-height: 100vh; margin-left: 252px; }.topbar { position: sticky; z-index: 5; top: 0; display: flex; height: 76px; align-items: center; gap: 22px; padding: 0 clamp(20px, 2.1vw, 34px); border-bottom: 1px solid #e9eef6; background: rgba(249,251,255,.92); backdrop-filter: blur(12px); }.global-search { display: flex; width: min(540px, 56%); height: 40px; align-items: center; gap: 9px; padding: 0 13px; border: 1px solid #e1e8f3; border-radius: 10px; background: #fff; color: #8093b3; }.global-search input,.search-field input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #273a61; font: inherit; font-size: 12px; }.global-search input::placeholder,.search-field input::placeholder { color: #8b9db9; }.notification-button { position: relative; display: grid; width: 36px; height: 36px; margin-left: auto; place-items: center; border: 0; background: transparent; color: #647b9f; cursor: pointer; }.notification-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border: 1px solid white; border-radius: 50%; background: #f35a69; }.profile-button { display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }.avatar,.account-avatar { display: grid; width: 37px; height: 37px; flex: 0 0 auto; place-items: center; border: 2px solid #fff; border-radius: 50%; background: linear-gradient(145deg, #d9e7ff, #a8c4fb); color: #2757a6; font-size: 14px; font-weight: 700; box-shadow: 0 2px 8px rgba(50,85,150,.12); }.profile-copy { display: grid; gap: 2px; }.profile-copy strong { max-width: 190px; overflow: hidden; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.profile-copy small { color: #8292ad; font-size: 10px; }.profile-button > svg { color: #8a9bb5; }.mobile-menu-button { display: none; }
-.content-area { width: min(100%, 1500px); margin: 0 auto; padding: 20px clamp(18px, 1.6vw, 27px) 42px; }.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(290px, .86fr); align-items: start; gap: 18px; }.main-column,.right-column { display: grid; min-width: 0; gap: 17px; }.welcome-banner { position: relative; display: flex; min-height: 248px; align-items: center; padding: 28px; overflow: hidden; border: 1px solid #e0eafd; border-radius: 10px; background: linear-gradient(112deg, #edf4ff 0%, #e9f1ff 66%, #dfeaff 100%); }.welcome-banner::after { position: absolute; right: 3%; bottom: -52%; width: 43%; aspect-ratio: 1; border: 1px solid rgba(136,171,239,.15); border-radius: 50%; content: ''; }.welcome-copy { position: relative; z-index: 2; width: min(100%, 625px); }.welcome-kicker,.view-kicker { margin: 0 0 9px; color: #3f6cc1; font-size: 10px; font-weight: 730; letter-spacing: .8px; }.welcome-copy h1 { margin: 0; color: #101d49; font-size: clamp(23px, 2.05vw, 29px); line-height: 1.25; font-weight: 730; letter-spacing: 0; }.welcome-copy > p:not(.welcome-kicker) { margin: 12px 0 0; color: #61769c; font-size: 13px; line-height: 1.7; }.quick-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }.quick-stat { display: flex; min-width: 132px; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.8); border-radius: 8px; background: rgba(255,255,255,.78); }.quick-icon { display: grid; width: 31px; height: 31px; flex: 0 0 auto; place-items: center; border-radius: 50%; }.quick-icon.lavender { color: #685cf0; background: #ebe8ff; }.quick-icon.sky { color: #2e78ef; background: #e2edff; }.quick-icon.peach { color: #f58246; background: #fff0e7; }.quick-stat > span:last-child { display: grid; gap: 1px; }.quick-stat strong { font-size: 17px; line-height: 1.1; }.quick-stat small { color: #7b8dad; font-size: 9px; white-space: nowrap; }
+.app-shell {
+  --ink: #0F172A;
+  --muted: #64748B;
+  --line: #E2E8F0;
+  --brand-primary: #2563EB;
+  --brand-hover: #1D4ED8;
+  --brand-light: #EFF6FF;
+  --ai-accent: #7C3AED;
+  --ai-light: #F5F3FF;
+  display: flex;
+  width: 100%;
+  min-height: 100vh;
+  color: var(--text-primary, #0F172A);
+  background: var(--bg-app, #F8FAFC);
+  font-family: var(--font-sans);
+}
+.sidebar {
+  position: fixed;
+  z-index: 25;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: 256px;
+  flex-direction: column;
+  padding: 18px 14px 14px;
+  border-right: 1px solid var(--border-subtle, #E2E8F0);
+  background: #ffffff;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar.sidebar-collapsed {
+  width: 76px;
+  padding: 18px 10px 14px;
+}
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  min-height: 44px;
+}
+.sidebar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  min-width: 0;
+}
+.brand-symbol {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-md, 8px);
+  background: linear-gradient(135deg, var(--brand-primary) 0%, #1D4ED8 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+}
+.brand-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.brand-name {
+  font-size: 15px;
+  font-weight: 750;
+  color: #0F172A;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brand-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #7C3AED;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mobile-close-btn {
+  display: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border-subtle, #E2E8F0);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: #64748B;
+  cursor: pointer;
+}
+.nav-section-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.nav-section-title {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: #94A3B8;
+  text-transform: uppercase;
+}
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: #475569;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.sidebar.sidebar-collapsed .side-link {
+  justify-content: center;
+  padding: 0;
+}
+.side-link:hover {
+  background-color: #F1F5F9;
+  color: #0F172A;
+}
+.side-link.selected {
+  background-color: var(--brand-light);
+  color: var(--brand-primary);
+  font-weight: 650;
+}
+.side-link.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background-color: var(--brand-primary);
+}
+.sidebar.sidebar-collapsed .side-link.selected::before {
+  left: 2px;
+}
+.side-link-icon {
+  flex-shrink: 0;
+}
+.side-link.selected .side-link-icon {
+  color: var(--brand-primary);
+}
+.side-link-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  background-color: #F5F3FF;
+  border: 1px solid #DDD6FE;
+  color: #7C3AED;
+}
+.side-link-lock {
+  color: #94A3B8;
+  flex-shrink: 0;
+}
+.sidebar-ai-card {
+  margin: 16px 0;
+  padding: 14px 12px;
+  border-radius: var(--radius-md, 8px);
+  background: linear-gradient(145deg, #F0FDFA 0%, #F5F3FF 100%);
+  border: 1px solid rgba(15, 118, 110, 0.15);
+}
+.ai-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7C3AED;
+  margin-bottom: 6px;
+}
+.ai-card-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0F172A;
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+.ai-card-desc {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #64748B;
+}
+.ai-card-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 30px;
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  border-radius: var(--radius-sm, 6px);
+  background-color: #ffffff;
+  color: #7C3AED;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ai-card-action-btn:hover {
+  background-color: #7C3AED;
+  color: #ffffff;
+}
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle, #E2E8F0);
+}
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: #64748B;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sidebar.sidebar-collapsed .sidebar-collapse-btn {
+  justify-content: center;
+  padding: 0;
+}
+.sidebar-collapse-btn:hover {
+  background-color: #F1F5F9;
+  color: #0F172A;
+}
+.sidebar-system-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #94A3B8;
+}
+.status-live-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #10B981;
+}
+.workspace {
+  width: calc(100% - 256px);
+  min-width: 0;
+  min-height: 100vh;
+  margin-left: 256px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.workspace.workspace-collapsed {
+  width: calc(100% - 76px);
+  margin-left: 76px;
+}
+.topbar {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 clamp(16px, 2vw, 32px);
+  border-bottom: 1px solid var(--border-subtle, #E2E8F0);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+}
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.topbar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+.breadcrumb-root {
+  color: #64748B;
+  font-weight: 500;
+}
+.breadcrumb-separator {
+  color: #CBD5E1;
+}
+.breadcrumb-active {
+  color: #0F172A;
+  font-weight: 700;
+}
+.topbar-center {
+  flex: 1;
+  max-width: 460px;
+}
+.global-search {
+  display: flex;
+  width: 100%;
+  height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--border-subtle, #E2E8F0);
+  border-radius: var(--radius-md, 8px);
+  background: #F8FAFC;
+  color: #64748B;
+  transition: all 0.15s ease;
+}
+.global-search:focus-within {
+  background: #ffffff;
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.global-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #0F172A;
+  font: inherit;
+  font-size: 13px;
+}
+.global-search input::placeholder {
+  color: #94A3B8;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.topbar-upgrade {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+  transition: transform 0.15s ease;
+}
+.topbar-upgrade:hover {
+  transform: translateY(-1px);
+}
+.notification-menu {
+  position: relative;
+}
+.notification-button {
+  position: relative;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--border-subtle, #E2E8F0);
+  border-radius: var(--radius-md, 8px);
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.notification-button:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+.notification-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid #ffffff;
+  border-radius: 50%;
+  background: #EF4444;
+}
+.notification-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(460px, calc(100vh - 90px));
+  overflow: auto;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  background: #FFFFFF;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+}
+.notification-popover-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #E2E8F0;
+  background: #FFFFFF;
+}
+.notification-popover-header h2 {
+  margin: 0;
+  color: #0F172A;
+  font-size: 14px;
+  font-weight: 700;
+}
+.notification-popover-header > span {
+  color: #2563EB;
+  font-size: 11px;
+  font-weight: 600;
+}
+.notification-empty {
+  margin: 0;
+  padding: 22px 16px;
+  color: #64748B;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+.notification-error {
+  color: #B91C1C;
+}
+.notification-list {
+  display: grid;
+}
+.notification-recommendations {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 16px;
+  border: 0;
+  background: #FFFFFF;
+  color: #2563EB;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.notification-recommendations:hover {
+  background: #EFF6FF;
+}
+.notification-recommendations strong {
+  margin-left: auto;
+  color: #475569;
+  font-size: 10px;
+}
+.notification-entry {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 7px;
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 14px;
+  border: 0;
+  border-bottom: 1px solid #F1F5F9;
+  background: #FFFFFF;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.notification-entry:hover,
+.notification-entry-unread {
+  background: #F8FAFC;
+}
+.notification-entry-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #ECFDF5;
+  color: #15803D;
+}
+.notification-entry-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.notification-entry-copy strong {
+  color: #0F172A;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.notification-entry-copy > span {
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.notification-entry-copy small {
+  color: #64748B;
+  font-size: 10px;
+}
+.notification-unread-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #2563EB;
+}
+.profile-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.avatar {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.profile-name-stack {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+.profile-header-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: #0F172A;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.profile-role-tag {
+  font-size: 11px;
+  color: #64748B;
+}
+.profile-header-chevron {
+  color: #94A3B8;
+}
+.mobile-menu-button {
+  display: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border-subtle, #E2E8F0);
+  border-radius: var(--radius-md, 8px);
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+}
+.content-area {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 24px clamp(16px, 2.2vw, 36px) 48px;
+}
+.content-area { width: 100%; max-width: none; box-sizing: border-box; margin: 0; padding: 20px clamp(18px, 1.6vw, 27px) 42px; }.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(290px, .86fr); align-items: start; gap: 18px; width: 100%; }.main-column,.right-column { display: grid; min-width: 0; gap: 17px; }.welcome-banner { position: relative; display: flex; min-height: 248px; align-items: center; padding: 28px; overflow: hidden; border: 1px solid #e0eafd; border-radius: 10px; background: linear-gradient(112deg, #edf4ff 0%, #e9f1ff 66%, #dfeaff 100%); width: 100%; box-sizing: border-box; }.welcome-banner::after { position: absolute; right: 3%; bottom: -52%; width: 43%; aspect-ratio: 1; border: 1px solid rgba(136,171,239,.15); border-radius: 50%; content: ''; }.welcome-copy { position: relative; z-index: 2; width: min(100%, 750px); }.welcome-kicker,.view-kicker { margin: 0 0 9px; color: #3f6cc1; font-size: 10px; font-weight: 730; letter-spacing: .8px; }.welcome-copy h1 { margin: 0; color: #101d49; font-size: clamp(23px, 2.05vw, 29px); line-height: 1.25; font-weight: 730; letter-spacing: 0; }.welcome-copy > p:not(.welcome-kicker) { margin: 12px 0 0; color: #61769c; font-size: 13px; line-height: 1.7; }.quick-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }.quick-stat { display: flex; min-width: 132px; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.8); border-radius: 8px; background: rgba(255,255,255,.78); }.quick-icon { display: grid; width: 31px; height: 31px; flex: 0 0 auto; place-items: center; border-radius: 50%; }.quick-icon.lavender { color: #685cf0; background: #ebe8ff; }.quick-icon.sky { color: #2e78ef; background: #e2edff; }.quick-icon.peach { color: #f58246; background: #fff0e7; }.quick-stat > span:last-child { display: grid; gap: 1px; }.quick-stat strong { font-size: 17px; line-height: 1.1; }.quick-stat small { color: #7b8dad; font-size: 9px; white-space: nowrap; }
 .welcome-art { position: absolute; top: 0; right: 0; width: 35%; height: 100%; overflow: hidden; }.art-orbit { position: absolute; right: -2%; bottom: -13%; width: 91%; aspect-ratio: 1; border: 1px solid rgba(87,141,240,.15); border-radius: 50%; }.orbit-b { right: 4%; bottom: -4%; width: 72%; border-style: dashed; border-color: rgba(87,141,240,.24); }.art-node { position: absolute; z-index: 2; display: grid; place-items: center; border: 4px solid rgba(255,255,255,.72); border-radius: 50%; color: white; box-shadow: 0 8px 20px rgba(71,113,196,.17); }.node-book { top: 35%; left: 12%; width: 37px; height: 37px; background: #4484fa; }.node-ai { top: 14%; left: 43%; width: 48px; height: 48px; background: #3171ed; }.node-bars { top: 20%; right: 12%; width: 40px; height: 40px; background: #94b6f7; }.node-check { top: 60%; left: 38%; width: 27px; height: 27px; border: 3px solid rgba(255,255,255,.8); background: #2ebd9a; }.art-track { position: absolute; border-top: 2px dashed #a7c5fa; transform: rotate(-18deg); }.track-one { top: 34%; left: 28%; width: 91px; }.track-two { top: 56%; left: 24%; width: 86px; transform: rotate(22deg); }.art-spark { position: absolute; color: rgba(69,125,237,.65); }.spark-one { top: 29%; right: 36%; font-size: 20px; }.spark-two { right: 10%; bottom: 22%; font-size: 25px; }
 .section-block,.assistant-panel,.weekly-panel,.goal-panel,.plan-form,.plan-list,.certificate-card,.test-list,.detail-section,.account-panel,.tutor-workspace { border: 1px solid #e7edf6; border-radius: 9px; background: #fff; }.section-block { padding: 17px 17px 16px; }.section-heading,.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.section-heading { margin-bottom: 13px; }.section-heading h2,.panel-heading h2 { margin: 0; font-size: 15px; line-height: 1.3; font-weight: 700; }.section-heading p { margin: 4px 0 0; color: #8393ad; font-size: 11px; }.inline-link,.text-link { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; padding: 4px 0; border: 0; background: transparent; color: #2868f4; font: inherit; font-size: 11px; cursor: pointer; }.inline-link:hover,.text-link:hover { color: #164fc5; }
 .continue-card { display: flex; align-items: center; gap: 16px; padding: 8px; border: 1px solid #e6edf8; border-radius: 8px; }.course-art { position: relative; display: flex; width: 195px; height: 124px; flex: 0 0 auto; align-items: center; justify-content: center; flex-direction: column; gap: 3px; overflow: hidden; border-radius: 8px; background: linear-gradient(135deg, #316edf, #5f7ded 54%, #7d91ed); color: white; }.course-art::before,.course-art::after { position: absolute; width: 120px; height: 120px; border: 1px solid rgba(255,255,255,.14); border-radius: 50%; content: ''; }.course-art::before { top: -57px; left: -24px; }.course-art::after { right: -38px; bottom: -73px; width: 154px; height: 154px; }.course-art > svg { z-index: 1; width: 38px; height: 38px; }.course-art small { z-index: 1; max-width: 85%; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.course-label { position: absolute; top: 10px; left: 11px; color: rgba(255,255,255,.76); font-size: 8px; font-weight: 700; letter-spacing: .7px; }.course-art-ring { position: absolute; right: 15px; top: 28px; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.45); border-radius: 50%; }.continue-body { min-width: 0; flex: 1; }.continue-title { display: flex; align-items: center; gap: 10px; }.continue-title h3 { overflow: hidden; margin: 0; font-size: 13px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }.status-label { display: inline-flex; align-items: center; gap: 5px; color: #20a37d; font-size: 9px; white-space: nowrap; }.status-label span { width: 6px; height: 6px; border-radius: 50%; background: #27ba8d; }.course-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0 12px; color: #6880a8; font-size: 10px; }.course-tags span { padding: 3px 7px; border-radius: 4px; background: #eef4ff; color: #4671c3; }.plan-progress { display: flex; align-items: center; gap: 9px; }.plan-progress > div { height: 6px; flex: 1; overflow: hidden; border-radius: 5px; background: #eaf0fa; }.plan-progress > div span { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg,#3477f6,#398de9); }.plan-progress small { color: #5a6f94; font-size: 9px; }.continue-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 11px; color: #7e8eaa; font-size: 9px; }.continue-meta > span { display: inline-flex; align-items: center; gap: 4px; }.continue-meta svg { width: 13px; height: 13px; }.continue-button { display: inline-flex; min-height: 35px; align-items: center; gap: 6px; padding: 0 11px; border: 0; border-radius: 6px; background: #2d68f3; color: white; font: inherit; font-size: 10px; font-weight: 600; white-space: nowrap; cursor: pointer; }.continue-button:hover,.primary-button:hover,.assistant-button:hover { background: #2059df; }
@@ -716,11 +1707,72 @@ onUnmounted(() => {
 @media (max-width: 1200px) { .tutor-workspace { grid-template-columns: 170px minmax(0,1fr); }.tutor-features { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; border-top: 1px solid #e8edf6; border-left: 0; }.tutor-features h2 { grid-column: 1 / -1; }.progress-visuals { grid-template-columns: minmax(0,1.3fr) minmax(210px,.8fr); } }
 @media (max-width: 900px) { .tutor-workspace { grid-template-columns: minmax(0,1fr); }.tutor-features { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 680px) { .roadmap-track { gap: 4px; }.roadmap-track > div small { font-size: 7px; }.progress-visuals { grid-template-columns: minmax(0,1fr); }.score-chart { height: 145px; }.score-panel { display: grid; grid-template-columns: 1fr 1fr; align-items: center; }.score-panel .section-heading { grid-column: 1 / -1; }.score-ring { width: 108px; margin: 0 auto; }.score-ring::before { width: 84px; }.score-legend { min-width: 0; }.tutor-features { grid-template-columns: minmax(0,1fr); }.tutor-features h2 { grid-column: auto; }.test-row { display: flex; }.certificate-card { min-height: 220px; } }
-@media (max-width: 1200px) { .sidebar { width: 220px; padding-right: 17px; padding-left: 17px; }.workspace { width: calc(100% - 220px); margin-left: 220px; }.dashboard-grid { grid-template-columns: minmax(0,1.5fr) minmax(270px,.9fr); gap: 13px; }.welcome-art { width: 30%; opacity: .86; }.welcome-copy { width: 74%; }.continue-card { gap: 11px; }.course-art { width: 148px; }.recommendation-grid { grid-template-columns: 1fr; }.recommendation-card { align-items: center; }.recommendation-copy p { min-height: 0; }.sidebar-quote { min-height: 190px; } }
-@media (max-width: 900px) { .sidebar { z-index: 20; width: 245px; transform: translateX(-100%); transition: transform .2s ease; }.sidebar.sidebar-open { transform: translateX(0); }.workspace { width: 100%; margin-left: 0; }.mobile-menu-button { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border: 1px solid #e3eaf4; border-radius: 7px; background: white; color: #5c7196; cursor: pointer; }.topbar { height: 68px; gap: 12px; }.global-search { width: min(540px, 62%); }.dashboard-grid { grid-template-columns: minmax(0,1.55fr) minmax(260px,.85fr); }.mobile-scrim { position: fixed; z-index: 15; inset: 0; background: rgba(18,35,72,.24); } }
-@media (max-width: 680px) { .topbar { padding: 0 12px; gap: 9px; }.global-search { width: auto; height: 37px; flex: 1; padding: 0 9px; }.global-search input { font-size: 10px; }.notification-button { width: 30px; margin-left: 0; }.profile-button { gap: 5px; }.profile-copy,.profile-button > svg { display: none; }.avatar { width: 33px; height: 33px; }.content-area { padding: 13px 12px 28px; }.dashboard-grid { grid-template-columns: minmax(0,1fr); gap: 13px; }.main-column,.right-column { gap: 13px; }.welcome-banner { min-height: 238px; padding: 20px 16px; }.welcome-copy { width: 100%; }.welcome-copy h1 { max-width: 25ch; font-size: 23px; }.welcome-copy > p:not(.welcome-kicker) { max-width: 46ch; font-size: 11px; }.welcome-art { right: -15px; bottom: -20px; top: auto; width: 170px; height: 135px; opacity: .32; }.quick-stats { position: relative; z-index: 3; gap: 5px; margin-top: 17px; }.quick-stat { min-width: 0; gap: 6px; padding: 7px; }.quick-icon { width: 27px; height: 27px; }.quick-stat strong { font-size: 14px; }.quick-stat small { max-width: 68px; font-size: 8px; white-space: normal; }.section-block { padding: 14px 12px; }.section-heading h2,.panel-heading h2 { font-size: 13px; }.continue-card { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 10px; padding: 8px; }.course-art { width: 90px; height: 98px; grid-row: span 2; }.course-art > svg { width: 29px; height: 29px; }.course-art small { max-width: 75px; font-size: 7px; }.course-label { top: 7px; left: 7px; font-size: 6px; }.continue-body { grid-column: 2; }.continue-title { align-items: flex-start; flex-direction: column; gap: 4px; }.continue-title h3 { max-width: 100%; font-size: 11px; }.course-tags { margin: 7px 0 8px; font-size: 8px; }.continue-meta { gap: 8px; margin-top: 8px; font-size: 8px; }.continue-button { grid-column: 2; justify-self: start; min-height: 31px; font-size: 9px; }.skill-overview { grid-template-columns: 105px minmax(0,1fr); gap: 8px; padding: 8px; }.mastery-ring { width: 64px; height: 64px; }.mastery-ring::before { width: 50px; height: 50px; }.skill-list { gap: 9px; }.skill-label strong { font-size: 9px; }.skill-label small { font-size: 8px; }.skill-bullet { width: 21px; height: 21px; }.skill-bar { margin-left: 28px; }.empty-recommendation { align-items: flex-start; flex-wrap: wrap; font-size: 10px; }.empty-recommendation > span { min-width: calc(100% - 34px); }.recommendation-grid { grid-template-columns: 1fr; }.assistant-panel,.weekly-panel,.goal-panel { padding: 14px; }.metric-cell { min-height: 82px; }.view-heading { align-items: flex-start; flex-direction: column; gap: 12px; }.view-heading h1 { font-size: 23px; }.search-field { width: 100%; }.plan-form { padding: 14px; }.form-row { grid-template-columns: 1fr; }.certificate-grid { grid-template-columns: 1fr; }.certificate-card { min-height: 190px; }.test-row { align-items: flex-start; gap: 9px; }.test-icon { width: 34px; height: 34px; }.test-info h2 { font-size: 11px; }.test-info p { font-size: 9px; }.test-meta { gap: 7px; font-size: 8px; }.test-row .primary-button { align-self: center; min-height: 31px; gap: 4px; padding: 0 8px; font-size: 9px; }.progress-summary { gap: 7px; }.progress-summary > div { padding: 10px; }.progress-summary strong { font-size: 17px; }.progress-summary small { font-size: 8px; }.select-field { grid-template-columns: auto minmax(120px,1fr); width: 100%; }.tutor-workspace { grid-template-columns: minmax(0,1fr); }.conversation-list { display: flex; max-height: 110px; gap: 5px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #e8edf6; }.conversation-list-heading { min-width: 118px; padding: 4px; }.conversation-item { width: auto; min-width: 125px; }.chat-panel { min-height: 370px; padding: 11px; }.chat-empty { padding: 12px; }.account-panel { flex-wrap: wrap; }.account-panel .secondary-button { margin-left: auto; }.plan-row { gap: 9px; }.plan-row-icon { width: 34px; height: 34px; }.plan-row-title { align-items: flex-start; flex-direction: column; gap: 5px; }.plan-row-content > p { line-height: 1.6; }.plan-row-content .plan-progress small { min-width: 76px; }.empty-inline { align-items: flex-start; flex-wrap: wrap; }.empty-inline > div { flex-basis: calc(100% - 60px); }.empty-inline > .outline-button { margin-left: 50px; }.result-panel { min-height: 340px; }.question-panel { padding: 12px; } }
+@media (max-width: 1024px) {
+  .topbar-center {
+    max-width: 300px;
+  }
+}
+@media (max-width: 900px) {
+  .sidebar {
+    z-index: 50;
+    width: 270px !important;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  }
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+  .mobile-close-btn {
+    display: grid;
+  }
+  .sidebar-collapse-btn {
+    display: none;
+  }
+  .workspace {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+  .mobile-menu-button {
+    display: grid;
+  }
+  .mobile-scrim {
+    position: fixed;
+    z-index: 45;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(3px);
+  }
+  .topbar-breadcrumb {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .topbar {
+    height: 60px;
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .topbar-center {
+    flex: 1;
+    max-width: none;
+  }
+  .profile-name-stack,
+  .profile-header-chevron {
+    display: none;
+  }
+  .topbar-upgrade span {
+    display: none;
+  }
+  .topbar-upgrade {
+    padding: 0 8px;
+  }
+  .content-area {
+    padding: 16px 12px 32px;
+  }
+}
 .side-link-locked { color: #6f7890; }.side-link-locked > svg:last-child { margin-left: auto; color: #8b6b1b; }
-.free-quota-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid #e0e7ef; border-radius: 8px; background: #fff; }.free-quota-banner > div { display: grid; width: min(100%, 480px); gap: 4px; }.free-quota-banner strong { color: #334155; font-size: 12px; }.free-quota-banner p { margin: 0; color: #526070; font-size: 11px; }.free-quota-track { height: 5px; margin-top: 4px; overflow: hidden; background: #eef1f6; }.free-quota-track i { display: block; height: 100%; background: #0f766e; }.quota-remaining { color: #475569; font-size: 11px; font-weight: 600; white-space: nowrap; }.quota-upgrade { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 12px; border-radius: 6px; color: #fff; background: #0f766e; font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap; }.quota-upgrade:hover { background: #115e59; }.practice-exam-notice { margin: 0; padding: 10px 0; border-bottom: 1px solid #e6edf6; color: #0f5f58; font-size: 12px; }
+.free-quota-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid #e0e7ef; border-radius: 8px; background: #fff; }.free-quota-banner > div { display: grid; width: min(100%, 480px); gap: 4px; }.free-quota-banner strong { color: #334155; font-size: 12px; }.free-quota-banner p { margin: 0; color: #526070; font-size: 11px; }.free-quota-track { height: 5px; margin-top: 4px; overflow: hidden; background: #eef1f6; }.free-quota-track i { display: block; height: 100%; background: #2563eb; }.quota-remaining { color: #475569; font-size: 11px; font-weight: 600; white-space: nowrap; }.quota-upgrade { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; padding: 0 12px; border-radius: 6px; color: #fff; background: #2563eb; font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap; }.quota-upgrade:hover { background: #1d4ed8; }.practice-exam-notice { margin: 0; padding: 10px 0; border-bottom: 1px solid #e6edf6; color: #1e40af; font-size: 12px; }
 .user-menu-profile { display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-width: 250px; }
 .user-menu-avatar { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff; font-size: 15px; font-weight: 700; box-shadow: 0 2px 8px rgba(37,99,235,.25); }
 .user-menu-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }

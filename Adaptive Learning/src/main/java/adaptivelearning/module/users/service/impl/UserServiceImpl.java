@@ -20,12 +20,14 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AccountExpiredException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.UUID;
 import java.util.Locale;
@@ -42,6 +44,12 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final GoogleTokenVerifier googleTokenVerifier;
     private final EmailVerificationService emailVerificationService;
+
+    @Value("${BOOTSTRAP_ADMIN_USERNAME:}")
+    private String bootstrapAdminUsername;
+
+    @Value("${BOOTSTRAP_ADMIN_PASSWORD:}")
+    private String bootstrapAdminPassword;
 
 
 
@@ -79,8 +87,7 @@ public class UserServiceImpl implements UserService {
                     .build();
         } catch (AccountExpiredException | DisabledException e) {
             throw new CommonException(ErrorCode.ACCOUNT_DEACTIVATE);
-        }
-        catch (Exception e) {
+        } catch (BadCredentialsException e) {
             throw new CommonException(ErrorCode.WRONG_PASSWORD);
         }
     }
@@ -132,13 +139,13 @@ public class UserServiceImpl implements UserService {
     @Override
     public EmailVerificationResponse signUp(SignUpRequest request) {
         String email = normalizeEmail(request.getEmail());
-        User existing = findUserByEmail(email);
+        User existing = userMapper.findByUsernameForUpdate(email).orElse(null);
         if (existing != null) {
             if (existing.isEmailVerified()) throw new CommonException(ErrorCode.USERNAME_ALREADY_EXISTS);
             return emailVerificationService.issue(email);
         }
         User user = saveUser(request, email);
-        userMapper.insertUser(user);
+        userMapper.insertUnverifiedUserIfAbsent(user);
         return emailVerificationService.issue(email);
     }
 
@@ -208,25 +215,18 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void initAdminUser() {
-        if (userMapper.countAdminUsers() == 0) {
+        if (userMapper.countAdminUsers() == 0
+                && bootstrapAdminUsername != null && !bootstrapAdminUsername.isBlank()
+                && bootstrapAdminPassword != null && bootstrapAdminPassword.length() >= 12) {
             User admin = new User();
-            admin.setUsername("admin");
-            admin.setPassword(passwordEncoder.encode("admin"));
+            admin.setUsername(bootstrapAdminUsername.trim());
+            admin.setPassword(passwordEncoder.encode(bootstrapAdminPassword));
             admin.setEnable(true);
             admin.setEmailVerified(true);
             admin.setIsDeleted(false);
             admin.setRole(Role.ROLE_ADMIN);
             userMapper.insertUser(admin);
-            User user = new User();
-            user.setUsername("user");
-            user.setPassword(passwordEncoder.encode("user"));
-            user.setEnable(true);
-            user.setEmailVerified(true);
-            user.setIsDeleted(false);
-            user.setRole(Role.ROLE_USER);
-            userMapper.insertUser(user);
         }
-
     }
 
 

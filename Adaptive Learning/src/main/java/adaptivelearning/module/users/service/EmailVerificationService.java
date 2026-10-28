@@ -44,7 +44,7 @@ public class EmailVerificationService {
 
     public EmailVerificationResponse issue(String rawEmail) {
         String email = normalize(rawEmail);
-        UserIdentity identity = findIdentity(email);
+        UserIdentity identity = findIdentityForUpdate(email);
         if (identity == null) throw new CommonException(ErrorCode.EMAIL_VERIFICATION_NOT_FOUND);
         if (identity.emailVerified()) throw new CommonException(ErrorCode.USERNAME_ALREADY_EXISTS);
         return createAndSend(email);
@@ -52,8 +52,7 @@ public class EmailVerificationService {
 
     public EmailVerificationResponse resend(String rawEmail) {
         String email = normalize(rawEmail);
-        requireMailConfiguration();
-        UserIdentity identity = findIdentity(email);
+        UserIdentity identity = findIdentityForUpdate(email);
         if (identity == null || identity.emailVerified()) {
             LocalDateTime now = LocalDateTime.now();
             return new EmailVerificationResponse(email, now.plusMinutes(CODE_TTL_MINUTES),
@@ -65,7 +64,11 @@ public class EmailVerificationService {
     @Transactional(noRollbackFor = CommonException.class)
     public EmailVerificationResponse verify(String rawEmail, String code) {
         String email = normalize(rawEmail);
-        EmailVerification verification = verificationRepository.findByEmailIgnoreCase(email)
+        UserIdentity identity = findIdentityForUpdate(email);
+        if (identity == null || identity.emailVerified()) {
+            throw new CommonException(ErrorCode.EMAIL_VERIFICATION_NOT_FOUND);
+        }
+        EmailVerification verification = verificationRepository.findByEmailIgnoreCaseForUpdate(email)
                 .orElseThrow(() -> new CommonException(ErrorCode.EMAIL_VERIFICATION_NOT_FOUND));
         if (verification.getVerifiedAt() != null) {
             throw new CommonException(ErrorCode.EMAIL_VERIFICATION_CODE_EXPIRED);
@@ -94,7 +97,7 @@ public class EmailVerificationService {
     private EmailVerificationResponse createAndSend(String email) {
         requireMailConfiguration();
         LocalDateTime now = LocalDateTime.now();
-        EmailVerification verification = verificationRepository.findByEmailIgnoreCase(email)
+        EmailVerification verification = verificationRepository.findByEmailIgnoreCaseForUpdate(email)
                 .orElseGet(() -> {
                     EmailVerification created = new EmailVerification();
                     created.setEmail(email);
@@ -155,8 +158,8 @@ public class EmailVerificationService {
         }
     }
 
-    private UserIdentity findIdentity(String email) {
-        return userMapper.findByUsername(email)
+    private UserIdentity findIdentityForUpdate(String email) {
+        return userMapper.findByUsernameForUpdate(email)
                 .map(user -> new UserIdentity(user.isEmailVerified()))
                 .orElse(null);
     }

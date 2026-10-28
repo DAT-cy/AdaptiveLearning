@@ -17,6 +17,8 @@ import adaptivelearning.module.attempts.repository.AttemptAnswerRepository;
 import adaptivelearning.module.attempts.repository.AttemptEventRepository;
 import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
 import adaptivelearning.module.attempts.service.AttemptService;
+import adaptivelearning.module.attempts.service.AttemptExpiredException;
+import adaptivelearning.module.attempts.service.AttemptSubmissionOutcome;
 import adaptivelearning.module.exams.entity.Exam;
 import adaptivelearning.module.exams.entity.ExamQuestion;
 import adaptivelearning.module.exams.repository.ExamQuestionRepository;
@@ -57,7 +59,7 @@ public class AttemptServiceImpl implements AttemptService {
 
     @Override
     public AttemptResponse startAttempt(Long userId, Long examId) {
-        Exam exam = examRepository.findById(examId)
+        Exam exam = examRepository.findByIdForUpdate(examId)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
         if (exam.getStatus() != ContentStatus.PUBLISHED) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
@@ -119,34 +121,33 @@ public class AttemptServiceImpl implements AttemptService {
     }
 
     @Override
+    @Transactional(noRollbackFor = AttemptExpiredException.class)
     public void saveAnswer(Long attemptId, Long userId, SaveAnswerRequest request) {
-        ExamAttempt attempt = requireOwnedAttempt(attemptId, userId);
+        ExamAttempt attempt = requireOwnedAttemptForUpdate(attemptId, userId);
         ensureActive(attempt);
-
-        AttemptAnswer answer = answerRepository.findByAttemptIdAndQuestionId(attemptId, request.getQuestionId())
-                .orElseGet(() -> AttemptAnswer.builder()
-                        .attemptId(attemptId)
-                        .questionId(request.getQuestionId())
-                        .build());
-
-        answer.setUserAnswerJson(request.getUserAnswerJson());
-        answer.setTimeSpentSeconds(request.getTimeSpentSeconds());
-        answerRepository.save(answer);
-
-        eventRepository.save(AttemptEvent.builder()
-                .attemptId(attemptId)
-                .eventType(EventType.AUTOSAVE)
-                .build());
+        saveAnswerForAttempt(attempt, request);
     }
 
     @Override
+    @Transactional(noRollbackFor = AttemptExpiredException.class)
     public AttemptResultResponse submitAttempt(Long attemptId, Long userId, SubmitAttemptRequest request) {
-        ExamAttempt attempt = requireOwnedAttempt(attemptId, userId);
+        return submitAttemptWithOutcome(attemptId, userId, request).result();
+    }
+
+    @Override
+    @Transactional(noRollbackFor = AttemptExpiredException.class)
+    public AttemptSubmissionOutcome submitAttemptWithOutcome(Long attemptId, Long userId,
+                                                              SubmitAttemptRequest request) {
+        ExamAttempt attempt = requireOwnedAttemptForUpdate(attemptId, userId);
+        if ((attempt.getStatus() == AttemptStatus.GRADED || attempt.getStatus() == AttemptStatus.VIOLATED)
+                && attempt.getScore() != null) {
+            return new AttemptSubmissionOutcome(buildResultResponse(attempt), false);
+        }
         ensureActive(attempt);
 
         if (request.getAnswers() != null) {
             for (SaveAnswerRequest ans : request.getAnswers()) {
-                saveAnswer(attemptId, userId, ans);
+                saveAnswerForAttempt(attempt, ans);
             }
         }
 
@@ -157,7 +158,7 @@ public class AttemptServiceImpl implements AttemptService {
                 .eventType(EventType.SUBMIT)
                 .build());
 
-        return scoreAttempt(attempt);
+        return new AttemptSubmissionOutcome(scoreAttempt(attempt), true);
     }
 
     @Override
@@ -179,8 +180,12 @@ public class AttemptServiceImpl implements AttemptService {
     }
 
     @Override
-    public void recordViolation(Long attemptId, ViolationRequest request) {
-        ExamAttempt attempt = requireAttempt(attemptId);
+    @Transactional(noRollbackFor = AttemptExpiredException.class)
+    public void recordViolation(Long attemptId, Long userId, boolean admin, ViolationRequest request) {
+        ExamAttempt attempt = requireAttemptForUpdate(attemptId);
+        if (!admin && !Objects.equals(attempt.getUserId(), userId)) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
         ensureActive(attempt);
 
         attempt.setViolationCount(attempt.getViolationCount() + 1);
@@ -205,10 +210,7 @@ public class AttemptServiceImpl implements AttemptService {
     @Transactional
     public void expireOverdueAttempts() {
         LocalDateTime now = LocalDateTime.now();
-        List<ExamAttempt> inProgress = attemptRepository.findByStatus(AttemptStatus.IN_PROGRESS);
-        List<ExamAttempt> overdue = inProgress.stream()
-                .filter(a -> a.getExpiresAt() != null && a.getExpiresAt().isBefore(now))
-                .toList();
+        List<ExamAttempt> overdue = attemptRepository.findOverdueForUpdate(AttemptStatus.IN_PROGRESS, now);
         for (ExamAttempt attempt : overdue) {
             attempt.setStatus(AttemptStatus.EXPIRED);
         }
@@ -220,6 +222,8 @@ public class AttemptServiceImpl implements AttemptService {
     // ---------------------------------------------------------------------
 
     private AttemptResultResponse scoreAttempt(ExamAttempt attempt) {
+        AttemptStatus terminalStatus = attempt.getStatus() == AttemptStatus.VIOLATED
+                ? AttemptStatus.VIOLATED : AttemptStatus.GRADED;
         attempt.setStatus(AttemptStatus.GRADING);
         attemptRepository.save(attempt);
 
@@ -228,31 +232,42 @@ public class AttemptServiceImpl implements AttemptService {
         Map<Long, Question> questionMap = questionIds.isEmpty()
                 ? Map.of()
                 : questionRepository.findAllById(questionIds).stream()
-                        .collect(Collectors.toMap(Question::getQuestionId, Function.identity()));
+                        .collect(Collectors.toMap(Question::getQuestionId, Function.identity(), (first, last) -> first));
 
         List<AttemptAnswer> answers = answerRepository.findByAttemptId(attempt.getAttemptId());
+        Map<Long, AttemptAnswer> answersByQuestion = answers.stream()
+                .collect(Collectors.toMap(AttemptAnswer::getQuestionId, Function.identity(), (first, last) -> last));
         double score = 0d;
-        int correctCount = 0;
 
-        for (AttemptAnswer answer : answers) {
-            Question question = questionMap.get(answer.getQuestionId());
+        for (ExamQuestion examQuestion : examQuestions) {
+            AttemptAnswer answer = answersByQuestion.get(examQuestion.getQuestionId());
+            if (answer == null) continue;
+            if (!hasAnswer(answer.getUserAnswerJson())) {
+                answer.setIsCorrect(null);
+                answer.setPointsEarned(0d);
+                continue;
+            }
+            Question question = questionMap.get(examQuestion.getQuestionId());
             if (question == null) {
                 answer.setIsCorrect(null);
+                answer.setPointsEarned(0d);
                 continue;
             }
 
             if (question.getCorrectAnswer() == null) {
                 answer.setIsCorrect(null);
+                answer.setPointsEarned(0d);
                 continue;
             }
 
-            boolean correct = isCorrect(answer.getUserAnswerJson(), question.getCorrectAnswer(), question.getQuestionType());
+            Boolean correct = isCorrect(answer.getUserAnswerJson(), question.getCorrectAnswer(), question.getQuestionType());
             answer.setIsCorrect(correct);
 
-            if (correct) {
-                answer.setPointsEarned(question.getPoints());
-                score += question.getPoints();
-                correctCount++;
+            double points = examQuestion.getPointsOverride() != null
+                    ? examQuestion.getPointsOverride() : question.getPoints();
+            if (Boolean.TRUE.equals(correct)) {
+                answer.setPointsEarned(points);
+                score += points;
             } else {
                 answer.setPointsEarned(0d);
             }
@@ -261,27 +276,65 @@ public class AttemptServiceImpl implements AttemptService {
         answerRepository.saveAll(answers);
 
         attempt.setScore(score);
-        attempt.setStatus(AttemptStatus.GRADED);
+        attempt.setStatus(terminalStatus);
         attemptRepository.save(attempt);
 
-        return buildResultResponse(attempt, examQuestions.size(), correctCount, answers);
+        return buildResultResponse(attempt, examQuestions, answers);
     }
 
-    private boolean isCorrect(String userAnswerJson, String correctAnswer, String questionType) {
+    private Boolean isCorrect(String userAnswerJson, String correctAnswer, String questionType) {
         if (userAnswerJson == null || correctAnswer == null) {
             return false;
         }
+        String type = questionType == null ? "" : questionType.trim().toUpperCase();
+        if ("ESSAY".equals(type)) return null;
         try {
             JsonNode userNode = objectMapper.readTree(userAnswerJson);
-            JsonNode correctNode = objectMapper.readTree(correctAnswer);
-
-            if ("ESSAY".equalsIgnoreCase(questionType)) {
-                return false;
+            JsonNode correctNode;
+            try {
+                correctNode = objectMapper.readTree(correctAnswer);
+            } catch (Exception invalidCorrectJson) {
+                if ("FILL_BLANK".equals(type)) {
+                    String userText = answerText(userNode);
+                    return userText != null && userText.trim().equalsIgnoreCase(correctAnswer.trim());
+                }
+                throw invalidCorrectJson;
             }
-            return userNode.equals(correctNode);
+
+            if ("MULTIPLE_CHOICE".equals(type) || "TRUE_FALSE".equals(type)
+                    || "TRUE_FALSE_NOT_GIVEN".equals(type)) {
+                if (userNode.isObject() && userNode.hasNonNull("selected")) {
+                    userNode = userNode.get("selected");
+                }
+                return userNode.equals(correctNode);
+            }
+            if ("FILL_BLANK".equals(type)) {
+                String userText = answerText(userNode);
+                String correctText = answerText(correctNode);
+                return userText != null && correctText != null
+                        && userText.trim().equalsIgnoreCase(correctText.trim());
+            }
+            return null;
         } catch (Exception e) {
-            return userAnswerJson.trim().equalsIgnoreCase(correctAnswer.trim());
+            if ("FILL_BLANK".equals(type)) {
+                return userAnswerJson.trim().equalsIgnoreCase(correctAnswer.trim());
+            }
+            if ("MULTIPLE_CHOICE".equals(type) || "TRUE_FALSE".equals(type)
+                    || "TRUE_FALSE_NOT_GIVEN".equals(type)) {
+                return userAnswerJson.trim().equals(correctAnswer.trim());
+            }
+            return null;
         }
+    }
+
+    private String answerText(JsonNode node) {
+        if (node.isTextual() || node.isNumber() || node.isBoolean()) return node.asText();
+        if (node.isObject()) {
+            for (String key : List.of("text", "value", "selected")) {
+                if (node.hasNonNull(key) && node.get(key).isValueNode()) return node.get(key).asText();
+            }
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------------
@@ -293,6 +346,11 @@ public class AttemptServiceImpl implements AttemptService {
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
     }
 
+    private ExamAttempt requireAttemptForUpdate(Long id) {
+        return attemptRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+    }
+
     private ExamAttempt requireOwnedAttempt(Long id, Long userId) {
         ExamAttempt attempt = requireAttempt(id);
         if (!Objects.equals(attempt.getUserId(), userId)) {
@@ -301,15 +359,44 @@ public class AttemptServiceImpl implements AttemptService {
         return attempt;
     }
 
+    private ExamAttempt requireOwnedAttemptForUpdate(Long id, Long userId) {
+        ExamAttempt attempt = requireAttemptForUpdate(id);
+        if (!Objects.equals(attempt.getUserId(), userId)) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
+        return attempt;
+    }
+
     private void ensureActive(ExamAttempt attempt) {
+        if (attempt.getStatus() == AttemptStatus.EXPIRED) {
+            throw new AttemptExpiredException();
+        }
         if (attempt.getStatus() != AttemptStatus.IN_PROGRESS) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
         if (attempt.getExpiresAt() != null && attempt.getExpiresAt().isBefore(LocalDateTime.now())) {
             attempt.setStatus(AttemptStatus.EXPIRED);
             attemptRepository.save(attempt);
-            throw new CommonException(ErrorCode.BAD_REQUEST);
+            throw new AttemptExpiredException();
         }
+    }
+
+    private void saveAnswerForAttempt(ExamAttempt attempt, SaveAnswerRequest request) {
+        examQuestionRepository.findByExamIdAndQuestionId(attempt.getExamId(), request.getQuestionId())
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        AttemptAnswer answer = answerRepository.findByAttemptIdAndQuestionId(
+                        attempt.getAttemptId(), request.getQuestionId())
+                .orElseGet(() -> AttemptAnswer.builder()
+                        .attemptId(attempt.getAttemptId())
+                        .questionId(request.getQuestionId())
+                        .build());
+        answer.setUserAnswerJson(request.getUserAnswerJson());
+        answer.setTimeSpentSeconds(Math.max(0, request.getTimeSpentSeconds()));
+        answerRepository.save(answer);
+        eventRepository.save(AttemptEvent.builder()
+                .attemptId(attempt.getAttemptId())
+                .eventType(EventType.AUTOSAVE)
+                .build());
     }
 
     private long timeRemainingSeconds(ExamAttempt attempt) {
@@ -352,17 +439,22 @@ public class AttemptServiceImpl implements AttemptService {
 
     private AttemptResultResponse buildResultResponse(ExamAttempt attempt) {
         List<AttemptAnswer> answers = answerRepository.findByAttemptId(attempt.getAttemptId());
-        long correct = answerRepository.countByAttemptIdAndIsCorrect(attempt.getAttemptId(), true);
-        long wrong = answers.stream().filter(a -> Boolean.FALSE.equals(a.getIsCorrect())).count();
-        int total = examQuestionRepository.countByExamId(attempt.getExamId());
-
-        return buildResultResponse(attempt, total, (int) correct, answers);
+        List<ExamQuestion> questions = examQuestionRepository.findByExamId(attempt.getExamId());
+        return buildResultResponse(attempt, questions, answers);
     }
 
-    private AttemptResultResponse buildResultResponse(ExamAttempt attempt, int totalQuestions,
-                                                      int correctCount, List<AttemptAnswer> answers) {
-        long wrongCount = answers.stream().filter(a -> Boolean.FALSE.equals(a.getIsCorrect())).count();
-        int unanswered = totalQuestions - answers.size();
+    private AttemptResultResponse buildResultResponse(ExamAttempt attempt, List<ExamQuestion> questions,
+                                                      List<AttemptAnswer> answers) {
+        java.util.Set<Long> examQuestionIds = questions.stream()
+                .map(ExamQuestion::getQuestionId).collect(Collectors.toSet());
+        List<AttemptAnswer> examAnswers = answers.stream()
+                .filter(answer -> examQuestionIds.contains(answer.getQuestionId()))
+                .collect(Collectors.toMap(AttemptAnswer::getQuestionId, Function.identity(), (first, last) -> last))
+                .values().stream().toList();
+        List<AttemptAnswer> answered = examAnswers.stream().filter(answer -> hasAnswer(answer.getUserAnswerJson())).toList();
+        int correctCount = (int) answered.stream().filter(answer -> Boolean.TRUE.equals(answer.getIsCorrect())).count();
+        long wrongCount = examAnswers.stream().filter(a -> Boolean.FALSE.equals(a.getIsCorrect())).count();
+        int unanswered = Math.max(0, questions.size() - answered.size());
 
         long timeTaken = 0;
         if (attempt.getStartedAt() != null && attempt.getSubmittedAt() != null) {
@@ -374,7 +466,7 @@ public class AttemptServiceImpl implements AttemptService {
                 .score(attempt.getScore())
                 .maxScore(attempt.getMaxScore())
                 .bandScore(attempt.getBandScore())
-                .totalQuestions(totalQuestions)
+                .totalQuestions(questions.size())
                 .correctCount(correctCount)
                 .wrongCount((int) wrongCount)
                 .unansweredCount(Math.max(0, unanswered))
@@ -382,5 +474,20 @@ public class AttemptServiceImpl implements AttemptService {
                 .timeTakenSeconds(Math.max(0, timeTaken))
                 .violationCount(attempt.getViolationCount())
                 .build();
+    }
+
+    private boolean hasAnswer(String userAnswerJson) {
+        if (userAnswerJson == null || userAnswerJson.isBlank()) return false;
+        try {
+            JsonNode node = objectMapper.readTree(userAnswerJson);
+            if (node.isNull()) return false;
+            String text = answerText(node);
+            if (text != null) return !text.isBlank();
+            if (node.isObject()) return !node.isEmpty();
+            if (node.isArray()) return !node.isEmpty();
+            return false;
+        } catch (Exception exception) {
+            return !userAnswerJson.isBlank();
+        }
     }
 }

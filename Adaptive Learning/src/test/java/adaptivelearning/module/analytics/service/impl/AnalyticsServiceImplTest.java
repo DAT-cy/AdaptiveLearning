@@ -9,6 +9,8 @@ import adaptivelearning.module.attempts.repository.AttemptAnswerRepository;
 import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
 import adaptivelearning.module.exams.entity.Exam;
 import adaptivelearning.module.exams.repository.ExamRepository;
+import adaptivelearning.module.exams.repository.ExamQuestionRepository;
+import adaptivelearning.module.questions.repository.QuestionRepository;
 import adaptivelearning.module.topics.entity.Topic;
 import adaptivelearning.module.topics.repository.TopicRepository;
 import adaptivelearning.module.users.entity.User;
@@ -55,7 +57,8 @@ class AnalyticsServiceImplTest {
 
         AnalyticsServiceImpl service = new AnalyticsServiceImpl(
                 answerRepository, attemptRepository, gapAnalysisRepository, recommendationRepository,
-                progressRepository, new ObjectMapper(), examRepository, topicRepository, userMapper);
+                progressRepository, new ObjectMapper(), examRepository, mock(ExamQuestionRepository.class),
+                mock(QuestionRepository.class), topicRepository, userMapper);
 
         var progress = service.getProgressOverview(5L, 3L);
 
@@ -101,7 +104,8 @@ class AnalyticsServiceImplTest {
 
         AnalyticsServiceImpl service = new AnalyticsServiceImpl(
                 answerRepository, attemptRepository, gapAnalysisRepository, recommendationRepository,
-                progressRepository, new ObjectMapper(), examRepository, topicRepository, userMapper);
+                progressRepository, new ObjectMapper(), examRepository, mock(ExamQuestionRepository.class),
+                mock(QuestionRepository.class), topicRepository, userMapper);
 
         var report = service.getAdminOverview("30d", 3L);
 

@@ -15,6 +15,7 @@ import adaptivelearning.module.attempts.dto.response.AttemptDetailResponse;
 import adaptivelearning.module.attempts.dto.response.AttemptResponse;
 import adaptivelearning.module.attempts.dto.response.AttemptResultResponse;
 import adaptivelearning.module.attempts.service.AttemptService;
+import adaptivelearning.module.attempts.service.AttemptSubmissionOutcome;
 import adaptivelearning.module.users.entity.Role;
 import adaptivelearning.utils.ClientUtils;
 import adaptivelearning.utils.SecurityUtils;
@@ -79,9 +80,9 @@ public class AttemptController {
             @PathVariable Long id, @RequestBody(required = false) SubmitAttemptRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
         SubmitAttemptRequest body = (request != null) ? request : new SubmitAttemptRequest();
-        AttemptResultResponse data = attemptService.submitAttempt(id, userId, body);
-        adaptiveUpdateDispatcher.updateAfterAttempt(userId, id);
-        return ResponseEntity.ok(DefaultRes.res(StatusCode.OK, ResponseMessage.UPDATED, data));
+        AttemptSubmissionOutcome outcome = attemptService.submitAttemptWithOutcome(id, userId, body);
+        if (outcome.newlySubmitted()) adaptiveUpdateDispatcher.updateAfterAttempt(userId, id);
+        return ResponseEntity.ok(DefaultRes.res(StatusCode.OK, ResponseMessage.UPDATED, outcome.result()));
     }
 
     @GetMapping("/{id}/result")
@@ -100,7 +101,8 @@ public class AttemptController {
     @Operation(summary = "Record a violation event for an attempt")
     public ResponseEntity<DefaultRes<Void>> recordViolation(
             @PathVariable Long id, @RequestBody ViolationRequest request) {
-        attemptService.recordViolation(id, request);
+        attemptService.recordViolation(id, SecurityUtils.getCurrentUserId(),
+                SecurityUtils.hasRole(Role.ROLE_ADMIN), request);
         return ResponseEntity.ok(DefaultRes.res(StatusCode.OK, ResponseMessage.SUCCESS));
     }
 

@@ -16,5 +16,7 @@ public interface SpeakingService {
 
     SpeakingEvaluationResponse evaluate(Long userId, Long submissionId, Long rubricId);
 
-    List<SpeakingEvaluationResponse> listEvaluations(Long submissionId);
+    List<SpeakingEvaluationResponse> listEvaluations(Long userId, Long submissionId);
+
+    SpeakingEvaluationResponse getEvaluation(Long userId, Long evaluationId);
 }

@@ -1,0 +1,1 @@
+export const EMAIL_RESEND_COOLDOWN_MS = 60_000

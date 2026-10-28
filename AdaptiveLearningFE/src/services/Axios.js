@@ -40,6 +40,10 @@ function getStatusMessage(code) {
   return statusMessages[code] || `Yêu cầu thất bại (mã lỗi ${code}).`
 }
 
+function isPublicAuthRequest(url = '') {
+  return /^\/api\/v1\/auth\/(?:login|google(?:\/config)?|signup(?:\/(?:verify|resend))?)$/.test(url)
+}
+
 const handleCode = (code) => {
   const userStore = useUserStore()
   switch (code) {
@@ -74,7 +78,7 @@ function getInstance() {
   axiosInstance.interceptors.request.use(
     config => {
       const token = getToken()
-      if (token) {
+      if (token && !isPublicAuthRequest(config.url)) {
         config.headers.Authorization = `Bearer ${token}`;
       }
       const shouldDebounce = debounce.some(url => config.url.includes(url));
@@ -121,15 +125,17 @@ function getInstance() {
         const responseCode = response.data?.responseCode
         if (['PREMIUM_REQUIRED', 'FREE_LIMIT_REACHED'].includes(responseCode)) {
           router.push({ path: '/pricing', query: { reason: responseCode } })
-        } else {
+        } else if (!isPublicAuthRequest(error.config?.url)) {
           handleCode(status)
         }
         return Promise.reject(error)
       } else {
         const timedOut = error.code === 'ECONNABORTED' || message?.toLowerCase().includes('timeout')
-        showError(timedOut
-          ? 'Máy chủ phản hồi quá thời gian chờ. Vui lòng thử lại.'
-          : 'Không thể kết nối tới máy chủ. Hãy kiểm tra backend và thử lại.')
+        if (!isPublicAuthRequest(error.config?.url)) {
+          showError(timedOut
+            ? 'Máy chủ phản hồi quá thời gian chờ. Vui lòng thử lại.'
+            : 'Không thể kết nối tới máy chủ. Hãy kiểm tra backend và thử lại.')
+        }
         return Promise.reject(error)
       }
     })

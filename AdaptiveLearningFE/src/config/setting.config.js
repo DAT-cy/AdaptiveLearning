@@ -18,7 +18,7 @@ export const setting = {
   routerMode: 'history',
 
   /* Danh sách các route không cần token. */
-  routesWhiteList: ['/login', '/register', '/verify-email', '/404', '/'],
+  routesWhiteList: ['/login', '/register', '/verify-email', '/404', '/403', '/'],
 
   /* Tên token BE. */
   tokenName: 'token',

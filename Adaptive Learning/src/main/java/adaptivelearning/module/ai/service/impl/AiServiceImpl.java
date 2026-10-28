@@ -15,6 +15,11 @@ import adaptivelearning.module.ai.repository.AiEvaluationRepository;
 import adaptivelearning.module.ai.repository.AiJobRepository;
 import adaptivelearning.module.ai.repository.RubricRepository;
 import adaptivelearning.module.ai.service.AiService;
+import adaptivelearning.module.attempts.entity.ExamAttempt;
+import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
+import adaptivelearning.module.exams.entity.Exam;
+import adaptivelearning.module.exams.repository.ExamQuestionRepository;
+import adaptivelearning.module.exams.repository.ExamRepository;
 import adaptivelearning.shared.enums.AiJobStatus;
 import adaptivelearning.shared.enums.AiJobType;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,7 +30,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,14 +47,19 @@ public class AiServiceImpl implements AiService {
     private final RubricRepository rubricRepository;
     private final AiProvider aiProvider;
     private final ObjectMapper objectMapper;
+    private final ExamAttemptRepository attemptRepository;
+    private final ExamQuestionRepository examQuestionRepository;
+    private final ExamRepository examRepository;
 
     @Override
     public AiEvaluationResponse gradeWriting(AiGradeRequest request) {
         validateGradeRequest(request);
+        ExamAttempt attempt = requireQuestionInAttempt(request.getAttemptId(), request.getQuestionId());
 
         Rubric rubric = null;
         if (request.getRubricId() != null) {
             rubric = findRubric(request.getRubricId());
+            requireRubricMatchesAttempt(rubric, attempt);
         }
 
         String systemPrompt = buildWritingPrompt(rubric);
@@ -81,15 +90,17 @@ public class AiServiceImpl implements AiService {
 
     @Override
     @Transactional(readOnly = true)
-    public AiEvaluationResponse getEvaluation(Long evaluationId) {
+    public AiEvaluationResponse getEvaluation(Long evaluationId, Long userId, boolean admin) {
         AiEvaluation evaluation = evaluationRepository.findById(evaluationId)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        requireAttemptOwner(evaluation.getAttemptId(), userId, admin);
         return toEvaluationResponse(evaluation);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<AiEvaluationResponse> getEvaluationByAttempt(Long attemptId) {
+    public List<AiEvaluationResponse> getEvaluationByAttempt(Long attemptId, Long userId, boolean admin) {
+        requireAttemptOwner(attemptId, userId, admin);
         return evaluationRepository.findByAttemptId(attemptId).stream()
                 .map(this::toEvaluationResponse)
                 .collect(Collectors.toList());
@@ -97,6 +108,7 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public RubricResponse createRubric(RubricRequest request) {
+        validateRubricCriteria(request.getCriteriaJson());
         Rubric rubric = Rubric.builder()
                 .certificateId(request.getCertificateId())
                 .skill(request.getSkill())
@@ -111,6 +123,7 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public RubricResponse updateRubric(Long rubricId, RubricRequest request) {
+        validateRubricCriteria(request.getCriteriaJson());
         Rubric rubric = findRubric(rubricId);
         rubric.setCertificateId(request.getCertificateId());
         rubric.setSkill(request.getSkill());
@@ -126,14 +139,19 @@ public class AiServiceImpl implements AiService {
     @Override
     @Transactional(readOnly = true)
     public List<RubricResponse> getRubricsByCertificate(Long certificateId) {
-        return rubricRepository.findByCertificateId(certificateId).stream()
+        return rubricRepository.findByCertificateIdAndIsActive(certificateId, true).stream()
                 .map(this::toRubricResponse)
                 .collect(Collectors.toList());
     }
 
     @Override
-    public AiJobResponse submitGradeJob(AiGradeRequest request) {
+    public AiJobResponse submitGradeJob(AiGradeRequest request, Long userId, boolean admin) {
         validateGradeRequest(request);
+        ExamAttempt attempt = requireAttemptOwner(request.getAttemptId(), userId, admin);
+        requireQuestionInAttempt(request.getAttemptId(), request.getQuestionId());
+        if (request.getRubricId() != null) {
+            requireRubricMatchesAttempt(findRubric(request.getRubricId()), attempt);
+        }
 
         String idempotencyKey = "GRADE_WRITING:" + request.getAttemptId() + ":" + request.getQuestionId();
 
@@ -157,31 +175,20 @@ public class AiServiceImpl implements AiService {
                         .status(AiJobStatus.PENDING)
                         .build()));
 
-        if (job.getStatus() == AiJobStatus.PENDING) {
-            processJobAsync(job, request);
-        }
-
         return toJobResponse(job);
     }
 
-    @Async
     @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void processPendingJobs() {
-        List<AiJob> pendingJobs = jobRepository.findByStatus(AiJobStatus.PENDING);
-        for (AiJob job : pendingJobs) {
-            log.info("Processing pending job {}", job.getJobId());
-            if (job.getJobType() != AiJobType.GRADE_WRITING) {
-                continue;
-            }
-            evaluationRepository.findByAttemptId(job.getInputRefId()).stream()
-                    .filter(evaluation -> evaluation.getStatus() == AiJobStatus.PENDING)
-                    .findFirst()
-                    .ifPresent(evaluation -> processJobAsync(job, AiGradeRequest.builder()
-                            .attemptId(evaluation.getAttemptId())
-                            .questionId(evaluation.getQuestionId())
-                            .rubricId(evaluation.getRubricId())
-                            .userAnswerText(evaluation.getUserAnswerText())
-                            .build()));
+        List<AiJobStatus> claimable = List.of(AiJobStatus.PENDING, AiJobStatus.RETRYING);
+        List<AiJob> candidates = jobRepository.findByStatusInOrderByJobIdAsc(claimable);
+        for (AiJob candidate : candidates) {
+            if (candidate.getJobType() != AiJobType.GRADE_WRITING) continue;
+            int claimed = jobRepository.claimIfStatusMatches(candidate.getJobId(), claimable,
+                    AiJobStatus.PROCESSING, LocalDateTime.now());
+            if (claimed == 0) continue;
+            jobRepository.findById(candidate.getJobId()).ifPresent(this::processClaimedJob);
         }
     }
 
@@ -192,9 +199,16 @@ public class AiServiceImpl implements AiService {
         if (job.getStatus() != AiJobStatus.FAILED) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
+        job.setRetryCount(0);
         job.setStatus(AiJobStatus.PENDING);
-        job.setRetryCount(job.getRetryCount() + 1);
         job.setErrorMessage(null);
+        job.setCompletedAt(null);
+        Long questionId = questionIdFromIdempotencyKey(job.getIdempotencyKey());
+        evaluationRepository.findByAttemptIdAndQuestionId(job.getInputRefId(), questionId)
+                .ifPresent(evaluation -> {
+                    evaluation.setStatus(AiJobStatus.PENDING);
+                    evaluationRepository.save(evaluation);
+                });
         AiJob saved = jobRepository.save(job);
         log.info("Retrying job {}", saved.getJobId());
         return toJobResponse(saved);
@@ -208,12 +222,18 @@ public class AiServiceImpl implements AiService {
                 .collect(Collectors.toList());
     }
 
-    private void processJobAsync(AiJob job, AiGradeRequest request) {
-        job.setStatus(AiJobStatus.PROCESSING);
-        job.setStartedAt(LocalDateTime.now());
-        jobRepository.save(job);
-
+    private void processClaimedJob(AiJob job) {
         try {
+            Long questionId = questionIdFromIdempotencyKey(job.getIdempotencyKey());
+            AiEvaluation evaluation = evaluationRepository.findByAttemptIdAndQuestionIdAndStatusIn(
+                            job.getInputRefId(), questionId, List.of(AiJobStatus.PENDING, AiJobStatus.RETRYING))
+                    .orElseThrow(() -> new IllegalStateException("Pending evaluation not found"));
+            AiGradeRequest request = AiGradeRequest.builder()
+                    .attemptId(evaluation.getAttemptId())
+                    .questionId(evaluation.getQuestionId())
+                    .rubricId(evaluation.getRubricId())
+                    .userAnswerText(evaluation.getUserAnswerText())
+                    .build();
             AiEvaluationResponse response = gradeWriting(request);
             job.setStatus(AiJobStatus.SUCCEEDED);
             job.setOutputRefType("AI_EVALUATION");
@@ -221,13 +241,28 @@ public class AiServiceImpl implements AiService {
             job.setCompletedAt(LocalDateTime.now());
         } catch (RuntimeException ex) {
             job.setRetryCount(job.getRetryCount() + 1);
-            job.setErrorMessage(ex.getMessage());
+            job.setErrorMessage("AI grading failed (" + ex.getClass().getSimpleName() + ")");
             job.setStatus(job.getRetryCount() < job.getMaxRetries()
                     ? AiJobStatus.RETRYING : AiJobStatus.FAILED);
-            log.error("Job {} failed: {}", job.getJobId(), ex.getMessage());
+            log.warn("AI job {} failed with {}", job.getJobId(), ex.getClass().getSimpleName());
+            evaluationRepository.findByAttemptIdAndQuestionId(job.getInputRefId(), questionIdFromIdempotencyKey(
+                    job.getIdempotencyKey())).ifPresent(evaluation -> {
+                evaluation.setStatus(job.getStatus());
+                evaluationRepository.save(evaluation);
+            });
         }
 
         jobRepository.save(job);
+    }
+
+    private Long questionIdFromIdempotencyKey(String idempotencyKey) {
+        try {
+            String[] parts = idempotencyKey.split(":");
+            if (parts.length != 3 || !"GRADE_WRITING".equals(parts[0])) throw new IllegalArgumentException();
+            return Long.valueOf(parts[2]);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Invalid AI job reference");
+        }
     }
 
     private String buildWritingPrompt(Rubric rubric) {
@@ -248,24 +283,25 @@ public class AiServiceImpl implements AiService {
     private void parseEvaluationResponse(String raw, AiEvaluation evaluation) {
         try {
             JsonNode root = objectMapper.readTree(raw);
-
-            if (root.has("overallScore") && root.get("overallScore").isNumber()) {
-                evaluation.setOverallScore(root.get("overallScore").doubleValue());
+            JsonNode score = root.path("overallScore");
+            JsonNode criteria = root.path("criteria");
+            JsonNode errors = root.path("errors");
+            JsonNode strengths = root.path("strengths");
+            JsonNode confidence = root.path("confidence");
+            if (!root.isObject() || !score.isNumber() || score.doubleValue() < 0 || score.doubleValue() > 10
+                    || !criteria.isArray() || !errors.isArray() || !strengths.isArray()
+                    || !confidence.isNumber() || confidence.doubleValue() < 0 || confidence.doubleValue() > 1
+                    || !root.path("rewriteSuggestion").isTextual()) {
+                throw new IllegalArgumentException("AI evaluation response does not match grading schema");
             }
-
-            evaluation.setCriteriaJson(extractField(root, "criteria"));
-            evaluation.setErrorsJson(extractField(root, "errors"));
-            evaluation.setStrengthsJson(extractField(root, "strengths"));
-
-            if (root.has("rewriteSuggestion")) {
-                evaluation.setRewriteSuggestion(root.get("rewriteSuggestion").asText(null));
-            }
-
-            if (root.has("confidence") && root.get("confidence").isNumber()) {
-                evaluation.setConfidence(root.get("confidence").doubleValue());
-            }
+            evaluation.setOverallScore(score.doubleValue());
+            evaluation.setCriteriaJson(criteria.toString());
+            evaluation.setErrorsJson(errors.toString());
+            evaluation.setStrengthsJson(strengths.toString());
+            evaluation.setRewriteSuggestion(root.path("rewriteSuggestion").asText());
+            evaluation.setConfidence(confidence.doubleValue());
         } catch (Exception ex) {
-            log.warn("Failed to parse AI evaluation JSON response: {}", ex.getMessage());
+            log.warn("AI evaluation response failed schema validation");
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
     }
@@ -280,13 +316,59 @@ public class AiServiceImpl implements AiService {
 
     private void validateGradeRequest(AiGradeRequest request) {
         if (request == null || request.getAttemptId() == null || request.getQuestionId() == null
-                || request.getUserAnswerText() == null || request.getUserAnswerText().isBlank()) {
+                || request.getUserAnswerText() == null || request.getUserAnswerText().isBlank()
+                || request.getUserAnswerText().length() > 20000) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private ExamAttempt requireAttemptOwner(Long attemptId, Long userId, boolean admin) {
+        ExamAttempt attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        if (!admin && !java.util.Objects.equals(attempt.getUserId(), userId)) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
+        return attempt;
+    }
+
+    private ExamAttempt requireQuestionInAttempt(Long attemptId, Long questionId) {
+        ExamAttempt attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        if (examQuestionRepository.findByExamIdAndQuestionId(attempt.getExamId(), questionId).isEmpty()) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        return attempt;
+    }
+
+    private void requireRubricMatchesAttempt(Rubric rubric, ExamAttempt attempt) {
+        Exam exam = examRepository.findById(attempt.getExamId())
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        if (!java.util.Objects.equals(rubric.getCertificateId(), exam.getCertificateId())) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private void validateRubricCriteria(String criteriaJson) {
+        try {
+            JsonNode criteria = objectMapper.readTree(criteriaJson);
+            if (!criteria.isArray() || criteria.isEmpty()) throw new IllegalArgumentException();
+            for (JsonNode criterion : criteria) {
+                if (!criterion.isObject() || !criterion.hasNonNull("name")
+                        || !criterion.hasNonNull("maxScore")
+                        || !criterion.path("name").isTextual()
+                        || criterion.path("name").asText().isBlank()
+                        || !criterion.path("maxScore").isNumber()
+                        || criterion.path("maxScore").doubleValue() <= 0) {
+                    throw new IllegalArgumentException();
+                }
+            }
+        } catch (Exception exception) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
     }
 
     private Rubric findRubric(Long rubricId) {
-        return rubricRepository.findById(rubricId)
+        return rubricRepository.findByRubricIdAndIsActive(rubricId, true)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
     }
 

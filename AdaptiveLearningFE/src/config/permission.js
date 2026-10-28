@@ -26,13 +26,18 @@ const { loginInterception, progressBar, recordRoute, routesWhiteList } = setting
 
 function landingPath(role) {
   if (role === 'ROLE_ADMIN') return '/admin'
-  return '/home'
+  if (role === 'ROLE_USER') return '/home'
+  return '/login'
 }
 
 function roleRedirect(to, role) {
+  if (!loginInterception) return null
   if (to.path === '/login') return landingPath(role)
   const allowedRoles = to.meta.allowedRoles || (to.meta.requiredRole ? [to.meta.requiredRole] : null)
-  if (allowedRoles && !allowedRoles.includes(role)) return landingPath(role)
+  if (allowedRoles && !allowedRoles.includes(role)) {
+    const target = landingPath(role)
+    return target !== to.path ? target : (role ? '/404' : '/login')
+  }
   return null
 }
 
@@ -62,37 +67,42 @@ router.beforeEach(async (to, from, next) => {
   if (!loginInterception) hasToken = true
 
   if (hasToken) {
-    // Nếu tuyến mục tiêu là trang đăng nhập, hãy chuyển hướng đến trang chủ
+    // Nếu tuyến mục tiêu là trang đăng nhập, hãy chuyển hướng đến trang chủ theo quyền
     if (to.path === '/login') {
       try {
         if (!userStore.state.role && loginInterception) await userStore.getInfo()
-        next(roleRedirect(to, userStore.state.role) || '/home')
+        const redirect = landingPath(userStore.state.role)
+        if (redirect && redirect !== '/login') {
+          next(redirect)
+        } else {
+          next()
+        }
       } catch {
         userStore.resetToken()
         next()
       }
       progressBar && NProgress.done()
     } else {
-      // Kiểm tra xem người dùng có các quyền cần thiết hay không
-      let hasGetUserInfo = userStore.getterUserName
+      // Kiểm tra xem đã lấy được vai trò/thông tin người dùng chưa
+      let hasGetUserInfo = Boolean(userStore.state.role)
 
       // Nếu việc chặn đăng nhập bị tắt, hãy coi như người dùng có các quyền cần thiết
       if (!loginInterception) hasGetUserInfo = true
 
       if (hasGetUserInfo) {
-        // Người dùng có các quyền cần thiết, tiến tới tuyến đường đích
+        // Người dùng có các quyền cần thiết, tiến tới tuyến đường đích nếu được phép
         const redirect = roleRedirect(to, userStore.state.role)
-        if (redirect) next(redirect)
+        if (redirect && redirect !== to.path) next(redirect)
         else next()
       } else {
         try {
-          // Lấy thông tin người dùng
+          // Lấy thông tin người dùng từ backend
           await userStore.getInfo()
           const redirect = roleRedirect(to, userStore.state.role)
-          if (redirect) next(redirect)
+          if (redirect && redirect !== to.path) next(redirect)
           else next()
         } catch (error) {
-          // Người dùng không có quyền cần thiết, đặt lại mã thông báo và chuyển hướng đến trang đăng nhập
+          // Người dùng không có quyền cần thiết / token hết hạn, đặt lại mã thông báo và chuyển hướng đến trang đăng nhập
           userStore.resetToken()
           next(`/login?redirect=${to.path}`)
           progressBar && NProgress.done()

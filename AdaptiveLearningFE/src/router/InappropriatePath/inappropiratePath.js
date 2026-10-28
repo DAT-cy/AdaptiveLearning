@@ -10,4 +10,14 @@ export default [
     },
     component: loadView('InappropriatePath', '404'),
   },
+  {
+    path: '/403',
+    name: 'Forbidden',
+    meta: {
+      title: 'Truy cập bị từ chối',
+      layout: 'only-view'
+    },
+    component: loadView('InappropriatePath', '403'),
+  },
 ]
+

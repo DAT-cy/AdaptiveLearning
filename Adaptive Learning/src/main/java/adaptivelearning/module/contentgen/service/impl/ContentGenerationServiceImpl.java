@@ -1,21 +1,304 @@
 package adaptivelearning.module.contentgen.service.impl;
 
-import adaptivelearning.config.response.*; import adaptivelearning.module.ai.gateway.AiProvider; import adaptivelearning.module.contentgen.dto.request.GenerateQuestionsRequest; import adaptivelearning.module.contentgen.dto.response.ContentGenerationResponse; import adaptivelearning.module.contentgen.entity.ContentGeneration; import adaptivelearning.module.contentgen.repository.ContentGenerationRepository; import adaptivelearning.module.contentgen.service.ContentGenerationService; import adaptivelearning.module.questions.entity.Question; import adaptivelearning.module.questions.repository.QuestionRepository; import adaptivelearning.module.rag.dto.response.KnowledgeContextResponse; import adaptivelearning.module.rag.service.RagService; import adaptivelearning.shared.enums.ContentStatus; import adaptivelearning.shared.enums.GenerationStatus; import adaptivelearning.shared.enums.QuestionDifficulty; import adaptivelearning.utils.SecurityUtils;
-import com.fasterxml.jackson.databind.*; import java.time.LocalDateTime; import java.util.*; import lombok.RequiredArgsConstructor; import org.springframework.beans.factory.annotation.Value; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional;
+import adaptivelearning.config.response.CommonException;
+import adaptivelearning.config.response.ErrorCode;
+import adaptivelearning.module.ai.gateway.AiProvider;
+import adaptivelearning.module.certificates.repository.CertificateRepository;
+import adaptivelearning.module.contentgen.dto.request.GenerateQuestionsRequest;
+import adaptivelearning.module.contentgen.dto.response.ContentGenerationResponse;
+import adaptivelearning.module.contentgen.entity.ContentGeneration;
+import adaptivelearning.module.contentgen.repository.ContentGenerationRepository;
+import adaptivelearning.module.contentgen.service.ContentGenerationService;
+import adaptivelearning.module.questions.entity.Question;
+import adaptivelearning.module.questions.repository.QuestionRepository;
+import adaptivelearning.module.rag.dto.response.KnowledgeContextResponse;
+import adaptivelearning.module.rag.service.RagService;
+import adaptivelearning.module.topics.entity.Topic;
+import adaptivelearning.module.topics.repository.TopicRepository;
+import adaptivelearning.shared.enums.ContentStatus;
+import adaptivelearning.shared.enums.GenerationStatus;
+import adaptivelearning.shared.enums.QuestionDifficulty;
+import adaptivelearning.utils.SecurityUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-@Service @RequiredArgsConstructor @Transactional
+@Service
+@RequiredArgsConstructor
+@Transactional
+@Slf4j
 public class ContentGenerationServiceImpl implements ContentGenerationService {
-    private final ContentGenerationRepository repo; private final QuestionRepository questions; private final RagService ragService; private final AiProvider ai; private final ObjectMapper mapper;
-    @Value("${gemini.model:${ai.model:gemini-2.5-flash}}") private String model;
-    public ContentGenerationResponse submit(Long userId, GenerateQuestionsRequest req){ ContentGeneration g=new ContentGeneration(); g.setRequestedBy(userId); g.setCertificateId(req.getCertificateId()); g.setTopicId(req.getTopicId()); g.setGenerationType("QUESTIONS"); g.setPrompt(req.getInstructions()); g.setParametersJson(toString(req)); g.setStatus(GenerationStatus.PENDING); g.setModel(model); g.setItemCount(req.getCount()); ContentGeneration saved=repo.save(g); processOne(saved); return map(saved); }
-    @Transactional(readOnly=true) public ContentGenerationResponse get(Long userId,Long id){ ContentGeneration g=repo.findById(id).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); if(!g.getRequestedBy().equals(userId)) throw new CommonException(ErrorCode.FORBIDDEN_ERROR); return map(g); }
-    @Transactional(readOnly=true) public List<ContentGenerationResponse> list(Long userId){ return repo.findByRequestedByOrderByCreatedAtDesc(userId).stream().map(this::map).toList(); }
-    public ContentGenerationResponse apply(Long id,Long userId){ ContentGeneration g=repo.findById(id).orElseThrow(()->new CommonException(ErrorCode.ENTITY_NOT_FOUND)); if(g.getStatus()!=GenerationStatus.READY) throw new CommonException(ErrorCode.BAD_REQUEST); JsonNode generated; try { generated=mapper.readTree(g.getResultJson()); } catch(Exception e) { throw new CommonException(ErrorCode.BAD_REQUEST); } if(!generated.isArray() || generated.isEmpty()) throw new CommonException(ErrorCode.BAD_REQUEST); GenerateQuestionsRequest request=fromParameters(g); List<Question> drafts=new ArrayList<>(); for(JsonNode item:generated){ String content=item.path("content").asText("").trim(); String type=item.path("questionType").asText(request.getQuestionType()); JsonNode options=item.path("options"); JsonNode answer=item.path("correctAnswer"); if(content.isEmpty() || answer.isMissingNode() || answer.isNull()) throw new CommonException(ErrorCode.BAD_REQUEST); String optionsJson=options.isMissingNode() || options.isNull() ? null : options.isTextual() ? options.asText() : options.toString(); drafts.add(Question.builder().certificateId(g.getCertificateId()).topicId(g.getTopicId()).questionType(type).difficulty(parseDifficulty(request.getDifficulty())).content(content).contentJson(item.path("sourceChunkIds").toString()).optionsJson(optionsJson).correctAnswer(answer.isTextual() ? mapper.valueToTree(answer.asText()).toString() : answer.toString()).explanation(item.path("explanation").asText(null)).points(1.0).estimatedTimeSeconds(60).status(ContentStatus.DRAFT).version(1).createdBy(SecurityUtils.getCurrentUsername()).tags("AI_GENERATED").build()); } questions.saveAll(drafts); g.setStatus(GenerationStatus.APPLIED); return map(repo.save(g)); }
-    public void processPending(){ repo.findByStatus(GenerationStatus.PENDING).forEach(this::processOne); }
-    private void processOne(ContentGeneration g){ g.setStatus(GenerationStatus.PROCESSING); g.setStartedAt(LocalDateTime.now()); repo.save(g); try{ GenerateQuestionsRequest req=fromParameters(g); String searchText=req.getQuestionType()+" "+req.getDifficulty()+" "+req.getInstructions(); List<KnowledgeContextResponse> sources=ragService.retrieveKnowledge(g.getCertificateId(),g.getTopicId(),searchText,6); if(sources.isEmpty()) throw new IllegalStateException("Chưa có đoạn kiến thức phù hợp trong kho tài liệu của kỳ thi và kỹ năng này."); String context=sources.stream().map(source->"[chunkId="+source.getChunkId()+"; tài liệu="+source.getTitle()+"; đoạn="+source.getChunkIndex()+"]\n"+source.getContent()).collect(java.util.stream.Collectors.joining("\n\n")); String system="Create original practice questions grounded ONLY in the provided knowledge excerpts. Do not add facts absent from them and do not claim the questions are official exam questions. If the excerpts do not support a question, do not create it. Return ONLY a JSON array; each object MUST have questionType, content, options (array of {label,text}, or [] for non-choice), correctAnswer, explanation, and sourceChunkIds (array of numeric chunkId values copied from the excerpts). No markdown."; String user="Exam: "+g.getCertificateId()+"\nTopic: "+g.getTopicId()+"\nQuestion type: "+req.getQuestionType()+"\nCount: "+req.getCount()+"\nDifficulty: "+req.getDifficulty()+"\nAdmin instructions: "+req.getInstructions()+"\n\nKnowledge excerpts:\n"+context; String raw=ai.chatCompletionSync(system,user,model,4000); JsonNode parsed=validate(raw,sources.stream().map(KnowledgeContextResponse::getChunkId).collect(java.util.stream.Collectors.toSet())); g.setResultJson(parsed.toString()); g.setStatus(GenerationStatus.READY); g.setItemCount(parsed.size()); }catch(Exception e){ g.setStatus(GenerationStatus.FAILED); g.setErrorMessage(e.getMessage()); } finally { g.setCompletedAt(LocalDateTime.now()); repo.save(g); } }
-    private JsonNode validate(String raw,Set<Long> allowedSources){ try{ JsonNode n=mapper.readTree(raw); if(!n.isArray()||n.isEmpty()) throw new IllegalArgumentException(); for(JsonNode q:n){ for(String f:List.of("questionType","content","options","correctAnswer","explanation","sourceChunkIds")) if(!q.hasNonNull(f)) throw new IllegalArgumentException(); if(!q.path("content").isTextual() || !q.path("options").isArray() || !q.path("sourceChunkIds").isArray() || q.path("sourceChunkIds").isEmpty() || q.path("content").asText().isBlank()) throw new IllegalArgumentException(); for(JsonNode sourceId:q.path("sourceChunkIds")) if(!sourceId.canConvertToLong() || !allowedSources.contains(sourceId.asLong())) throw new IllegalArgumentException(); } return n; }catch(Exception e){ throw new CommonException(ErrorCode.BAD_REQUEST); } }
-    private QuestionDifficulty parseDifficulty(String value){ try{return QuestionDifficulty.valueOf(value == null ? "MEDIUM" : value.toUpperCase(Locale.ROOT));}catch(IllegalArgumentException e){return QuestionDifficulty.MEDIUM;} }
-    private String toString(GenerateQuestionsRequest r){ try{return mapper.writeValueAsString(r);}catch(Exception e){return "{}";} }
-    private GenerateQuestionsRequest fromParameters(ContentGeneration g){ try{return mapper.readValue(g.getParametersJson(),GenerateQuestionsRequest.class);}catch(Exception e){throw new CommonException(ErrorCode.BAD_REQUEST);} }
-    private ContentGenerationResponse map(ContentGeneration g){ return ContentGenerationResponse.builder().generationId(g.getGenerationId()).requestedBy(g.getRequestedBy()).certificateId(g.getCertificateId()).topicId(g.getTopicId()).generationType(g.getGenerationType()).prompt(g.getPrompt()).parametersJson(g.getParametersJson()).resultJson(g.getResultJson()).status(g.getStatus()).model(g.getModel()).itemCount(g.getItemCount()).errorMessage(g.getErrorMessage()).startedAt(g.getStartedAt()).completedAt(g.getCompletedAt()).build(); }
+
+    private static final int MAX_QUESTION_LENGTH = 20_000;
+
+    private final ContentGenerationRepository repository;
+    private final QuestionRepository questions;
+    private final RagService ragService;
+    private final AiProvider aiProvider;
+    private final ObjectMapper objectMapper;
+    private final CertificateRepository certificates;
+    private final TopicRepository topics;
+
+    @Value("${gemini.model:${ai.model:gemini-2.5-flash}}")
+    private String model;
+
+    @Override
+    public ContentGenerationResponse submit(Long userId, GenerateQuestionsRequest request) {
+        validateRequest(request);
+        if (!certificates.existsById(request.getCertificateId())) {
+            throw new CommonException(ErrorCode.ENTITY_NOT_FOUND);
+        }
+        Topic topic = topics.findById(request.getTopicId())
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        if (!topic.isActive() || !Objects.equals(topic.getCertificateId(), request.getCertificateId())) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+
+        ContentGeneration generation = new ContentGeneration();
+        generation.setRequestedBy(userId);
+        generation.setCertificateId(request.getCertificateId());
+        generation.setTopicId(request.getTopicId());
+        generation.setGenerationType("QUESTIONS");
+        generation.setPrompt(request.getInstructions());
+        generation.setParametersJson(toJson(request));
+        generation.setStatus(GenerationStatus.PENDING);
+        generation.setModel(model);
+        generation.setItemCount(request.getCount());
+        ContentGeneration saved = repository.save(generation);
+
+        // This MVP performs retrieval and provider generation in the request thread.
+        processOne(saved);
+        return toResponse(saved);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ContentGenerationResponse get(Long userId, Long id) {
+        ContentGeneration generation = findOwned(userId, id);
+        return toResponse(generation);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ContentGenerationResponse> list(Long userId) {
+        return repository.findByRequestedByOrderByCreatedAtDesc(userId).stream()
+                .map(this::toResponse).toList();
+    }
+
+    @Override
+    public ContentGenerationResponse apply(Long id, Long userId) {
+        ContentGeneration generation = findOwned(userId, id);
+        if (generation.getStatus() != GenerationStatus.READY) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+
+        JsonNode generated;
+        try {
+            generated = objectMapper.readTree(generation.getResultJson());
+        } catch (Exception exception) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        GenerateQuestionsRequest request = fromParameters(generation);
+        validateGeneratedBatch(generated, request, embeddedSourceIds(generated));
+
+        List<Question> drafts = new ArrayList<>();
+        for (JsonNode item : generated) {
+            JsonNode answer = item.path("correctAnswer");
+            drafts.add(Question.builder()
+                    .certificateId(generation.getCertificateId())
+                    .topicId(generation.getTopicId())
+                    .questionType(item.path("questionType").asText())
+                    .difficulty(parseDifficulty(request.getDifficulty()))
+                    .content(item.path("content").asText().trim())
+                    .contentJson(item.path("sourceChunkIds").toString())
+                    .optionsJson(item.path("options").toString())
+                    .correctAnswer(answer.isTextual()
+                            ? objectMapper.valueToTree(answer.asText()).toString() : answer.toString())
+                    .explanation(item.path("explanation").asText(null))
+                    .points(1.0)
+                    .estimatedTimeSeconds(60)
+                    .status(ContentStatus.DRAFT)
+                    .version(1)
+                    .createdBy(SecurityUtils.getCurrentUsername())
+                    .tags("AI_GENERATED")
+                    .build());
+        }
+        questions.saveAll(drafts);
+        generation.setStatus(GenerationStatus.APPLIED);
+        return toResponse(repository.save(generation));
+    }
+
+    @Override
+    public void processPending() {
+        repository.findByStatus(GenerationStatus.PENDING).forEach(this::processOne);
+    }
+
+    private void processOne(ContentGeneration generation) {
+        generation.setStatus(GenerationStatus.PROCESSING);
+        generation.setStartedAt(LocalDateTime.now());
+        repository.save(generation);
+        try {
+            GenerateQuestionsRequest request = fromParameters(generation);
+            String query = request.getQuestionType() + " " + request.getDifficulty() + " " + request.getInstructions();
+            List<KnowledgeContextResponse> sources = ragService.retrieveKnowledge(
+                    generation.getCertificateId(), generation.getTopicId(), query, 6);
+            if (sources.isEmpty()) throw new IllegalStateException("No relevant knowledge chunks");
+
+            String context = sources.stream()
+                    .map(source -> "[chunkId=" + source.getChunkId() + "; title=" + source.getTitle()
+                            + "; chunk=" + source.getChunkIndex() + "]\n" + source.getContent())
+                    .collect(Collectors.joining("\n\n"));
+            String systemPrompt = "Create original practice questions grounded ONLY in the provided knowledge excerpts. "
+                    + "Do not add facts absent from them or claim questions are official. Return ONLY a JSON array. "
+                    + "Each object must contain questionType, content, options (array of {label,text}, or [] for non-choice), "
+                    + "correctAnswer, explanation, and sourceChunkIds copied from the excerpts. No markdown.";
+            String userPrompt = "Exam: " + generation.getCertificateId() + "\nTopic: " + generation.getTopicId()
+                    + "\nQuestion type: " + request.getQuestionType() + "\nCount: " + request.getCount()
+                    + "\nDifficulty: " + request.getDifficulty() + "\nAdmin instructions: " + request.getInstructions()
+                    + "\n\nKnowledge excerpts:\n" + context;
+            String raw = aiProvider.chatCompletionSync(systemPrompt, userPrompt, model, 4000);
+            Set<Long> allowedSources = sources.stream().map(KnowledgeContextResponse::getChunkId)
+                    .collect(Collectors.toSet());
+            JsonNode parsed = validateGeneratedBatch(objectMapper.readTree(raw), request, allowedSources);
+            generation.setResultJson(parsed.toString());
+            generation.setStatus(GenerationStatus.READY);
+            generation.setItemCount(parsed.size());
+        } catch (Exception exception) {
+            generation.setStatus(GenerationStatus.FAILED);
+            generation.setErrorMessage("Generation failed (" + exception.getClass().getSimpleName() + ")");
+            log.warn("Content generation {} failed with {}",
+                    generation.getGenerationId(), exception.getClass().getSimpleName());
+        } finally {
+            generation.setCompletedAt(LocalDateTime.now());
+            repository.save(generation);
+        }
+    }
+
+    private JsonNode validateGeneratedBatch(JsonNode batch, GenerateQuestionsRequest request,
+                                            Set<Long> allowedSourceIds) {
+        if (batch == null || !batch.isArray() || batch.isEmpty() || batch.size() > request.getCount()) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        for (JsonNode item : batch) validateGeneratedQuestion(item, request, allowedSourceIds);
+        return batch;
+    }
+
+    private void validateGeneratedQuestion(JsonNode item, GenerateQuestionsRequest request,
+                                           Set<Long> allowedSourceIds) {
+        JsonNode content = item.path("content");
+        JsonNode questionType = item.path("questionType");
+        JsonNode options = item.path("options");
+        JsonNode answer = item.path("correctAnswer");
+        JsonNode explanation = item.path("explanation");
+        JsonNode sourceIds = item.path("sourceChunkIds");
+        if (!item.isObject() || !content.isTextual() || content.asText().isBlank()
+                || content.asText().length() > MAX_QUESTION_LENGTH || !questionType.isTextual()
+                || !questionType.asText().equalsIgnoreCase(request.getQuestionType())
+                || !options.isArray() || answer.isMissingNode() || answer.isNull()
+                || !explanation.isTextual() || !sourceIds.isArray() || sourceIds.isEmpty()) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        for (JsonNode sourceId : sourceIds) {
+            if (!sourceId.canConvertToLong() || !allowedSourceIds.contains(sourceId.asLong())) {
+                throw new CommonException(ErrorCode.BAD_REQUEST);
+            }
+        }
+
+        if ("MULTIPLE_CHOICE".equalsIgnoreCase(request.getQuestionType())) {
+            if (options.isEmpty() || !answer.isTextual()) throw new CommonException(ErrorCode.BAD_REQUEST);
+            boolean answerExists = false;
+            for (JsonNode option : options) {
+                if (!option.isObject() || !option.path("label").isTextual()
+                        || option.path("label").asText().isBlank()
+                        || !option.path("text").isTextual() || option.path("text").asText().isBlank()) {
+                    throw new CommonException(ErrorCode.BAD_REQUEST);
+                }
+                if (answer.asText().equals(option.path("label").asText())) answerExists = true;
+            }
+            if (!answerExists) throw new CommonException(ErrorCode.BAD_REQUEST);
+        } else if (!options.isEmpty()) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private Set<Long> embeddedSourceIds(JsonNode generated) {
+        if (generated == null || !generated.isArray()) throw new CommonException(ErrorCode.BAD_REQUEST);
+        Set<Long> ids = new java.util.HashSet<>();
+        for (JsonNode item : generated) {
+            JsonNode sourceIds = item.path("sourceChunkIds");
+            if (!sourceIds.isArray()) throw new CommonException(ErrorCode.BAD_REQUEST);
+            for (JsonNode sourceId : sourceIds) {
+                if (!sourceId.canConvertToLong()) throw new CommonException(ErrorCode.BAD_REQUEST);
+                ids.add(sourceId.asLong());
+            }
+        }
+        return ids;
+    }
+
+    private void validateRequest(GenerateQuestionsRequest request) {
+        if (request == null || request.getCertificateId() == null || request.getTopicId() == null
+                || request.getCount() < 1 || request.getCount() > 20
+                || request.getQuestionType() == null || request.getQuestionType().isBlank()
+                || !Set.of("MULTIPLE_CHOICE", "TRUE_FALSE", "TRUE_FALSE_NOT_GIVEN", "FILL_BLANK", "ESSAY")
+                        .contains(request.getQuestionType().trim().toUpperCase(Locale.ROOT))) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        parseDifficulty(request.getDifficulty());
+    }
+
+    private QuestionDifficulty parseDifficulty(String value) {
+        if (value == null || value.isBlank()) return QuestionDifficulty.MEDIUM;
+        try {
+            return QuestionDifficulty.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private ContentGeneration findOwned(Long userId, Long id) {
+        ContentGeneration generation = repository.findById(id)
+                .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        if (!Objects.equals(generation.getRequestedBy(), userId)) {
+            throw new CommonException(ErrorCode.FORBIDDEN_ERROR);
+        }
+        return generation;
+    }
+
+    private String toJson(GenerateQuestionsRequest request) {
+        try {
+            return objectMapper.writeValueAsString(request);
+        } catch (Exception exception) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private GenerateQuestionsRequest fromParameters(ContentGeneration generation) {
+        try {
+            return objectMapper.readValue(generation.getParametersJson(), GenerateQuestionsRequest.class);
+        } catch (Exception exception) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private ContentGenerationResponse toResponse(ContentGeneration generation) {
+        return ContentGenerationResponse.builder()
+                .generationId(generation.getGenerationId()).requestedBy(generation.getRequestedBy())
+                .certificateId(generation.getCertificateId()).topicId(generation.getTopicId())
+                .generationType(generation.getGenerationType()).prompt(generation.getPrompt())
+                .parametersJson(generation.getParametersJson()).resultJson(generation.getResultJson())
+                .status(generation.getStatus()).model(generation.getModel()).itemCount(generation.getItemCount())
+                .errorMessage(generation.getErrorMessage()).startedAt(generation.getStartedAt())
+                .completedAt(generation.getCompletedAt()).build();
+    }
 }

@@ -1,0 +1,10 @@
+version: 1
+name: ai-provider
+slug: ai-provider
+protocol: http
+port: 4610
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

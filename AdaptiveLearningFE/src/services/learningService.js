@@ -1,6 +1,6 @@
 import { Axios } from './Axios'
 
-const data = (request) => request.then((response) => response.data)
+const data = (request) => request.then((response) => response.data?.data ?? response.data)
 
 export const learningService = {
   certificates: () => data(Axios.get('/api/v1/certificates')),
@@ -23,7 +23,11 @@ export const learningService = {
   adaptiveRecommendations: (certificateId) => data(Axios.get('/api/v1/adaptive/recommend', { certificateId })),
   plans: () => data(Axios.get('/api/v1/plans')),
   createPlan: (payload) => data(Axios.post('/api/v1/plans', payload)),
+  planTasks: (id) => data(Axios.get(`/api/v1/plans/${id}/tasks`)),
   planSummary: (id) => data(Axios.get(`/api/v1/plans/${id}/summary`)),
+  updatePlanTask: (taskId, payload) => data(Axios.patch(`/api/v1/plans/tasks/${taskId}`, payload)),
+  completePlan: (id) => data(Axios.post(`/api/v1/plans/${id}/complete`)),
+  archivePlan: (id) => data(Axios.post(`/api/v1/plans/${id}/archive`)),
   practicePackages: (certificateId) => data(Axios.get('/api/v1/practice', certificateId ? { certificateId } : {})),
   conversations: () => data(Axios.get('/api/v1/tutor/conversations')),
   createConversation: (payload) => data(Axios.post('/api/v1/tutor/conversations', payload)),

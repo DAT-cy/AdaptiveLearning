@@ -12,5 +12,11 @@ public interface AiEvaluationRepository extends JpaRepository<AiEvaluation, Long
 
     Optional<AiEvaluation> findByAttemptIdAndQuestionId(Long attemptId, Long questionId);
 
+    Optional<AiEvaluation> findByAttemptIdAndQuestionIdAndStatus(
+            Long attemptId, Long questionId, AiJobStatus status);
+
+    Optional<AiEvaluation> findByAttemptIdAndQuestionIdAndStatusIn(
+            Long attemptId, Long questionId, List<AiJobStatus> statuses);
+
     List<AiEvaluation> findByStatus(AiJobStatus status);
 }

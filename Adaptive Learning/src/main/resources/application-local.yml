@@ -1,6 +1,13 @@
 server:
   port: 9090
 
+billing:
+  premium-currency: ${PREMIUM_CURRENCY:VND}
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
 adaptive:
   bkt:
     base-url: ${BKT_URL:http://localhost:8001}
@@ -17,6 +24,9 @@ spring:
           auth: ${MAIL_SMTP_AUTH:true}
           starttls:
             enable: ${MAIL_SMTP_STARTTLS_ENABLE:true}
+          connectiontimeout: ${MAIL_SMTP_CONNECTION_TIMEOUT:5000}
+          timeout: ${MAIL_SMTP_READ_TIMEOUT:5000}
+          writetimeout: ${MAIL_SMTP_WRITE_TIMEOUT:5000}
   servlet:
     multipart:
       max-file-size: 20MB
@@ -24,7 +34,7 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/adaptivelearning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:1234}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
@@ -41,11 +51,11 @@ mybatis:
     map-underscore-to-camel-case: true
 
 jwt:
-  secret: your-secret-key-here-must-be-at-least-32-characters-long
+  secret: ${JWT_SECRET}
   expiration: 86400000 # 24 hours in milliseconds
 
 gemini:
-  api-key: AIzaSyACEdChYoUwlA3HSVUyLFPMLgSYyKZCoW0
+  api-key: ${GEMINI_API_KEY:${AI_API_KEY:}}
   model: gemini-2.5-flash
   base-url: https://generativelanguage.googleapis.com/v1beta
 

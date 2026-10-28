@@ -2,6 +2,8 @@ package adaptivelearning.module.ai.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,9 +25,11 @@ public class AiGradeRequest {
     private Long questionId;
 
     @NotNull(message = "userAnswerText is required")
+    @Size(min = 1, max = 20000, message = "userAnswerText must be between 1 and 20000 characters")
     @Schema(description = "User answer text (essay or transcript)", example = "This is my essay...")
     private String userAnswerText;
 
     @Schema(description = "Optional rubric ID to use for grading", example = "1")
+    @Positive(message = "rubricId must be positive")
     private Long rubricId;
 }

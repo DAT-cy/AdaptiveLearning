@@ -9,5 +9,9 @@ public interface RubricRepository extends JpaRepository<Rubric, Long> {
 
     Optional<Rubric> findByCertificateIdAndSkillAndIsActive(Long certificateId, String skill, boolean isActive);
 
+    Optional<Rubric> findByRubricIdAndIsActive(Long rubricId, boolean isActive);
+
+    List<Rubric> findByCertificateIdAndIsActive(Long certificateId, boolean isActive);
+
     List<Rubric> findByCertificateId(Long certificateId);
 }

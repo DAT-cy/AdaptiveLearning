@@ -19,7 +19,7 @@ public class SaveAnswerRequest {
     private Long questionId;
 
     @NotNull(message = "userAnswerJson is required")
-    @Schema(description = "User's answer as JSON", example = "{\"selected\":\"A\"}")
+    @Schema(description = "User's answer as a JSON scalar; for example, a selected option label", example = "\"A\"")
     private String userAnswerJson;
 
     @Schema(description = "Time spent on this question in seconds", example = "30")

@@ -27,8 +27,8 @@ class EntitlementServiceTest {
     void setUp() {
         userMapper = mock(UserMapper.class);
         BillingProperties properties = new BillingProperties();
-        ReflectionTestUtils.setField(properties, "premiumPriceValue", "19.99");
-        ReflectionTestUtils.setField(properties, "premiumCurrencyValue", "USD");
+        ReflectionTestUtils.setField(properties, "premiumPriceValue", "120000");
+        ReflectionTestUtils.setField(properties, "premiumCurrencyValue", "VND");
         ReflectionTestUtils.setField(properties, "freeExamLimitValue", 5);
         service = new EntitlementService(userMapper, mock(TopicRepository.class), properties,
                 mock(PaymentStrategyRegistry.class));
@@ -78,6 +78,7 @@ class EntitlementServiceTest {
         assertEquals(PlanType.PREMIUM, entitlements.plan());
         assertEquals(-1, entitlements.examLimit());
         assertEquals(-1, entitlements.examsRemaining());
-        assertEquals("19.99", entitlements.premiumPrice().toPlainString());
+        assertEquals("120000", entitlements.premiumPrice().toPlainString());
+        assertEquals("VND", entitlements.premiumCurrency());
     }
 }

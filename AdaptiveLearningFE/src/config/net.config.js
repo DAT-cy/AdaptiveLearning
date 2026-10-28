@@ -1,7 +1,9 @@
 export const network = {
 
   // Địa chỉ api mặc định
-  baseURL: import.meta.env.VITE_API_KEY?.trim() || '',
+  baseURL: import.meta.env.VITE_API_BASE_URL?.trim()
+    || import.meta.env.VITE_API_KEY?.trim()
+    || '',
 
   // Cấu hình phương thức nhận dữ liệu từ máy chủ là application/json;charset=UTF-8 hoặc application/x-www-form-urlencoded;charset=UTF-8
   contentType: 'application/json;charset=UTF-8',

@@ -16,10 +16,12 @@ Exercise the backend provider HTTP clients without real payment credentials or c
 ## Assumptions
 
 - **The local handlers return structurally representative provider responses only.** They do not establish real capture, signature verification, settlement, charge/refund behavior or merchant onboarding. (reasoned 2026-10-27, provider adapter contracts and official provider documentation)
-- **PayPal mock capture is fixed at USD 19.99.** A simulation checkout using another server-configured amount will correctly be rejected by the backend amount check; use 19.99 for that path. (reasoned 2026-10-27, `postman/mocks/paypal-billing/default.js`)
+- **PayPal mock capture echoes the order's amount and currency.** VND checkout tests can assert the integer amount through order creation and capture; this does not establish live PayPal account eligibility for VND. (observed 2026-10-28, `postman/mocks/paypal-billing/default.js`)
 - **No live payment credentials are installed in the Compose environment.** Simulation credentials and the Stripe test signing secret were supplied only to a disposable local backend; no provider settlement occurred. (observed 2026-10-27, local container configuration and simulation logs)
 
 <!-- begin:observations -->
+2026-10-28: full Gradle suite ran `VndCheckoutSimulationTest`; Stripe and PayPal mock members both served checkout requests carrying integer VND amounts and the tests passed.
+2026-10-28: `VndCheckoutSimulationTest` sent checkout requests through the Java provider adapters; Stripe received lowercase VND and an integer amount, and PayPal received an integer VND order amount. Both mock members served their modeled responses.
 2026-10-27: both mock members served actual backend calls: Stripe checkout and signed success/refund events; PayPal OAuth, order creation, return capture, and verified webhook events.
 <!-- end:observations -->
 

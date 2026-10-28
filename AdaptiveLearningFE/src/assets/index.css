@@ -4,36 +4,36 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 210 40% 98%;
+    --foreground: 222.2 47.4% 11.2%;
 
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 222.2 47.4% 11.2%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222.2 47.4% 11.2%;
 
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 224.3 76.3% 48%;
+    --secondary-foreground: 0 0% 100%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 255 100% 98%;
+    --accent-foreground: 262 83% 58%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --ring: 222.2 84% 4.9%;
+    --ring: 221.2 83.2% 53.3%;
 
-    --radius: 0.5rem;
+    --radius: 0.625rem;
   }
 
   .dark {
@@ -71,8 +71,14 @@
 html, body, #app {
   width: 100%;
   min-width: 0;
-  min-height: 100%;
+  min-height: 100vh;
   margin: 0;
+  padding: 0;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
 }
 
 html { scrollbar-gutter: stable; }
@@ -82,6 +88,31 @@ body, input, button, select, textarea {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
+}
+
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):hover, select:hover, textarea:hover {
+  border-color: #94A3B8;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--brand-primary);
+  box-shadow: var(--shadow-focus-ring);
+}
+
+input:disabled, select:disabled, textarea:disabled {
+  background-color: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 ::placeholder {
@@ -95,82 +126,131 @@ body, input, button, select, textarea {
 }
 
 :root {
-  --bg-page: #F5F7FB;
+  /* Canvas & Surface */
+  --bg-app: #F8FAFC;
+  --bg-page: #F8FAFC;
   --surface: #FFFFFF;
+  --surface-card: #FFFFFF;
   --surface-subtle: #F8FAFC;
   --surface-footer: #FAFBFD;
-  --surface-hover: #F4F6FA;
-  --surface-muted: #F1F4F9;
-  --ds-border: #E6EAF2;
-  --border-subtle: #EEF1F6;
-  --border-item: #E9EDF3;
-  --border-control: #8391A5;
+  --surface-hover: #F1F5F9;
+  --surface-muted: #F1F5F9;
+
+  /* Borders */
+  --border-subtle: #E2E8F0;
+  --ds-border: #E2E8F0;
+  --border-item: #E2E8F0;
+  --border-control: #94A3B8;
+
+  /* Typography */
   --text: #0F172A;
-  --text-strong: #1E293B;
-  --text-secondary: #334155;
-  --text-muted: #526070;
+  --text-primary: #0F172A;
+  --text-strong: #0F172A;
+  --text-secondary: #64748B;
+  --text-muted: #64748B;
   --text-muted-alt: #475569;
   --text-overline: #64748B;
-  --text-placeholder: #66717F;
-  --ds-primary: #0F766E;
-  --primary-hover: #115E59;
-  --primary-ink: #0F5F58;
-  --primary-soft: #E6F7F3;
-  --primary-soft-2: #D9F5EF;
-  --primary-tint: #F2FBF9;
-  --primary-border: #C9ECE2;
-  --primary-dashed: #2A9D8F;
-  --brand-gradient: linear-gradient(135deg, #0F766E 0%, #0E7490 100%);
+  --text-placeholder: #94A3B8;
+
+  /* Brand Primary (Blue - Light AI Education) */
+  --brand-primary: #2563EB;
+  --brand-primary-hover: #1D4ED8;
+  --brand-primary-soft: #EFF6FF;
+  --ds-primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --primary-ink: #1D4ED8;
+  --primary-soft: #EFF6FF;
+  --primary-soft-2: #DBEAFE;
+  --primary-tint: #F8FAFC;
+  --primary-border: #BFDBFE;
+  --primary-dashed: #2563EB;
+
+  /* Brand Secondary */
+  --brand-secondary: #1D4ED8;
+  --brand-secondary-hover: #1E40AF;
+  --brand-secondary-soft: #DBEAFE;
+
+  /* AI Accent (Violet) */
+  --ai-accent: #7C3AED;
+  --ai-accent-hover: #6D28D9;
+  --ai-accent-soft: #F5F3FF;
+  --ai-accent-border: #DDD6FE;
+
+  /* Gradients */
+  --brand-gradient: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  --ai-gradient: linear-gradient(135deg, #2563EB 0%, #7C3AED 100%);
+  --hero-gradient: linear-gradient(135deg, #EFF6FF 0%, #F8FAFC 50%, #F5F3FF 100%);
+
+  /* Secondary Accents */
   --blue: #2563EB;
   --blue-ink: #1D4ED8;
-  --blue-soft: #E0EDFF;
-  --blue-card: #EEF4FF;
-  --blue-card-border: #D6E4FD;
-  --teal: #0F766E;
-  --teal-ink: #0F5F58;
-  --teal-soft: #D9F5EF;
-  --teal-card: #E9F8F4;
-  --teal-card-border: #C9ECE2;
+  --blue-soft: #EFF6FF;
+  --blue-card: #F8FAFC;
+  --blue-card-border: #E2E8F0;
+  --teal: #2563EB;
+  --teal-ink: #1D4ED8;
+  --teal-soft: #EFF6FF;
+  --teal-card: #F8FAFC;
+  --teal-card-border: #E2E8F0;
   --violet: #7C3AED;
   --violet-ink: #6D28D9;
-  --violet-soft: #EFE9FF;
-  --violet-card: #F3EEFF;
-  --violet-card-border: #E2D6FD;
+  --violet-soft: #F5F3FF;
+  --violet-card: #F5F3FF;
+  --violet-card-border: #DDD6FE;
   --amber: #D97706;
   --amber-ink: #B45309;
-  --amber-soft: #FFF1DB;
-  --amber-card: #FFF5E6;
-  --amber-card-border: #F9E0B8;
-  --rose: #E11D48;
-  --rose-ink: #BE123C;
-  --rose-soft: #FFE4EC;
-  --rose-card: #FFF1F4;
-  --rose-card-border: #FBD0DC;
-  --success-dot: #10B981;
-  --danger: #B42318;
-  --danger-hover: #912018;
-  --required: #E11D48;
-  --notify-dot: #F43F5E;
-  --off-track: #8391A5;
-  --off-soft: #EEF1F5;
-  --overlay-scrim: rgba(15,23,42,.45);
-  --overlay-shadow: 0 24px 64px rgba(15,23,42,.18), 0 2px 6px rgba(15,23,42,.06);
-  --popover-shadow: 0 12px 32px rgba(15,23,42,.12);
+  --amber-soft: #FFFBEB;
+  --amber-card: #FFFBEB;
+  --amber-card-border: #FDE68A;
+  --rose: #DC2626;
+  --rose-ink: #B91C1C;
+  --rose-soft: #FEF2F2;
+  --rose-card: #FEF2F2;
+  --rose-card-border: #FECACA;
+
+  /* Status Colors */
+  --status-success: #16A34A;
+  --status-warning: #D97706;
+  --status-danger: #DC2626;
+  --success: #16A34A;
+  --success-dot: #16A34A;
+  --success-soft: #F0FDF4;
+  --warning: #D97706;
+  --warning-soft: #FFFBEB;
+  --danger: #DC2626;
+  --danger-hover: #B91C1C;
+  --danger-soft: #FEF2F2;
+  --required: #DC2626;
+  --notify-dot: #DC2626;
+  --off-track: #94A3B8;
+  --off-soft: #F1F5F9;
+
+  /* Overlays & Shadows */
+  --overlay-scrim: rgba(15, 23, 42, 0.45);
+  --overlay-shadow: 0 20px 48px -8px rgba(15, 23, 42, 0.12), 0 8px 16px -4px rgba(15, 23, 42, 0.04);
+  --popover-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
   --tooltip-surface: #0F172A;
-  --drawer-handle: #CBD3DD;
-  --shadow-toast: var(--shadow-hover);
-  --radius-sm: 8px;
+  --drawer-handle: #CBD5E1;
+  --shadow-toast: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-card-hover: 0 8px 20px -4px rgba(15, 23, 42, 0.07), 0 4px 8px -2px rgba(15, 23, 42, 0.03);
+  --shadow-overlay: 0 20px 48px -8px rgba(15, 23, 42, 0.12), 0 8px 16px -4px rgba(15, 23, 42, 0.04);
+  --shadow-focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  --shadow-hover: 0 8px 20px -4px rgba(15, 23, 42, 0.07);
+  --shadow-row-hover: 0 4px 14px rgba(15, 23, 42, 0.04);
+  --shadow-primary-btn: 0 4px 12px rgba(37, 99, 235, 0.22);
+
+  /* Border Radii */
+  --radius-sm: 6px;
   --radius-md: 10px;
-  --radius-lg: 12px;
-  --radius-xl: 14px;
-  --radius-2xl: 16px;
-  --radius-3xl: 18px;
-  --radius-full: 999px;
-  --shadow-card: 0 1px 2px rgba(15,23,42,.04);
-  --shadow-hover: 0 10px 24px rgba(15,23,42,.07);
-  --shadow-row-hover: 0 4px 14px rgba(15,23,42,.06);
-  --shadow-primary-btn: 0 6px 16px rgba(15,118,110,.28);
-  --font-sans: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-sans: 'Be Vietnam Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -382,5 +462,104 @@ body, input, button, select, textarea {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  /* Standard Form Element Classes (Light AI Education) */
+  .primary-button {
+    display: inline-flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 18px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    background-color: var(--brand-primary);
+    box-shadow: var(--shadow-primary-btn);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .primary-button:hover {
+    background-color: var(--brand-primary-hover);
+    transform: translateY(-1px);
+  }
+
+  .primary-button:active {
+    transform: translateY(0);
+  }
+
+  .primary-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .secondary-button {
+    display: inline-flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background-color: var(--surface);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .secondary-button:hover {
+    background-color: var(--surface-hover);
+    border-color: #cbd5e1;
+  }
+
+  .secondary-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .outline-button {
+    display: inline-flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 16px;
+    border: 1px solid var(--brand-primary);
+    border-radius: var(--radius-md);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--brand-primary);
+    background-color: transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .outline-button:hover {
+    background-color: var(--brand-primary-soft);
+  }
+
+  .outline-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 }

@@ -4,7 +4,7 @@ const paymentStatusPage = () => import('@/features/User/pages/PaymentStatus.vue'
 
 const userRoutes = [
   { path: '/home', name: 'UserHome', view: 'dashboard', title: 'Trang chủ' },
-  { path: '/plans', name: 'LearningPlans', view: 'plans', title: 'Lộ trình học' },
+  { path: '/plans', name: 'LearningPlans', view: 'plans', title: 'Kế hoạch học' },
   { path: '/courses', name: 'LearningCourses', view: 'courses', title: 'Khóa học' },
   { path: '/tests', name: 'LearningTests', view: 'tests', title: 'Bài kiểm tra' },
   { path: '/history', name: 'LearningHistory', view: 'history', title: 'Lịch sử làm bài' },

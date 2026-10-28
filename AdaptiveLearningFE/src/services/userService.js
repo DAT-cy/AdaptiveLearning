@@ -4,14 +4,14 @@ const unwrap = (response) => response?.data?.data ?? response?.data ?? response;
 
 function login(payload) {
   const url = "/api/v1/auth/login";
-  return Axios.post(url, payload);
+  return Axios.post(url, payload).then(unwrap);
 }
 function loginWithGoogle(payload) {
-  return Axios.post("/api/v1/auth/google", payload);
+  return Axios.post("/api/v1/auth/google", payload).then(unwrap);
 }
-function getInfo(payload) {
+function getInfo() {
   const url = "/api/v1/auth/profile";
-  return Axios.get(url, payload);
+  return Axios.get(url).then(unwrap);
 }
 
 function googleConfig() {

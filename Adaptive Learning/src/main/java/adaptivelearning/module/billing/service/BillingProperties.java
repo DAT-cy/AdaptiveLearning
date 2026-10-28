@@ -11,7 +11,7 @@ public class BillingProperties {
     @Value("${PREMIUM_PRICE:}")
     private String premiumPriceValue;
 
-    @Value("${PREMIUM_CURRENCY:USD}")
+    @Value("${billing.premium-currency:VND}")
     private String premiumCurrencyValue;
 
     @Value("${FREE_EXAM_LIMIT:5}")
@@ -25,8 +25,9 @@ public class BillingProperties {
 
     public BigDecimal premiumPrice() {
         if (premiumPriceValue == null || premiumPriceValue.isBlank()) return null;
+        if (!"VND".equals(premiumCurrency())) return null;
         try {
-            BigDecimal price = new BigDecimal(premiumPriceValue.trim()).setScale(2, RoundingMode.UNNECESSARY);
+            BigDecimal price = new BigDecimal(premiumPriceValue.trim()).setScale(0, RoundingMode.UNNECESSARY);
             return price.signum() > 0 ? price : null;
         } catch (RuntimeException exception) {
             return null;
@@ -35,7 +36,7 @@ public class BillingProperties {
 
     public String premiumCurrency() {
         return premiumCurrencyValue == null || premiumCurrencyValue.isBlank()
-                ? "USD" : premiumCurrencyValue.trim().toUpperCase(Locale.ROOT);
+                ? "VND" : premiumCurrencyValue.trim().toUpperCase(Locale.ROOT);
     }
 
     public int freeExamLimit() {

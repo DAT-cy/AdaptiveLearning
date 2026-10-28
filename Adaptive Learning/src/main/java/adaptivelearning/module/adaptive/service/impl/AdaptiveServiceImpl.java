@@ -73,6 +73,11 @@ public class AdaptiveServiceImpl implements AdaptiveService {
         ExamAttempt attempt = attemptRepository.findById(attemptId)
                 .filter(a -> userId.equals(a.getUserId()))
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+        if (attempt.getSubmittedAt() == null || attempt.getScore() == null
+                || !EnumSet.of(AttemptStatus.SUBMITTED, AttemptStatus.GRADED, AttemptStatus.VIOLATED)
+                        .contains(attempt.getStatus())) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
 
         Long certificateId = resolveCertificateId(attempt);
 
@@ -158,11 +163,15 @@ public class AdaptiveServiceImpl implements AdaptiveService {
         if (profileOpt.isEmpty()) {
             return new ScoreForecastResponse(
                     certificateId, 0.0, 0.2,
-                    "No learner profile found for this certificate");
+                    "Uncalibrated heuristic estimate: no learner profile exists for this certificate");
         }
 
         LearnerProfile profile = profileOpt.get();
         Map<String, Double> abilityMap = parseAbilityJson(profile.getAbilityBySkillJson());
+        if (abilityMap.isEmpty()) {
+            return new ScoreForecastResponse(certificateId, 0.0, 0.2,
+                    "Uncalibrated heuristic estimate: no valid skill history exists for this certificate");
+        }
 
         // Simple heuristic: average ability scaled to 0-990 range
         double avgAbility = abilityMap.values().stream()
@@ -175,8 +184,8 @@ public class AdaptiveServiceImpl implements AdaptiveService {
 
         return new ScoreForecastResponse(
                 certificateId, forecastScore, confidence,
-                "Heuristic forecast from " + abilityMap.size() + " skill abilities across "
-                        + profile.getTotalAttempts() + " attempts");
+                "Uncalibrated heuristic estimate from " + abilityMap.size() + " skill abilities across "
+                        + profile.getTotalAttempts() + " attempts; score and confidence are not empirically calibrated");
     }
 
     // ---- helpers ----
@@ -208,14 +217,17 @@ public class AdaptiveServiceImpl implements AdaptiveService {
     }
 
     private BktEstimateRequest buildBktRequest(Long learnerId, Long certificateId) {
-        Map<Long, Exam> examsById = new HashMap<>();
-        examRepository.findAll().stream()
-                .filter(exam -> certificateId.equals(exam.getCertificateId()))
-                .forEach(exam -> examsById.put(exam.getExamId(), exam));
-
-        List<ExamAttempt> completedAttempts = attemptRepository.findByStatusIn(
+        List<ExamAttempt> candidateAttempts = attemptRepository.findByStatusIn(
                 EnumSet.of(AttemptStatus.SUBMITTED, AttemptStatus.GRADED));
-        completedAttempts.removeIf(attempt -> !examsById.containsKey(attempt.getExamId()));
+        Map<Long, Exam> examsById = examRepository.findAllById(candidateAttempts.stream()
+                        .map(ExamAttempt::getExamId).distinct().toList())
+                .stream()
+                .filter(exam -> certificateId.equals(exam.getCertificateId()))
+                .collect(Collectors.toMap(Exam::getExamId, exam -> exam));
+        List<ExamAttempt> completedAttempts = candidateAttempts.stream()
+                .filter(attempt -> attempt.getSubmittedAt() != null && attempt.getScore() != null
+                        && examsById.containsKey(attempt.getExamId()))
+                .toList();
         if (completedAttempts.isEmpty()) {
             return BktEstimateRequest.builder()
                     .learnerId(String.valueOf(learnerId))
@@ -280,13 +292,8 @@ public class AdaptiveServiceImpl implements AdaptiveService {
             LocalDateTime timestamp, int answerOrder, BktInteraction interaction) {}
 
     private Long resolveCertificateId(ExamAttempt attempt) {
-        List<ExamQuestion> examQuestions = examQuestionRepository.findByExamId(attempt.getExamId());
-        if (examQuestions.isEmpty()) {
-            throw new CommonException(ErrorCode.ENTITY_NOT_FOUND);
-        }
-        Long firstQuestionId = examQuestions.get(0).getQuestionId();
-        return questionRepository.findById(firstQuestionId)
-                .map(Question::getCertificateId)
+        return examRepository.findById(attempt.getExamId())
+                .map(Exam::getCertificateId)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
     }
 
@@ -295,7 +302,10 @@ public class AdaptiveServiceImpl implements AdaptiveService {
             if (json == null || json.isBlank()) {
                 return new HashMap<>();
             }
-            return objectMapper.readValue(json, new TypeReference<Map<String, Double>>() {});
+            Map<String, Double> parsed = objectMapper.readValue(json, new TypeReference<Map<String, Double>>() {});
+            parsed.entrySet().removeIf(entry -> entry.getValue() == null || !Double.isFinite(entry.getValue()));
+            parsed.replaceAll((skill, ability) -> Math.max(0.0, Math.min(1.0, ability)));
+            return parsed;
         } catch (Exception e) {
             log.warn("Failed to parse ability JSON: {}", e.getMessage());
             return new HashMap<>();

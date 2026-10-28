@@ -43,7 +43,7 @@ public class TutorController {
     }
 
     @PostMapping("/conversations")
-    public ResponseEntity<DefaultRes<?>> create(@RequestBody CreateConversationRequest request) {
+    public ResponseEntity<DefaultRes<?>> create(@Valid @RequestBody CreateConversationRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(DefaultRes.res(201, "CREATED", service.createConversation(user(), request)));
     }
