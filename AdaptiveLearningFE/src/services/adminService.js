@@ -12,6 +12,8 @@ export const adminService = {
   createUser: (payload) => data(Axios.post('/api/v1/admin/users', payload)),
   updateUserRole: (userId, role) =>
     data(Axios.put(`/api/v1/admin/users/${userId}/role`, { role })),
+  updateExamApprovalPermission: (userId, allowed) =>
+    data(Axios.put(`/api/v1/admin/users/${userId}/exam-approval`, { allowed })),
   updateUserStatus: (userId, enabled) =>
     data(Axios.patch(`/api/v1/admin/users/${userId}/status`, { enabled })),
   updateUserPlan: (userId, plan) =>
@@ -28,6 +30,14 @@ export const adminService = {
   certificates: () => data(Axios.get('/api/v1/certificates')),
   exams: () => data(Axios.get('/api/v1/exams')),
   examTemplates: () => data(Axios.get('/api/v1/exam-templates')),
+  examImports: () => data(Axios.get('/api/v1/exam-imports')),
+  examImport: (id) => data(Axios.get(`/api/v1/exam-imports/${id}`)),
+  createExamImport: (formData) => data(Axios.post('/api/v1/exam-imports', formData, {
+    timeout: 180000,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })),
+  updateExamImport: (id, payload) => data(Axios.put(`/api/v1/exam-imports/${id}`, payload)),
+  confirmExamImport: (id) => data(Axios.post(`/api/v1/exam-imports/${id}/confirm`)),
   createExamTemplate: (payload) =>
     data(Axios.post('/api/v1/exam-templates', payload)),
   generateExamFromTemplate: (id, payload) =>

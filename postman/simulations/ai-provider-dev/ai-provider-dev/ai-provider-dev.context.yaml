@@ -1,0 +1,53 @@
+purpose:
+  stands_in_for: The OpenAI-compatible chat-completions endpoint used by OpenAiProvider, including exam-import parsing prompts.
+  unblocks: HTTP request serialization, response parsing, and exam-import extraction tests without live AI credentials.
+
+assumptions:
+  - id: ai-completion-shape-for-exam-import
+    status: supported
+    claim: For the exam-import prompt shape exercised here, OpenAiProvider sends a chat-completions request and parses the stand-in's JSON-array completion into a pending import.
+    reason: This supports the local caller and response parsing only; it does not establish that a live model will preserve every source question or answer correctly.
+    verification: On 2026-10-30, ExamImportSimulationTest uploaded a text PDF to ExamImportServiceImpl, the simulation recorded one POST /v1/chat/completions and returned HTTP 200 with a structured question array, and the service returned PENDING_REVIEW with one parsed question. The stand-in generated the answer; no live provider was called.
+    source: postman/mocks/ai-provider/default.js; postman/simulations/ai-provider-dev/ai-provider-dev/ai-provider-dev.sim.yaml; Adaptive Learning/src/test/java/adaptivelearning/module/examimports/service/impl/ExamImportSimulationTest.java
+    updated_at: "2026-10-30"
+  - id: live-provider-question-extraction-quality
+    status: unknown
+    claim: A live Gemini-compatible provider extracts all questions from supported exam PDFs, preserves their wording, and returns correct answer-key mappings in the requested JSON shape.
+    reason: The simulation uses a fixed local response and cannot establish model quality, provider limits, or live API compatibility for exam documents.
+    verification: No live AI provider request was made. Validate representative text PDFs and answer keys against the configured provider before relying on auto-extracted content; every import remains pending teacher review.
+    source: Adaptive Learning/src/main/java/adaptivelearning/module/examimports/service/impl/ExamImportServiceImpl.java; AI_Exam_Generator_Spec_for_Codex.md
+    updated_at: "2026-10-30"
+  - id: ai-mock-route-and-response
+    status: supported
+    claim: The local ai-provider mock handles POST /v1/chat/completions and returns HTTP 501 for other methods or paths.
+    reason: The mock's fixed route behavior was observed in code and the exam-import request matched its modeled route.
+    verification: The exam-import simulation sent one POST to /v1/chat/completions and received HTTP 200; the handler source returns 501 for every unmatched route.
+    source: postman/mocks/ai-provider/default.js; simulation run on 2026-10-30
+    updated_at: "2026-10-30"
+  - id: ai-simulation-route-key
+    status: supported
+    claim: The one-port simulation serves the AI member under route key /ai, and the application base URL must retain /ai/v1/ so OpenAiProvider reaches the mock's /v1/chat/completions route.
+    reason: Path routing removes the first segment for member dispatch; losing the route key would reach an unmodeled route or member.
+    verification: Ran with AI_SIM_BASE_URL=http://localhost:4920/ai/v1/ and observed the request logged as routeKey ai, path /v1/chat/completions, statusCode 200.
+    source: postman/simulations/ai-provider-dev/ai-provider-dev/ai-provider-dev.sim.yaml; postman simulation run --help; simulation run on 2026-10-30
+    updated_at: "2026-10-30"
+  - id: no-matching-member-forwarding
+    status: unknown
+    claim: Under proxy routing, requests without a matching member origin may reach the real provider.
+    reason: The AI simulation has no origin entry and was run on one port, not behind a proxy; no unmatched request was sent.
+    verification: Historical context records this as an assumption. Keep the simulation one-port or explicitly configure origins before proxying; re-check current CLI routing behavior before a proxy run.
+    source: postman/simulations/ai-provider-dev/ai-provider-dev/ai-provider-dev.sim.yaml; postman/simulations/ai-provider-dev/ai-provider-dev/ai-provider-dev.context.md
+    updated_at: "2026-10-30"
+  - id: mock-restart-after-edit
+    status: supported
+    claim: Changes to the AI mock handler require restarting the simulation to take effect.
+    reason: The simulation process loads its handlers at startup and does not hot-reload them.
+    verification: The mock was edited before starting this run; the run then served the structured exam-import response. The CLI was stopped after the test.
+    source: postman/mocks/ai-provider/default.js; postman/simulations/ai-provider-dev/ai-provider-dev/ai-provider-dev.context.md
+    updated_at: "2026-10-30"
+
+fingerprints:
+  - id: exam-import-simulation-2026-10-30
+    date: "2026-10-30"
+    commit: "82b5cda9c9103d2b78ff5107a711bf67200366ff; working tree dirty"
+    cli: "Postman CLI 1.74.0"

@@ -10,4 +10,4 @@ routing: path
 mocks:
   - name: ai-provider
     routeKey: ai
-    path: postman/mocks/ai-provider
+    path: postman/mocks/ai-provider/config.yaml

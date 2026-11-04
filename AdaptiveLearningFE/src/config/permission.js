@@ -26,6 +26,7 @@ const { loginInterception, progressBar, recordRoute, routesWhiteList } = setting
 
 function landingPath(role) {
   if (role === 'ROLE_ADMIN') return '/admin'
+  if (role === 'ROLE_TEACHER') return '/teacher/review'
   if (role === 'ROLE_USER') return '/home'
   return '/login'
 }

@@ -223,6 +223,7 @@
     username: '',
     password: '',
     role: 'ROLE_USER',
+    canApproveExams: false,
   })
   const programForm = reactive({
     name: '',
@@ -806,6 +807,7 @@
       username: '',
       password: '',
       role: 'ROLE_USER',
+      canApproveExams: false,
     })
     modal.value = 'account'
     adminModalBaseline.value = JSON.stringify(accountForm)
@@ -918,6 +920,7 @@
         username: accountForm.username.trim(),
         password: accountForm.password,
         role: accountForm.role,
+        canApproveExams: accountForm.canApproveExams,
       })
       modal.value = ''
       adminModalBaseline.value = ''
@@ -1237,7 +1240,7 @@
     if (oldRole === newRole) return
     const confirmed = await confirm({
       title: 'Xác nhận thay đổi vai trò',
-      message: `Bạn có chắc muốn cấp vai trò "${newRole === 'ROLE_ADMIN' ? 'Quản trị viên (ROLE_ADMIN)' : 'Người học (ROLE_USER)'}" cho tài khoản "${user.username}"?`,
+      message: `Bạn có chắc muốn cấp vai trò "${newRole === 'ROLE_ADMIN' ? 'Quản trị viên' : newRole === 'ROLE_TEACHER' ? 'Giáo viên' : 'Người học'}" cho tài khoản "${user.username}"?`,
       confirmLabel: 'Xác nhận',
       cancelLabel: 'Hủy',
     })
@@ -1255,6 +1258,19 @@
       pageError.value =
         error?.response?.data?.responseMessage ||
         'Không thể cập nhật quyền tài khoản.'
+      toast.error(pageError.value)
+    }
+  }
+
+  async function updateExamApprovalPermission(user, event) {
+    const allowed = event.target.checked
+    try {
+      await adminService.updateExamApprovalPermission(user.userId, allowed)
+      user.canApproveExams = allowed
+      toast.success(allowed ? 'Đã cấp quyền duyệt đề' : 'Đã thu hồi quyền duyệt đề', { description: user.username })
+    } catch (error) {
+      event.target.checked = !allowed
+      pageError.value = error?.response?.data?.responseMessage || 'Không thể cập nhật quyền duyệt đề.'
       toast.error(pageError.value)
     }
   }
@@ -2321,6 +2337,7 @@
                     <option value="all">Tất cả vai trò</option>
                     <option value="ROLE_USER">Người học (ROLE_USER)</option>
                     <option value="ROLE_ADMIN">Quản trị viên (ROLE_ADMIN)</option>
+                    <option value="ROLE_TEACHER">Giáo viên (ROLE_TEACHER)</option>
                   </select>
                 </label>
 
@@ -2393,6 +2410,7 @@
                     <tr>
                       <th style="min-width: 220px;">Tài khoản</th>
                       <th style="min-width: 150px;">Vai trò</th>
+                      <th style="min-width: 130px;">Quyền duyệt</th>
                       <th style="min-width: 180px;">Gói học & Hạn mức</th>
                       <th style="min-width: 150px;">Trạng thái</th>
                       <th style="text-align: right; min-width: 160px;">Thao tác</th>
@@ -2424,7 +2442,15 @@
                         >
                           <option value="ROLE_USER">Người học</option>
                           <option value="ROLE_ADMIN">Quản trị viên</option>
+                          <option value="ROLE_TEACHER">Giáo viên</option>
                         </select>
+                      </td>
+
+                      <td>
+                        <label class="teacher-approval-toggle">
+                          <input v-if="user.role === 'ROLE_TEACHER'" type="checkbox" :checked="user.canApproveExams" @change="updateExamApprovalPermission(user, $event)" />
+                          <span>{{ user.role === 'ROLE_TEACHER' ? 'Duyệt đề' : '—' }}</span>
+                        </label>
                       </td>
 
                       <td>
@@ -2524,8 +2550,13 @@
                       >
                         <option value="ROLE_USER">Người học</option>
                         <option value="ROLE_ADMIN">Quản trị viên</option>
+                        <option value="ROLE_TEACHER">Giáo viên</option>
                       </select>
                     </div>
+                    <label v-if="user.role === 'ROLE_TEACHER'" class="teacher-approval-toggle">
+                      <input type="checkbox" :checked="user.canApproveExams" @change="updateExamApprovalPermission(user, $event)" />
+                      <span>Duyệt đề</span>
+                    </label>
 
                     <div class="card-field-row">
                       <span class="card-field-label">Gói học:</span>
@@ -4453,6 +4484,9 @@
                     <p class="knowledge-panel-subtitle">Gán theo kỳ thi và kỹ năng để tạo ngữ cảnh chuẩn xác</p>
                   </div>
                 </div>
+                <button type="button" class="knowledge-open-exam-import" @click="router.push('/admin/exam-imports')">
+                  <FileText :size="15" /> Nhập bộ đề thi
+                </button>
               </div>
 
               <form class="knowledge-upload-form" @submit.prevent="importKnowledge">
@@ -4849,7 +4883,10 @@
           <input v-model="accountForm.password" type="password" required minlength="8" autocomplete="new-password" placeholder="Tối thiểu 8 ký tự" />
         </label>
         <label class="admin-overlay-field">Vai trò
-          <select v-model="accountForm.role"><option value="ROLE_USER">Người học</option><option value="ROLE_ADMIN">Quản trị viên</option></select>
+          <select v-model="accountForm.role"><option value="ROLE_USER">Người học</option><option value="ROLE_TEACHER">Giáo viên</option><option value="ROLE_ADMIN">Quản trị viên</option></select>
+        </label>
+        <label v-if="accountForm.role === 'ROLE_TEACHER'" class="admin-overlay-field admin-overlay-checkbox">
+          <input v-model="accountForm.canApproveExams" type="checkbox" /> Có quyền duyệt bộ đề và đáp án
         </label>
       </form>
       <form v-else-if="modal === 'program'" id="admin-program-form" class="admin-overlay-form" @submit.prevent="saveProgram">
@@ -6779,6 +6816,8 @@
     border-bottom: 1px solid #F1F5F9;
     background: #FFFFFF;
   }
+  .knowledge-open-exam-import { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #C9D9DD; border-radius: 5px; background: #F4FAFA; color: #176B68; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .knowledge-open-exam-import:hover { background: #E9F4F3; }
   .knowledge-panel-title-group {
     display: flex;
     align-items: center;
@@ -7770,6 +7809,8 @@
     cursor: pointer;
     transition: all 0.15s ease;
   }
+  .teacher-approval-toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary, #475569); font-size: 12px; white-space: nowrap; }
+  .teacher-approval-toggle input { width: 16px; height: 16px; accent-color: var(--ds-primary, #2563EB); }
   .role-select:focus {
     outline: none;
     border-color: #2563EB;

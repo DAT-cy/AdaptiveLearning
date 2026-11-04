@@ -14,6 +14,6 @@ public interface UserService {
     LoginResponse loginWithGoogle(GoogleLoginRequest request);
     void initAdminUser();
     EmailVerificationResponse signUp(SignUpRequest request);
-    User createManagedUser(String username, String password, Role role);
+    User createManagedUser(String username, String password, Role role, boolean canApproveExams);
     ProfileUser getProfile();
 }

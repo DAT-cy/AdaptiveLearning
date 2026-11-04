@@ -14,6 +14,7 @@
         <result property="premiumActivatedAt" column="premium_activated_at"/>
         <result property="freeExamsUsed" column="free_exams_used"/>
         <result property="role" column="role"/>
+        <result property="canApproveExams" column="can_approve_exams"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
@@ -31,6 +32,7 @@
             premium_activated_at,
             free_exams_used,
             role,
+            can_approve_exams,
             created_at,
             updated_at
         FROM tbl_users
@@ -40,6 +42,7 @@
 
     <select id="findByUsernameForUpdate" resultMap="userResultMap">
         SELECT user_id, username, full_name, password, enable, email_verified, is_deleted, plan,
+               can_approve_exams,
                premium_activated_at, free_exams_used, role, created_at, updated_at
         FROM tbl_users
         WHERE LOWER(username) = LOWER(#{username})
@@ -48,7 +51,7 @@
     </select>
 
     <select id="findAllForAdmin" resultMap="userResultMap">
-        SELECT user_id, username, full_name, enable, email_verified, is_deleted, role, plan,
+        SELECT user_id, username, full_name, enable, email_verified, is_deleted, role, can_approve_exams, plan,
                premium_activated_at, free_exams_used, created_at, updated_at
         FROM tbl_users
         WHERE is_deleted = false
@@ -56,7 +59,7 @@
     </select>
 
     <select id="findById" resultMap="userResultMap">
-        SELECT user_id, username, full_name, password, enable, email_verified, is_deleted, role, plan,
+        SELECT user_id, username, full_name, password, enable, email_verified, is_deleted, role, can_approve_exams, plan,
                premium_activated_at, free_exams_used, created_at, updated_at
         FROM tbl_users
         WHERE user_id = #{userId}
@@ -81,6 +84,7 @@
                                premium_activated_at,
                                free_exams_used,
                                role,
+                               can_approve_exams,
                                created_at,
                                created_id,
                                updated_at,
@@ -95,6 +99,7 @@
                 #{premiumActivatedAt},
                 #{freeExamsUsed},
                 #{role},
+                #{canApproveExams},
                 NOW(),
                 #{username},
                 NOW(),
@@ -104,9 +109,10 @@
     <insert id="insertUnverifiedUserIfAbsent" parameterType="adaptivelearning.module.users.entity.User">
         INSERT IGNORE INTO tbl_users (username, full_name, password, enable, email_verified, is_deleted,
                                       plan, premium_activated_at, free_exams_used, role,
+                                      can_approve_exams,
                                       created_at, created_id, updated_at, updated_id)
         VALUES (#{user.username}, #{user.fullName}, #{user.password}, #{user.enable}, #{user.emailVerified}, #{user.isDeleted},
-                #{user.plan}, #{user.premiumActivatedAt}, #{user.freeExamsUsed}, #{user.role}, NOW(),
+                #{user.plan}, #{user.premiumActivatedAt}, #{user.freeExamsUsed}, #{user.role}, #{user.canApproveExams}, NOW(),
                 #{user.username}, NOW(), #{user.username})
     </insert>
 
@@ -114,6 +120,14 @@
         UPDATE tbl_users
         SET role = #{role}, updated_at = NOW()
         WHERE user_id = #{userId}
+          AND is_deleted = false
+    </update>
+
+    <update id="updateExamApprovalPermission">
+        UPDATE tbl_users
+        SET can_approve_exams = #{allowed}, updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND (role = 'ROLE_TEACHER' OR #{allowed} = false)
           AND is_deleted = false
     </update>
 

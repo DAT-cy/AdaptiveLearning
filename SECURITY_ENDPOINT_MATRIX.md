@@ -1,6 +1,6 @@
 # Endpoint Security Matrix
 
-Derived from Spring controller mappings and `SecurityConfig`. The roles below mean an authenticated principal with exactly `ROLE_USER` or `ROLE_ADMIN`. Unauthenticated protected requests should receive 401; authenticated requests with an insufficient role should receive 403. For owner-scoped records, a different user's ID must not return or mutate that record (most service paths return 404 for missing/foreign rows; attempt and analytics guards return 403).
+Derived from Spring controller mappings and `SecurityConfig`. Roles include `ROLE_USER`, `ROLE_ADMIN`, and `ROLE_TEACHER`. `EXAM_APPROVER` is an additional authority granted only to a teacher account whose exam-approval permission is enabled; it does not grant admin access. Unauthenticated protected requests should receive 401; authenticated requests with an insufficient role should receive 403. For owner-scoped records, a different user's ID must not return or mutate that record (most service paths return 404 for missing/foreign rows; attempt and analytics guards return 403).
 
 | Method and endpoint | Allowed role | Ownership / entitlement | Expected outcome and current control |
 |---|---|---|---|
@@ -30,7 +30,9 @@ Derived from Spring controller mappings and `SecurityConfig`. The roles below me
 | `GET /api/v1/ai/jobs`, `POST /jobs/{id}/retry`, `POST /rubrics`, `PUT /rubrics/{id}` | ADMIN | Global AI operations | Admin-only. |
 | `GET /api/v1/ai/rubrics/certificate/{id}` | USER, ADMIN | Shared rubric catalog | Authenticated read. |
 | `POST /api/v1/content-generation`, `GET /content-generation`, `GET /{id}`, `POST /{id}/apply` | ADMIN | Current admin-created generation; apply admin-only | Admin-only; service scopes user-facing listing by current admin ID. |
-| `GET /api/v1/admin/users`, `/analytics`, `/{userId}/attempts`, `/{userId}/progress`; `POST /api/v1/admin/users`; `PUT /{userId}/role`; `PATCH /{userId}/status` | ADMIN | Global user administration | `/api/v1/admin/**` requires `ROLE_ADMIN`; integration-tested. |
+| `POST /api/v1/exam-imports` | ADMIN | Global exam-import queue | Creates an extracted exam in `PENDING_REVIEW`; admin-only. |
+| `GET /api/v1/exam-imports`, `GET /{id}`, `PUT /{id}`, `POST /{id}/confirm` | ADMIN or teacher with `EXAM_APPROVER` | Shared pending review queue | Method-level authority checks; only pending imports can be edited or confirmed; confirmation creates approved question-bank entries. |
+| `GET /api/v1/admin/users`, `/analytics`, `/{userId}/attempts`, `/{userId}/progress`; `POST /api/v1/admin/users`; `PUT /{userId}/role`, `PUT /{userId}/exam-approval`; `PATCH /{userId}/status` | ADMIN | Global user administration | `/api/v1/admin/**` requires `ROLE_ADMIN`; approval permission is persisted only for teacher accounts. |
 | `POST /api/v1/tutor/conversations`, `GET /conversations`, `GET/POST /conversations/{id}/messages`, `DELETE /conversations/{id}` | USER current owner with AI entitlement; ADMIN uses own scope | Conversation owner | Service checks conversation owner for ID-based operations. |
 | `POST /api/v1/rag/documents`, `GET /documents`, `GET /documents/{id}`, `/search`, `DELETE /documents/{id}` | USER current owner; ADMIN uses own scope | Document owner | Service uses owner-scoped document lookup. |
 | `POST /api/v1/admin/knowledge-base`, `/pdf`; `GET /admin/knowledge-base`, `/{id}`; `PUT /{id}`, `PATCH /{id}/active`, `DELETE /{id}` | ADMIN | Shared knowledge corpus | Controller-level ADMIN and `/api/v1/admin/**` protection. |

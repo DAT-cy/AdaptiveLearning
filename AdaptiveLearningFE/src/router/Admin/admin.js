@@ -1,8 +1,21 @@
 const adminHome = () => import('@/features/Admin/pages/Home.vue')
 const overlayDemo = () => import('@/features/Admin/pages/OverlayDemo.vue')
 const reports = () => import('@/features/Admin/pages/Reports.vue')
+const examImports = () => import('@/features/Admin/pages/ExamImports.vue')
 
 export default [
+  {
+    path: '/admin/exam-imports',
+    name: 'AdminExamImports',
+    meta: { title: 'Nhập bộ đề', layout: 'only-view', allowedRoles: ['ROLE_ADMIN'] },
+    component: examImports,
+  },
+  {
+    path: '/teacher/review',
+    name: 'TeacherExamReview',
+    meta: { title: 'Duyệt bộ đề', layout: 'only-view', allowedRoles: ['ROLE_TEACHER'] },
+    component: examImports,
+  },
   {
     path: '/admin/reports',
     name: 'AdminReports',

@@ -22,6 +22,7 @@ export const useUserStore = defineStore('user', () => {
     username: '',
     fullName: initialFullName,
     role: normalizeRole(localStorage.getItem('adaptive-learning-role') || ''),
+    canApproveExams: localStorage.getItem('adaptive-learning-can-approve-exams') === 'true',
     avatar: '',
     permissions: [],
   })
@@ -39,6 +40,8 @@ export const useUserStore = defineStore('user', () => {
     state.username = profile.username || username
     state.fullName = fixVietnameseMojibake(profile.fullName || profile.username?.split('@')[0] || '')
     state.role = normalizeRole(profile.role)
+    state.canApproveExams = Boolean(profile.canApproveExams)
+    localStorage.setItem('adaptive-learning-can-approve-exams', String(state.canApproveExams))
     localStorage.setItem('adaptive-learning-fullname', state.fullName)
     localStorage.setItem('adaptive-learning-role', state.role)
   }
@@ -51,6 +54,8 @@ export const useUserStore = defineStore('user', () => {
     state.username = profile.username || ''
     state.fullName = fixVietnameseMojibake(profile.fullName || profile.username?.split('@')[0] || '')
     state.role = normalizeRole(profile.role)
+    state.canApproveExams = Boolean(profile.canApproveExams)
+    localStorage.setItem('adaptive-learning-can-approve-exams', String(state.canApproveExams))
     localStorage.setItem('adaptive-learning-fullname', state.fullName)
     localStorage.setItem('adaptive-learning-role', state.role)
   }
@@ -61,6 +66,8 @@ export const useUserStore = defineStore('user', () => {
     state.username = profile.username
     state.fullName = fixVietnameseMojibake(profile.fullName || profile.username?.split('@')[0] || '')
     state.role = normalizeRole(profile.role)
+    state.canApproveExams = Boolean(profile.canApproveExams)
+    localStorage.setItem('adaptive-learning-can-approve-exams', String(state.canApproveExams))
     localStorage.setItem('adaptive-learning-fullname', state.fullName)
     localStorage.setItem('adaptive-learning-role', state.role)
   }
@@ -69,7 +76,8 @@ export const useUserStore = defineStore('user', () => {
     removeToken()
     localStorage.removeItem('adaptive-learning-fullname')
     localStorage.removeItem('adaptive-learning-role')
-    Object.assign(state, { accessToken: null, username: '', fullName: '', role: '', avatar: '', permissions: [] })
+    localStorage.removeItem('adaptive-learning-can-approve-exams')
+    Object.assign(state, { accessToken: null, username: '', fullName: '', role: '', canApproveExams: false, avatar: '', permissions: [] })
   }
 
   function logout() {

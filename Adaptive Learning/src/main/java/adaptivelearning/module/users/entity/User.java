@@ -56,8 +56,14 @@ public class User extends BaseEntity implements UserDetails {
     @Column(nullable = false, length = 32)
     private Role role;
 
+    @Column(name = "can_approve_exams", nullable = false)
+    private boolean canApproveExams;
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
+        if (role == Role.ROLE_TEACHER && canApproveExams) {
+            return List.of(new SimpleGrantedAuthority(role.name()), new SimpleGrantedAuthority("EXAM_APPROVER"));
+        }
         return List.of(new SimpleGrantedAuthority(role.name()));
     }
 

@@ -89,7 +89,8 @@ public class AdminController {
     @PostMapping
     public ResponseEntity<DefaultRes<AccountSummary>> createUser(
             @Valid @RequestBody CreateAccountRequest request) {
-        User user = userService.createManagedUser(request.getUsername(), request.getPassword(), request.getRole());
+        User user = userService.createManagedUser(request.getUsername(), request.getPassword(), request.getRole(),
+                request.isCanApproveExams());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(DefaultRes.res(HttpStatus.CREATED.value(), ResponseMessage.CREATED,
                         toSummary(user, billingProperties.freeExamLimit())));
@@ -101,6 +102,19 @@ public class AdminController {
             @Valid @RequestBody UpdateRoleRequest request) {
         if (userMapper.updateRole(userId, request.getRole()) == 0) {
             return ResponseEntity.notFound().build();
+        }
+        if (request.getRole() != Role.ROLE_TEACHER) {
+            userMapper.updateExamApprovalPermission(userId, false);
+        }
+        return ResponseEntity.ok(DefaultRes.res(HttpStatus.OK.value(), ResponseMessage.UPDATED));
+    }
+
+    @PutMapping("/{userId}/exam-approval")
+    public ResponseEntity<DefaultRes<Void>> updateExamApprovalPermission(
+            @PathVariable Long userId, @Valid @RequestBody UpdateExamApprovalRequest request) {
+        if (userMapper.updateExamApprovalPermission(userId, request.getAllowed()) == 0) {
+            return ResponseEntity.badRequest().body(DefaultRes.res(HttpStatus.BAD_REQUEST.value(),
+                    "Exam approval permission can only be assigned to teachers"));
         }
         return ResponseEntity.ok(DefaultRes.res(HttpStatus.OK.value(), ResponseMessage.UPDATED));
     }
@@ -149,12 +163,12 @@ public class AdminController {
     }
 
     private static AccountSummary toSummary(User user, int freeExamLimit) {
-        return new AccountSummary(user.getUserId(), user.getUsername(), user.getRole(),
+        return new AccountSummary(user.getUserId(), user.getUsername(), user.getRole(), user.isCanApproveExams(),
                 Boolean.TRUE.equals(user.getEnable()), user.isEmailVerified(),
                 user.getPlan() == null ? PlanType.FREE : user.getPlan(), user.getFreeExamsUsed(), freeExamLimit);
     }
 
-    public record AccountSummary(Long userId, String username, Role role, boolean enabled,
+    public record AccountSummary(Long userId, String username, Role role, boolean canApproveExams, boolean enabled,
                                  boolean emailVerified, PlanType plan, int freeExamsUsed, int freeExamLimit) {}
 
     public record AdminPaymentSummary(
@@ -183,6 +197,8 @@ public class AdminController {
 
         @NotNull
         private Role role;
+
+        private boolean canApproveExams;
     }
 
     @Getter
@@ -190,6 +206,13 @@ public class AdminController {
     public static class UpdateRoleRequest {
         @NotNull
         private Role role;
+    }
+
+    @Getter
+    @Setter
+    public static class UpdateExamApprovalRequest {
+        @NotNull
+        private Boolean allowed;
     }
 
     @Getter

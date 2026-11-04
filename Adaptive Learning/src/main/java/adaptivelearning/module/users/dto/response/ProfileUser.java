@@ -12,4 +12,5 @@ public class ProfileUser {
     private String username;
     private String fullName;
     private Role role;
+    private boolean canApproveExams;
 }

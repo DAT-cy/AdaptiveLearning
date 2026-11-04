@@ -84,6 +84,7 @@ public class UserServiceImpl implements UserService {
                     .fullName(effectiveName)
                     .token(jwtToken)
                     .role(user.getRole())
+                    .canApproveExams(user.isCanApproveExams())
                     .build();
         } catch (AccountExpiredException | DisabledException e) {
             throw new CommonException(ErrorCode.ACCOUNT_DEACTIVATE);
@@ -134,6 +135,7 @@ public class UserServiceImpl implements UserService {
                 .fullName(effectiveName)
                 .token(jwtService.generateToken(user))
                 .role(user.getRole())
+                .canApproveExams(user.isCanApproveExams())
                 .build();
     }
     @Override
@@ -150,7 +152,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public User createManagedUser(String username, String password, Role role) {
+    public User createManagedUser(String username, String password, Role role, boolean canApproveExams) {
         if (findUserByEmail(username) != null) {
             throw new CommonException(ErrorCode.USERNAME_ALREADY_EXISTS);
         }
@@ -158,6 +160,7 @@ public class UserServiceImpl implements UserService {
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(password));
         user.setRole(role);
+        user.setCanApproveExams(role == Role.ROLE_TEACHER && canApproveExams);
         user.setEnable(true);
         user.setEmailVerified(true);
         user.setIsDeleted(false);
@@ -177,6 +180,7 @@ public class UserServiceImpl implements UserService {
 
         return ProfileUser.builder()
                 .role(user.getRole())
+                .canApproveExams(user.isCanApproveExams())
                 .username(user.getUsername())
                 .fullName(effectiveName)
                 .build();

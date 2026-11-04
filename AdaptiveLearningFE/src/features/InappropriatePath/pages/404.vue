@@ -7,7 +7,7 @@ import { useUserStore } from '@/stores/user'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const homePath = computed(() => userStore.state.role === 'ROLE_ADMIN' ? '/admin' : '/home')
+const homePath = computed(() => userStore.state.role === 'ROLE_ADMIN' ? '/admin' : userStore.state.role === 'ROLE_TEACHER' ? '/teacher/review' : '/home')
 
 function goBack() {
   if (window.history.length > 1) router.back()

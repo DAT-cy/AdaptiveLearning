@@ -20,6 +20,7 @@ public interface UserMapper {
     void insertUser(User user);
     int insertUnverifiedUserIfAbsent(@Param("user") User user);
     int updateRole(@Param("userId") Long userId, @Param("role") Role role);
+    int updateExamApprovalPermission(@Param("userId") Long userId, @Param("allowed") boolean allowed);
     int updateEnabled(@Param("userId") Long userId, @Param("enabled") boolean enabled);
     int updateEmailVerified(@Param("username") String username, @Param("verified") boolean verified);
     int updatePlan(@Param("userId") Long userId, @Param("plan") PlanType plan,

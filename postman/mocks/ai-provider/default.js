@@ -14,12 +14,31 @@ const server = http.createServer(async (req, res) => {
   if (!req.headers.authorization || !req.headers.authorization.startsWith("Bearer ")) {
     return respond(res, 401, { error: { message: "Missing provider authorization" } });
   }
+  const userPrompt = payload.messages?.find((message) => message.role === "user")?.content || "";
+  const isExamImport = userPrompt.includes("Exam source text:");
   return respond(res, 200, {
     id: "chatcmpl-test",
     object: "chat.completion",
     created: 1,
     model: payload.model || "gpt-4o-mini",
-    choices: [{ index: 0, message: { role: "assistant", content: "{\"result\":\"ok\"}" }, finish_reason: "stop" }],
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: isExamImport
+          ? JSON.stringify([{
+              questionType: "MULTIPLE_CHOICE",
+              difficulty: "MEDIUM",
+              content: "Simulation question?",
+              options: [{ label: "A", text: "First" }, { label: "B", text: "Second" }],
+              correctAnswer: "A",
+              explanation: "Simulated answer key",
+              points: 1,
+            }])
+          : "{\"result\":\"ok\"}",
+      },
+      finish_reason: "stop",
+    }],
     usage: { prompt_tokens: 12, completion_tokens: 5, total_tokens: 17 },
   });
 });
