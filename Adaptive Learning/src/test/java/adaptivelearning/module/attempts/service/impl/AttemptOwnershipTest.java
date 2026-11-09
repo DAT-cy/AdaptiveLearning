@@ -11,6 +11,7 @@ import adaptivelearning.module.attempts.repository.AttemptAnswerRepository;
 import adaptivelearning.module.attempts.repository.AttemptEventRepository;
 import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
 import adaptivelearning.module.billing.service.EntitlementService;
+import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.exams.repository.ExamQuestionRepository;
 import adaptivelearning.module.exams.repository.ExamRepository;
 import adaptivelearning.module.questions.repository.QuestionRepository;
@@ -26,7 +27,7 @@ class AttemptOwnershipTest {
         when(attempts.findByIdForUpdate(9L)).thenReturn(Optional.of(ExamAttempt.builder().attemptId(9L).userId(2L).build()));
         AttemptServiceImpl service = new AttemptServiceImpl(attempts, mock(AttemptAnswerRepository.class),
                 mock(AttemptEventRepository.class), mock(ExamRepository.class), mock(ExamQuestionRepository.class),
-                mock(QuestionRepository.class), new ObjectMapper(), mock(EntitlementService.class));
+                mock(QuestionRepository.class), mock(CertificateRepository.class), new ObjectMapper(), mock(EntitlementService.class));
 
         assertThrows(CommonException.class, () -> service.recordViolation(9L, 1L, false, new ViolationRequest()));
     }

@@ -49,7 +49,7 @@ function onOpenAutoFocus(event: Event) {
 </script>
 
 <template>
-  <AlertDialogRoot :open="open" @update:open="(value) => !value && settle('cancel')">
+  <AlertDialogRoot :open="open" @update:open="(value) => !value && queueMicrotask(() => settle('cancel'))">
     <AlertDialogPortal>
       <AlertDialogOverlay class="overlay-backdrop overlay-confirm-backdrop" />
       <AlertDialogContent class="overlay-confirm" @open-auto-focus="onOpenAutoFocus">

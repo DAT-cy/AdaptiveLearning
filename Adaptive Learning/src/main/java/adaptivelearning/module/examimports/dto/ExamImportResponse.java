@@ -13,9 +13,15 @@ public class ExamImportResponse {
     String title;
     Long certificateId;
     Long topicId;
+    boolean canDelete;
     boolean answerGenerated;
+    boolean hasAnswers;
     ExamImportStatus status;
     int questionCount;
+    String sourceFileName;
+    String sourceFileContentType;
+    Long sourceFileSize;
+    List<ExamImportResourceResponse> resources;
     List<ExamImportQuestion> questions;
     String sourceContent;
     String answerContent;

@@ -56,6 +56,72 @@ public class OpenAiProvider implements AiProvider {
                 .block(Duration.ofSeconds(120));
     }
 
+    @Override
+    public Mono<String> analyzeDocument(String systemPrompt, String userPrompt, byte[] documentBytes, String mimeType, int maxTokens) {
+        if (apiKey == null || apiKey.isBlank()) {
+            return Mono.error(new IllegalStateException("GEMINI_API_KEY is not configured"));
+        }
+        String base64Data = java.util.Base64.getEncoder().encodeToString(documentBytes);
+        Map<String, Object> inlineData = Map.of(
+                "mimeType", (mimeType == null || mimeType.isBlank()) ? "application/pdf" : mimeType,
+                "data", base64Data
+        );
+        Map<String, Object> requestBody = Map.of(
+                "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
+                "contents", List.of(Map.of(
+                        "role", "user",
+                        "parts", List.of(
+                                Map.of("text", userPrompt),
+                                Map.of("inlineData", inlineData)
+                        ))),
+                "generationConfig", Map.of(
+                        "maxOutputTokens", maxTokens,
+                        "responseMimeType", "application/json")
+        );
+
+        return webClient.post()
+                .uri("models/" + geminiModel + ":generateContent")
+                .header("x-goog-api-key", apiKey)
+                .header("Content-Type", "application/json")
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .map(response -> {
+                    JsonNode candidates = response.path("candidates");
+                    if (!candidates.isArray() || candidates.isEmpty()) {
+                        String reason = response.path("promptFeedback").path("blockReason").asText();
+                        throw new IllegalStateException(reason.isBlank()
+                                ? "Gemini returned no candidates"
+                                : "Gemini blocked the prompt: " + reason);
+                    }
+                    JsonNode parts = candidates.path(0).path("content").path("parts");
+                    StringBuilder text = new StringBuilder();
+                    for (JsonNode part : parts) {
+                        if (part.hasNonNull("text")) text.append(part.path("text").asText());
+                    }
+                    if (text.isEmpty()) throw new IllegalStateException("Gemini returned no text content");
+                    return text.toString();
+                })
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
+                        .filter(this::isRetryable)
+                        .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
+                .onErrorMap(ex -> {
+                    if (ex instanceof WebClientResponseException response) {
+                        String message = providerErrorMessage(response);
+                        log.error("AI document analysis failed: {}", message);
+                        return new RuntimeException("AI provider error: " + message, ex);
+                    }
+                    log.error("AI document analysis failed: {}", ex.getMessage(), ex);
+                    return new RuntimeException("AI provider error: " + ex.getMessage(), ex);
+                });
+    }
+
+    @Override
+    public String analyzeDocumentSync(String systemPrompt, String userPrompt, byte[] documentBytes, String mimeType, int maxTokens) {
+        return analyzeDocument(systemPrompt, userPrompt, documentBytes, mimeType, maxTokens)
+                .block(Duration.ofSeconds(180));
+    }
+
     private Mono<String> executeRequest(String systemPrompt, String userPrompt, String model, int maxTokens) {
         log.info("AI provider route: nativeGemini={}, compatibleGemini={}, keyConfigured={}, model={}, baseUrl={}",
                 geminiNativeEndpoint, geminiEndpoint, apiKey != null && !apiKey.isBlank(),

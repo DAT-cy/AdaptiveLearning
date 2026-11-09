@@ -15,6 +15,7 @@ const server = http.createServer(async (req, res) => {
     return respond(res, 401, { error: { message: "Missing provider authorization" } });
   }
   const userPrompt = payload.messages?.find((message) => message.role === "user")?.content || "";
+  const isAnswerKeyMapping = userPrompt.includes("Answer key mapping request:");
   const isExamImport = userPrompt.includes("Exam source text:");
   return respond(res, 200, {
     id: "chatcmpl-test",
@@ -25,7 +26,9 @@ const server = http.createServer(async (req, res) => {
       index: 0,
       message: {
         role: "assistant",
-        content: isExamImport
+        content: isAnswerKeyMapping
+          ? JSON.stringify([{ questionIndex: 1, correctAnswer: "A" }])
+          : isExamImport
           ? JSON.stringify([{
               questionType: "MULTIPLE_CHOICE",
               difficulty: "MEDIUM",

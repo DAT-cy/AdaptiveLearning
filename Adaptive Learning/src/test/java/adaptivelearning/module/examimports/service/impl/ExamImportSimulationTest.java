@@ -3,11 +3,15 @@ package adaptivelearning.module.examimports.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 import adaptivelearning.module.ai.gateway.OpenAiProvider;
 import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.examimports.entity.ExamImport;
 import adaptivelearning.module.examimports.entity.ExamImportStatus;
+import adaptivelearning.module.examimports.storage.FileStorage;
+import adaptivelearning.module.examimports.storage.StoredFile;
+import adaptivelearning.module.examimports.repository.ExamImportResourceRepository;
 import adaptivelearning.module.examimports.repository.ExamImportRepository;
 import adaptivelearning.module.questions.repository.QuestionRepository;
 import adaptivelearning.module.rag.service.PdfTextExtractor;
@@ -49,7 +53,7 @@ class ExamImportSimulationTest {
         OpenAiProvider provider = new OpenAiProvider(builder, mapper, "simulation-test-key",
                 System.getenv("AI_SIM_BASE_URL"), "mock-exam-model");
         ExamImportServiceImpl service = new ExamImportServiceImpl(
-                imports, questions, certificates, topics, provider, mapper);
+                imports, mock(ExamImportResourceRepository.class), questions, certificates, topics, provider, mapper, fileStorage());
         ReflectionTestUtils.setField(service, "model", "mock-exam-model");
         when(certificates.existsById(4L)).thenReturn(true);
         when(topics.findById(8L)).thenReturn(Optional.of(Topic.builder().certificateId(4L).isActive(true).build()));
@@ -62,6 +66,67 @@ class ExamImportSimulationTest {
         assertEquals(1, response.getQuestionCount());
         assertEquals("Simulation question?", response.getQuestions().get(0).getContent());
         assertEquals("A", response.getQuestions().get(0).getCorrectAnswer());
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "AI_SIM_BASE_URL", matches = "http://.+")
+    void longExamUsesMultipleSmallAiRequestsAgainstStandIn() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        WebClient.Builder builder = WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(HttpClient.create().responseTimeout(Duration.ofSeconds(5))));
+        OpenAiProvider provider = new OpenAiProvider(builder, mapper, "simulation-test-key",
+                System.getenv("AI_SIM_BASE_URL"), "mock-exam-model");
+        ExamImportServiceImpl service = new ExamImportServiceImpl(
+                imports, mock(ExamImportResourceRepository.class), questions, certificates, topics, provider, mapper, fileStorage());
+        ReflectionTestUtils.setField(service, "model", "mock-exam-model");
+        when(certificates.existsById(4L)).thenReturn(true);
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        String source = java.util.stream.IntStream.rangeClosed(1, 4)
+                .mapToObj(index -> "Question " + index + ": " + "context ".repeat(800))
+                .collect(java.util.stream.Collectors.joining("\n"));
+
+        var response = service.create(2L, "Long simulation exam", 4L, null,
+                textFile("exam.md", source), null);
+
+        assertEquals(4, response.getQuestionCount());
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "AI_SIM_BASE_URL", matches = "http://.+")
+    void answerKeyUploadUsesConfiguredAiHttpStandInAndOnlyUpdatesTheAnswer() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        WebClient.Builder builder = WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(HttpClient.create().responseTimeout(Duration.ofSeconds(5))));
+        OpenAiProvider provider = new OpenAiProvider(builder, mapper, "simulation-test-key",
+                System.getenv("AI_SIM_BASE_URL"), "mock-exam-model");
+        ExamImportServiceImpl service = new ExamImportServiceImpl(
+                imports, mock(ExamImportResourceRepository.class), questions, certificates, topics, provider, mapper, fileStorage());
+        ReflectionTestUtils.setField(service, "model", "mock-exam-model");
+        ExamImport item = new ExamImport();
+        item.setImportId(9L);
+        item.setTitle("Simulation exam");
+        item.setCertificateId(4L);
+        item.setStatus(ExamImportStatus.PENDING_REVIEW);
+        item.setAnswerGenerated(true);
+        item.setQuestionsJson("[{\"questionType\":\"MULTIPLE_CHOICE\",\"difficulty\":\"MEDIUM\","
+                + "\"content\":\"Existing OCR question?\",\"options\":[{\"label\":\"A\",\"text\":\"First\"},"
+                + "{\"label\":\"B\",\"text\":\"Second\"}],\"correctAnswer\":\"\","
+                + "\"explanation\":\"Existing explanation\",\"points\":1}]");
+        when(imports.findById(9L)).thenReturn(Optional.of(item));
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.importAnswerKey(9L, textFile("answers.md", "1. A"));
+
+        assertEquals(1, result.getMatchedAnswerCount());
+        assertEquals("Existing OCR question?", result.getExamImport().getQuestions().get(0).getContent());
+        assertEquals("A", result.getExamImport().getQuestions().get(0).getCorrectAnswer());
+    }
+
+    private FileStorage fileStorage() {
+        FileStorage storage = mock(FileStorage.class);
+        when(storage.store(any(), any(), any())).thenReturn(new StoredFile(
+                "12345678-1234-1234-1234-123456789abc", "exam.pdf", "application/pdf", 123L, "0".repeat(64)));
+        return storage;
     }
 
     private MockMultipartFile pdf(String name, String text) throws Exception {
@@ -80,5 +145,10 @@ class ExamImportSimulationTest {
             bytes = output.toByteArray();
         }
         return new MockMultipartFile("examFile", name, "application/pdf", bytes);
+    }
+
+    private MockMultipartFile textFile(String name, String text) {
+        return new MockMultipartFile("examFile", name, "text/markdown",
+                text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

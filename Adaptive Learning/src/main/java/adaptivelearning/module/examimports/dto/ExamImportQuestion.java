@@ -14,6 +14,16 @@ public class ExamImportQuestion {
     private String correctAnswer;
     private String explanation;
     private Double points;
+    private Long topicId;
+    private String skill;
+    private String sourceQuestionNumber;
+    private Integer sourcePageNumber;
+    private Integer sourceSectionOrder;
+    private String sourceSectionTitle;
+    private String sourceSectionQuestionStart;
+    private String sourceSectionQuestionEnd;
+    private String sectionInstructions;
+    private String stimulusContent;
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)

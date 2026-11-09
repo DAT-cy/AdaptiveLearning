@@ -81,9 +81,12 @@ function getInstance() {
       if (token && !isPublicAuthRequest(config.url)) {
         config.headers.Authorization = `Bearer ${token}`;
       }
-      const shouldDebounce = debounce.some(url => config.url.includes(url));
-      pendingRequests++; // Tăng biến đếm khi bắt đầu gọi API
-      isLoading.value = (apiLoading || shouldDebounce) && pendingRequests > 0;
+      const isSilent = config.silent || config.skipLoading || config.headers?.['X-Silent-Request'] === 'true' || config.url?.includes('/analysis');
+      if (!isSilent) {
+        const shouldDebounce = debounce.some(url => config.url.includes(url));
+        pendingRequests++; // Tăng biến đếm khi bắt đầu gọi API
+        isLoading.value = (apiLoading || shouldDebounce) && pendingRequests > 0;
+      }
       return config;
     },
     error => {
@@ -93,8 +96,11 @@ function getInstance() {
 
   axiosInstance.interceptors.response.use(
     response => {
-      pendingRequests--; // Giảm biến đếm khi nhận được phản hồi từ API
-      isLoading.value = pendingRequests > 0
+      const isSilent = response.config?.silent || response.config?.skipLoading || response.config?.headers?.['X-Silent-Request'] === 'true' || response.config?.url?.includes('/analysis');
+      if (!isSilent) {
+        pendingRequests = Math.max(0, pendingRequests - 1); // Giảm biến đếm khi nhận được phản hồi từ API
+        isLoading.value = pendingRequests > 0;
+      }
       const { data, config } = response
       if (['PREMIUM_REQUIRED', 'FREE_LIMIT_REACHED'].includes(data?.responseCode)) {
         router.push({ path: '/pricing', query: { reason: data.responseCode } })
@@ -117,8 +123,11 @@ function getInstance() {
       }
     },
     error => {
-      pendingRequests--; // Giảm biến đếm khi nhận được phản hồi từ API
-      isLoading.value = pendingRequests > 0
+      const isSilent = error.config?.silent || error.config?.skipLoading || error.config?.headers?.['X-Silent-Request'] === 'true' || error.config?.url?.includes('/analysis');
+      if (!isSilent) {
+        pendingRequests = Math.max(0, pendingRequests - 1); // Giảm biến đếm khi nhận được phản hồi từ API
+        isLoading.value = pendingRequests > 0;
+      }
       const { response, message } = error
       if (response && response.data) {
         const { status } = response
@@ -158,8 +167,8 @@ function put(endpointApiUrl, payload = {}, config = {}) {
   return getInstance().put(endpointApiUrl, payload, config);
 }
 
-function del(endpointApiUrl, payload = {}, config = {}) {
-  return getInstance().delete(endpointApiUrl, payload, config);
+function del(endpointApiUrl, config = {}) {
+  return getInstance().delete(endpointApiUrl, config);
 }
 
 function patch(endpointApiUrl, payload = {}, config = {}) {
@@ -172,5 +181,6 @@ export const Axios = {
   post,
   put,
   del,
+  delete: del,
   patch
 }

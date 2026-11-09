@@ -1,5 +1,6 @@
 README.md
 .env
+data/exam-assets/
 .gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar

@@ -1,6 +1,6 @@
 purpose:
   stands_in_for: The OpenAI-compatible chat-completions endpoint used by OpenAiProvider, including exam-import parsing prompts.
-  unblocks: HTTP request serialization, response parsing, and exam-import extraction tests without live AI credentials.
+  unblocks: HTTP request serialization, chunked exam-import parsing/progress tests, answer-key matching, and provider failure tests without live AI credentials.
 
 assumptions:
   - id: ai-completion-shape-for-exam-import
@@ -10,6 +10,20 @@ assumptions:
     verification: On 2026-10-30, ExamImportSimulationTest uploaded a text PDF to ExamImportServiceImpl, the simulation recorded one POST /v1/chat/completions and returned HTTP 200 with a structured question array, and the service returned PENDING_REVIEW with one parsed question. The stand-in generated the answer; no live provider was called.
     source: postman/mocks/ai-provider/default.js; postman/simulations/ai-provider-dev/ai-provider-dev/ai-provider-dev.sim.yaml; Adaptive Learning/src/test/java/adaptivelearning/module/examimports/service/impl/ExamImportSimulationTest.java
     updated_at: "2026-10-30"
+  - id: long-exam-chunked-chat-requests
+    status: supported
+    claim: For the tested long text exam, ExamImportServiceImpl splits the source into four chunks, sends one POST /v1/chat/completions per chunk in order, parses each JSON-array response, and merges the four returned questions into one pending import.
+    reason: The simulation returns exactly one fixed question per request, so the four-question result for the four-chunk fixture establishes that the caller made and merged multiple provider requests. This does not establish live Gemini extraction quality or OCR behavior.
+    verification: On 2026-11-09, ran ExamImportSimulationTest with --rerun-tasks against the one-port ai-provider-dev simulation at AI_SIM_BASE_URL=http://localhost:4920/ai/v1/. The short case made one HTTP 200 request; the long Markdown fixture made four HTTP 200 requests and returned four parsed questions. No live AI credentials or provider were used.
+    source: Adaptive Learning/src/main/java/adaptivelearning/module/examimports/service/impl/ExamImportServiceImpl.java; Adaptive Learning/src/test/java/adaptivelearning/module/examimports/service/impl/ExamImportSimulationTest.java; postman/mocks/ai-provider/default.js
+    updated_at: "2026-11-09"
+  - id: exam-answer-key-matching-preserves-ocr-content
+    status: supported
+    claim: For the tested answer-key request, the caller sends existing OCR questions plus an answer key to POST /v1/chat/completions, maps the returned questionIndex to the existing question, and updates only its correctAnswer.
+    reason: The stand-in returns one deterministic questionIndex/correctAnswer mapping and the caller test verifies the original OCR question text is unchanged. This establishes the local mapping path, not live model answer-key accuracy.
+    verification: On 2026-11-09, ran ExamImportSimulationTest with --rerun-tasks against the one-port ai-provider-dev simulation at AI_SIM_BASE_URL=http://localhost:4920/ai/v1/. The answer-key test observed HTTP 200 and returned one matched answer while preserving question content. No live provider was called.
+    source: Adaptive Learning/src/main/java/adaptivelearning/module/examimports/service/impl/ExamImportServiceImpl.java; Adaptive Learning/src/test/java/adaptivelearning/module/examimports/service/impl/ExamImportSimulationTest.java; postman/mocks/ai-provider/default.js
+    updated_at: "2026-11-09"
   - id: live-provider-question-extraction-quality
     status: unknown
     claim: A live Gemini-compatible provider extracts all questions from supported exam PDFs, preserves their wording, and returns correct answer-key mappings in the requested JSON shape.
@@ -50,4 +64,8 @@ fingerprints:
   - id: exam-import-simulation-2026-10-30
     date: "2026-10-30"
     commit: "82b5cda9c9103d2b78ff5107a711bf67200366ff; working tree dirty"
+    cli: "Postman CLI 1.74.0"
+  - id: exam-import-chunk-progress-2026-11-09
+    date: "2026-11-09"
+    commit: "3fdefa7e10719edf886448eab4349b2d20a01f6d; working tree dirty"
     cli: "Postman CLI 1.74.0"

@@ -19,6 +19,9 @@ import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
 import adaptivelearning.module.attempts.service.AttemptService;
 import adaptivelearning.module.attempts.service.AttemptExpiredException;
 import adaptivelearning.module.attempts.service.AttemptSubmissionOutcome;
+import adaptivelearning.module.attempts.service.IeltsScoreCalculator;
+import adaptivelearning.module.certificates.entity.Certificate;
+import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.exams.entity.Exam;
 import adaptivelearning.module.exams.entity.ExamQuestion;
 import adaptivelearning.module.exams.repository.ExamQuestionRepository;
@@ -54,6 +57,7 @@ public class AttemptServiceImpl implements AttemptService {
     private final ExamRepository examRepository;
     private final ExamQuestionRepository examQuestionRepository;
     private final QuestionRepository questionRepository;
+    private final CertificateRepository certificateRepository;
     private final ObjectMapper objectMapper;
     private final EntitlementService entitlementService;
 
@@ -276,6 +280,22 @@ public class AttemptServiceImpl implements AttemptService {
         answerRepository.saveAll(answers);
 
         attempt.setScore(score);
+
+        // Tính Band Score nếu kỳ thi thuộc chứng chỉ IELTS
+        examRepository.findById(attempt.getExamId()).ifPresent(exam -> {
+            if (exam.getCertificateId() != null) {
+                certificateRepository.findById(exam.getCertificateId()).ifPresent(cert -> {
+                    if (cert.getCode() != null && cert.getCode().toUpperCase().contains("IELTS")) {
+                        int correctCount = (int) answers.stream()
+                                .filter(a -> Boolean.TRUE.equals(a.getIsCorrect()))
+                                .count();
+                        String skill = exam.getTitle();
+                        attempt.setBandScore(IeltsScoreCalculator.calculateBandScore(skill, correctCount));
+                    }
+                });
+            }
+        });
+
         attempt.setStatus(terminalStatus);
         attemptRepository.save(attempt);
 

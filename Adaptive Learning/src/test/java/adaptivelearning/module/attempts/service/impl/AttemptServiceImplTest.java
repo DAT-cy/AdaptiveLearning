@@ -20,6 +20,8 @@ import adaptivelearning.module.attempts.repository.AttemptAnswerRepository;
 import adaptivelearning.module.attempts.repository.AttemptEventRepository;
 import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
 import adaptivelearning.module.billing.service.EntitlementService;
+import adaptivelearning.module.certificates.entity.Certificate;
+import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.exams.entity.Exam;
 import adaptivelearning.module.exams.entity.ExamQuestion;
 import adaptivelearning.module.exams.repository.ExamQuestionRepository;
@@ -44,6 +46,7 @@ class AttemptServiceImplTest {
     private ExamRepository exams;
     private ExamQuestionRepository examQuestions;
     private QuestionRepository questions;
+    private CertificateRepository certificates;
     private EntitlementService entitlements;
     private AttemptServiceImpl service;
 
@@ -55,9 +58,10 @@ class AttemptServiceImplTest {
         exams = mock(ExamRepository.class);
         examQuestions = mock(ExamQuestionRepository.class);
         questions = mock(QuestionRepository.class);
+        certificates = mock(CertificateRepository.class);
         entitlements = mock(EntitlementService.class);
         service = new AttemptServiceImpl(attempts, answers, events, exams, examQuestions,
-                questions, new ObjectMapper(), entitlements);
+                questions, certificates, new ObjectMapper(), entitlements);
     }
 
     @Test

@@ -32,6 +32,36 @@ export const adminService = {
   examTemplates: () => data(Axios.get('/api/v1/exam-templates')),
   examImports: () => data(Axios.get('/api/v1/exam-imports')),
   examImport: (id) => data(Axios.get(`/api/v1/exam-imports/${id}`)),
+  examImportSource: (id) => Axios.getBlob(`/api/v1/exam-imports/${id}/source`),
+  examImportResourceFile: (id, resourceId) => Axios.getBlob(`/api/v1/exam-imports/${id}/resources/${resourceId}/file`),
+  uploadExamImportAudio: (id, sectionKey, sectionTitle, formData) =>
+    data(Axios.post(`/api/v1/exam-imports/${id}/resources/audio`, formData, {
+      params: { sectionKey, sectionTitle },
+      timeout: 120000,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })),
+  uploadExamImportImage: (id, sectionKey, sectionTitle, formData) =>
+    data(Axios.post(`/api/v1/exam-imports/${id}/resources/image`, formData, {
+      params: { sectionKey, sectionTitle },
+      timeout: 60000,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })),
+  deleteExamImport: (id) => data(Axios.del(`/api/v1/exam-imports/${id}`)),
+  importExamAnswerKey: (id, formData) => data(Axios.post(`/api/v1/exam-imports/${id}/answers`, formData, {
+    timeout: 180000,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })),
+  startExamImportAnalysis: (formData) => data(Axios.post('/api/v1/exam-imports/analysis', formData, {
+    timeout: 60000,
+    headers: { 'Content-Type': 'multipart/form-data', 'X-Silent-Request': 'true' },
+    silent: true,
+    skipLoading: true,
+  })),
+  examImportAnalysisProgress: (jobId) => data(Axios.get(`/api/v1/exam-imports/analysis/${jobId}`, {
+    silent: true,
+    skipLoading: true,
+    headers: { 'X-Silent-Request': 'true' },
+  })),
   createExamImport: (formData) => data(Axios.post('/api/v1/exam-imports', formData, {
     timeout: 180000,
     headers: { 'Content-Type': 'multipart/form-data' },

@@ -27,7 +27,7 @@ public class ExamImport extends BaseEntity {
     @Column(nullable = false)
     private Long certificateId;
 
-    @Column(nullable = false)
+    @Column(name = "topic_id")
     private Long topicId;
 
     @Column(nullable = false, columnDefinition = "LONGTEXT")
@@ -38,6 +38,21 @@ public class ExamImport extends BaseEntity {
 
     @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String questionsJson;
+
+    @Column(name = "source_file_key", length = 36)
+    private String sourceFileKey;
+
+    @Column(name = "source_file_name", length = 255)
+    private String sourceFileName;
+
+    @Column(name = "source_file_content_type", length = 120)
+    private String sourceFileContentType;
+
+    @Column(name = "source_file_size")
+    private Long sourceFileSize;
+
+    @Column(name = "source_file_sha256", length = 64)
+    private String sourceFileSha256;
 
     @Column(nullable = false)
     private boolean answerGenerated;

@@ -53,12 +53,13 @@ services:
       DB_URL: jdbc:mysql://mysql:3306/adaptivelearning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF-8
       DB_USERNAME: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in the environment or .env}
+      EXAM_ASSET_STORAGE_PATH: /data/exam-assets
       JWT_SECRET: ${JWT_SECRET:?Set a unique JWT_SECRET with at least 32 characters}
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-775450545173-dg1fks5jjs667s0ek3d2lj4s5sf07si2.apps.googleusercontent.com}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      AI_API_KEY: ${GEMINI_API_KEY:-${AI_API_KEY:-}}
+      AI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in environment or .env}
       BKT_URL: http://pybkt:8001
       MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
       MAIL_PORT: ${MAIL_PORT:-587}
@@ -91,6 +92,7 @@ services:
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - .:/workspace
+      - exam-assets:/data/exam-assets
       - gradle-cache:/home/gradle/.gradle
     depends_on:
       mysql:
@@ -118,4 +120,5 @@ services:
 volumes:
   mysql-data:
   gradle-cache:
+  exam-assets:
   frontend-node-modules:

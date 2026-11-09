@@ -29,8 +29,8 @@ spring:
           writetimeout: ${MAIL_SMTP_WRITE_TIMEOUT:5000}
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 41MB
+      max-file-size: 50MB
+      max-request-size: 60MB
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/adaptivelearning?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF-8}
     username: ${DB_USERNAME:root}
@@ -56,7 +56,7 @@ jwt:
 
 gemini:
   api-key: ${GEMINI_API_KEY:${AI_API_KEY:}}
-  model: gemini-2.5-flash
+  model: gemini-3.5-flash-lite
   base-url: https://generativelanguage.googleapis.com/v1beta
 
 google:
