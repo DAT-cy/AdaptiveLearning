@@ -1,0 +1,225 @@
+.admin-shell .admin-panel {
+  min-width: 0;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  background: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.admin-shell .admin-table-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.admin-shell .admin-panel-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 18px 20px;
+}
+
+.admin-shell .admin-table-panel > .admin-panel-heading {
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.admin-shell .admin-panel-heading > div {
+  min-width: 0;
+}
+
+.admin-shell .admin-panel-heading h2 {
+  margin: 0;
+  color: #0F172A;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.admin-shell .admin-panel-heading p {
+  margin: 3px 0 0;
+  color: #64748B;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.admin-shell .admin-primary-button,
+.admin-shell .admin-secondary-button {
+  display: inline-flex;
+  min-height: 38px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.admin-shell .admin-primary-button {
+  color: #FFFFFF;
+  background: #2563EB;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.admin-shell .admin-primary-button:hover:not(:disabled) {
+  background: #1D4ED8;
+}
+
+.admin-shell .admin-primary-button:disabled,
+.admin-shell .admin-secondary-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-shell .admin-secondary-button {
+  border-color: #E2E8F0;
+  color: #334155;
+  background: #FFFFFF;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.admin-shell .admin-secondary-button:hover:not(:disabled) {
+  border-color: #CBD5E1;
+  color: #0F172A;
+  background: #F8FAFC;
+}
+
+.admin-shell .admin-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.admin-shell table.admin-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  color: #334155;
+  font-size: 13px;
+  text-align: left;
+}
+
+.admin-shell .admin-table th {
+  height: 40px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #E2E8F0;
+  color: #475569;
+  background: #F8FAFC;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-shell .admin-table td {
+  min-height: 48px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #F1F5F9;
+  color: #334155;
+  vertical-align: middle;
+}
+
+.admin-shell .admin-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-shell .admin-table tbody tr:hover {
+  background: #F8FAFC;
+}
+
+.admin-shell .table-action {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  color: #334155;
+  background: #FFFFFF;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-shell .table-action:hover:not(:disabled) {
+  border-color: #CBD5E1;
+  background: #F8FAFC;
+}
+
+.admin-shell .table-action.danger {
+  border-color: #FECACA;
+  color: #DC2626;
+  background: #FEF2F2;
+}
+
+.admin-shell .table-action.primary-action {
+  border-color: #BFDBFE;
+  color: #2563EB;
+  background: #EFF6FF;
+}
+
+.admin-shell .admin-empty {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 20px;
+  color: #64748B;
+  font-size: 13px;
+  text-align: center;
+}
+
+.admin-shell .admin-empty strong {
+  color: #0F172A;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.admin-shell .admin-empty p {
+  max-width: 420px;
+  margin: 0;
+  color: #64748B;
+  line-height: 1.5;
+}
+
+.admin-shell .empty-icon-wrap {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  color: #64748B;
+  background: #F8FAFC;
+}
+
+@media (max-width: 640px) {
+  .admin-shell .admin-panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .admin-shell .admin-table-panel > .admin-panel-heading {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .admin-shell .table-action {
+    min-height: 34px;
+  }
+}

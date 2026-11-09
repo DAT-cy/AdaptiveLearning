@@ -673,6 +673,7 @@ function clearHistorySearch() {
 <style scoped>
 .progress-page-wrapper {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 24px;
   width: 100%;
@@ -880,6 +881,7 @@ function clearHistorySearch() {
 }
 
 .progress-section-card {
+  min-width: 0;
   padding: 22px 24px;
   border-radius: var(--radius-lg, 12px);
   background-color: #ffffff;
@@ -916,6 +918,7 @@ function clearHistorySearch() {
 
 .charts-two-columns {
   display: grid;
+  min-width: 0;
   grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr);
   gap: 20px;
 }
@@ -1591,7 +1594,7 @@ function clearHistorySearch() {
   }
 
   .charts-two-columns {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .skills-mastery-grid {

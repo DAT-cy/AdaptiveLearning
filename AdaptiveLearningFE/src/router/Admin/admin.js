@@ -42,4 +42,14 @@ export default [
     },
     component: adminHome,
   },
+  {
+    path: '/admin/:section(overview|accounts|billing|results|programs|exams|knowledge)',
+    name: 'AdminSection',
+    meta: {
+      title: 'Quản trị hệ thống',
+      layout: 'only-view',
+      allowedRoles: ['ROLE_ADMIN'],
+    },
+    component: adminHome,
+  },
 ]

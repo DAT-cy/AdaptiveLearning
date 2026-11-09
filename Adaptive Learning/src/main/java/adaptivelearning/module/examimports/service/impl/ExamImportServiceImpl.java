@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +55,7 @@ public class ExamImportServiceImpl implements ExamImportService {
     private static final int MAX_PROMPT_CHARS = 120_000;
     private static final int MAX_CHUNK_CHARS = 10_000;
     private static final int MAX_CHUNK_OUTPUT_TOKENS = 6_000;
+    private static final int MAX_SCANNED_PAGE_OUTPUT_TOKENS = 10_000;
     private static final Set<String> QUESTION_TYPES = Set.of("MULTIPLE_CHOICE", "TRUE_FALSE", "FILL_BLANK", "ESSAY");
 
     private final ExamImportRepository imports;
@@ -85,6 +87,15 @@ public class ExamImportServiceImpl implements ExamImportService {
     public ExamImportResponse createWithProgress(Long userId, String title, Long certificateId, Long topicId,
                                                  MultipartFile examFile, MultipartFile answerFile,
                                                  boolean answerInExam, BiConsumer<Integer, Integer> progress) {
+        return createWithProgress(userId, title, certificateId, topicId, examFile, answerFile,
+                answerInExam, progress, questions -> {});
+    }
+
+    @Override
+    public ExamImportResponse createWithProgress(Long userId, String title, Long certificateId, Long topicId,
+                                                 MultipartFile examFile, MultipartFile answerFile,
+                                                 boolean answerInExam, BiConsumer<Integer, Integer> progress,
+                                                 Consumer<List<ExamImportQuestion>> partialQuestions) {
         if (title == null || title.isBlank() || title.trim().length() > 200 || certificateId == null
                 || !certificates.existsById(certificateId)) {
             throw new IllegalArgumentException("Hãy nhập tiêu đề và kỳ thi hợp lệ.");
@@ -161,22 +172,27 @@ public class ExamImportServiceImpl implements ExamImportService {
                                 ? "The exam is a scanned PDF. Perform OCR. This chunk covers target pages "
                                     + chunk.firstPage() + "-" + chunk.lastPage()
                                     + "; neighboring pages may be included only as context. Emit questions that begin on target pages only; "
-                                    + "do not repeat questions shown on context-only pages.\n"
+                                    + "do not repeat questions shown on context-only pages. The application assigns sourcePageNumber from the target page; "
+                                    + "do not infer or change that field.\n"
                                 : "Exam source text:\n[Chunk " + (index + 1) + "/" + chunks.size() + "]\n" + chunk.text())
                         + (answerInExam ? "\nThe exam document itself contains the official answer key. Find and match those answers; do not infer answers." : "")
                         + (answerText == null ? "\n\nNo answer-key file was provided. Return empty strings for correctAnswer and explanation." : "\n\nAnswer-key source text:\n" + answerText);
                 String raw = chunk.pdfBytes() != null
-                        ? aiProvider.analyzeDocumentSync(system, prompt, chunk.pdfBytes(), "application/pdf", MAX_CHUNK_OUTPUT_TOKENS).trim()
+                        ? aiProvider.analyzeDocumentSync(system, prompt, chunk.pdfBytes(), "application/pdf", MAX_SCANNED_PAGE_OUTPUT_TOKENS).trim()
                         : aiProvider.chatCompletionSync(system, prompt, model, MAX_CHUNK_OUTPUT_TOKENS).trim();
                 List<ExamImportQuestion> partQuestions = parseQuestions(raw);
                 if (partQuestions != null) {
                     for (ExamImportQuestion question : partQuestions) {
-                        if (question.getSourcePageNumber() == null && chunk.pdfBytes() != null) {
+                        if (chunk.pdfBytes() != null) {
                             question.setSourcePageNumber(chunk.firstPage());
                         }
                         if (isExamScannedPdf && !seenScannedQuestionKeys.add(scannedQuestionKey(question))) continue;
                         parsed.add(question);
                     }
+                }
+                if (!parsed.isEmpty()) {
+                    prepareQuestionsForPreview(parsed, certTopics, topicId, answerText != null || answerInExam);
+                    partialQuestions.accept(List.copyOf(parsed));
                 }
                 progress.accept(index + 1, chunks.size());
             }
@@ -238,6 +254,27 @@ public class ExamImportServiceImpl implements ExamImportService {
         } catch (RuntimeException exception) {
             if (examImport.getSourceFileKey() != null) fileStorage.delete(examImport.getSourceFileKey());
             throw exception;
+        }
+    }
+
+    private void prepareQuestionsForPreview(List<ExamImportQuestion> questions,
+                                            List<adaptivelearning.module.topics.entity.Topic> certTopics,
+                                            Long fixedTopicId, boolean hasAnswerSource) {
+        for (ExamImportQuestion question : questions) {
+            if (fixedTopicId != null) {
+                question.setTopicId(fixedTopicId);
+            } else if (question.getTopicId() == null && question.getSkill() != null && !question.getSkill().isBlank()) {
+                certTopics.stream()
+                        .filter(topic -> topic.getName().equalsIgnoreCase(question.getSkill().trim())
+                                || (topic.getCode() != null && topic.getCode().equalsIgnoreCase(question.getSkill().trim())))
+                        .findFirst()
+                        .ifPresent(topic -> question.setTopicId(topic.getTopicId()));
+            }
+            normalizeAiQuestion(question);
+            if (!hasAnswerSource) {
+                question.setCorrectAnswer("");
+                question.setExplanation("");
+            }
         }
     }
 

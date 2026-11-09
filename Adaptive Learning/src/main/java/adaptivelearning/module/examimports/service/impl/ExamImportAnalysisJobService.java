@@ -1,13 +1,17 @@
 package adaptivelearning.module.examimports.service.impl;
 
 import adaptivelearning.module.examimports.dto.ExamImportAnalysisProgress;
+import adaptivelearning.module.examimports.dto.ExamImportQuestion;
 import adaptivelearning.module.examimports.dto.ExamImportResponse;
 import adaptivelearning.module.examimports.service.ExamImportService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,6 +32,7 @@ public class ExamImportAnalysisJobService {
     private static final long JOB_TTL_MILLIS = TimeUnit.HOURS.toMillis(3);
 
     private final ExamImportService examImportService;
+    private final ObjectMapper objectMapper;
     private final ConcurrentHashMap<String, Job> jobs = new ConcurrentHashMap<>();
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(
             2, 2, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(4), runnable -> {
@@ -43,7 +48,7 @@ public class ExamImportAnalysisJobService {
         Upload exam = snapshot(examFile, true);
         Upload answer = answerFile == null || answerFile.isEmpty() ? null : snapshot(answerFile, false);
         String jobId = UUID.randomUUID().toString();
-        Job job = new Job(jobId, userId);
+        Job job = new Job(jobId, userId, objectMapper);
         jobs.put(jobId, job);
         try {
             executor.execute(() -> run(job, title, certificateId, topicId, exam, answer, answerInExam));
@@ -69,7 +74,7 @@ public class ExamImportAnalysisJobService {
             ExamImportResponse result = examImportService.createWithProgress(
                     job.ownerId, title, certificateId, topicId,
                     exam.asMultipartFile("examFile"), answer == null ? null : answer.asMultipartFile("answerFile"),
-                    answerInExam, job::updateProgress);
+                    answerInExam, job::updateProgress, job::updateQuestions);
             job.complete(result.getImportId());
         } catch (Exception exception) {
             String message = exception.getMessage() == null ? "Không thể phân tích bộ đề." : exception.getMessage();
@@ -109,6 +114,7 @@ public class ExamImportAnalysisJobService {
     private static final class Job {
         private final String id;
         private final Long ownerId;
+        private final ObjectMapper objectMapper;
         private volatile String status = "PROCESSING";
         private volatile int progress = 1;
         private volatile int completedChunks;
@@ -117,10 +123,12 @@ public class ExamImportAnalysisJobService {
         private volatile String message = "Đang chuẩn bị file...";
         private volatile String errorMessage;
         private volatile long finishedAt;
+        private volatile List<ExamImportQuestion> questions = List.of();
 
-        private Job(String id, Long ownerId) {
+        private Job(String id, Long ownerId, ObjectMapper objectMapper) {
             this.id = id;
             this.ownerId = ownerId;
+            this.objectMapper = objectMapper;
         }
 
         private void updateProgress(int completed, int total) {
@@ -129,6 +137,10 @@ public class ExamImportAnalysisJobService {
             progress = total == 0 ? 3 : 5 + (int) (85.0 * completed / total);
             message = completed >= total ? "Đang lưu bộ đề..."
                     : "Đang phân tích phần " + Math.min(completed + 1, total) + " / " + total + "...";
+        }
+
+        private void updateQuestions(List<ExamImportQuestion> partialQuestions) {
+            questions = partialQuestions == null ? List.of() : List.copyOf(partialQuestions);
         }
 
         private void complete(Long createdImportId) {
@@ -149,7 +161,11 @@ public class ExamImportAnalysisJobService {
         private ExamImportAnalysisProgress snapshot() {
             return ExamImportAnalysisProgress.builder().jobId(id).status(status).progress(progress)
                     .completedChunks(completedChunks).totalChunks(totalChunks).importId(importId)
-                    .message(message).errorMessage(errorMessage).build();
+                    .questions(copyQuestions(questions)).message(message).errorMessage(errorMessage).build();
+        }
+
+        private List<ExamImportQuestion> copyQuestions(List<ExamImportQuestion> source) {
+            return objectMapper.convertValue(source, new TypeReference<>() {});
         }
     }
 

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { ArrowLeft, Check, FileText, Image as ImageIcon, LoaderCircle, Save, Search, Trash2, Upload } from 'lucide-vue-next'
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, LoaderCircle, Save, Search, Trash2, Upload } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { adminService } from '@/services/adminService'
 import { useUserStore } from '@/stores/user'
@@ -38,6 +38,13 @@ const analysisProgress = ref(null)
 const saving = ref(false)
 const unansweredOnly = ref(false)
 const questionSearch = ref('')
+const collapsedSections = ref(new Set())
+const liveOcrQuestions = computed(() => analysisProgress.value?.questions || [])
+function liveQuestionSkill(question) {
+  if (question.skill) return question.skill
+  const topic = reviewTopics.value.find((item) => String(item.topicId) === String(question.topicId))
+  return topic ? topicPath(topic, reviewTopics.value) : ''
+}
 const error = ref('')
 const notice = ref('')
 const form = reactive({ title: '', certificateId: '', topicId: '' })
@@ -57,10 +64,13 @@ const reviewSections = computed(() => {
     const topicId = question.topicId ?? selected.value?.topicId
     const majorSkill = majorSkillFor(topicId, reviewTopics.value)
     const sourceTitle = String(question.sourceSectionTitle || '').trim()
-    const key = sourceTitle ? `source:${sourceTitle.toLowerCase()}` : majorSkill ? String(majorSkill.topicId) : 'unclassified'
+    const skillKey = majorSkill ? String(majorSkill.topicId) : 'unclassified'
+    const sourceSlug = sourceTitle.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'section'
+    const key = sourceTitle ? `source:${skillKey}:${sourceSlug}` : skillKey
     if (!sections.has(key)) {
       sections.set(key, {
         key,
+        resourceKeys: sourceTitle ? [key, `source:${sourceTitle.toLowerCase()}`] : [key],
         title: sourceTitle || majorSkill?.name || 'Chưa phân loại kỹ năng',
         sourceSectionTitle: sourceTitle,
         sourceSectionOrder: question.sourceSectionOrder,
@@ -81,9 +91,40 @@ const reviewSections = computed(() => {
     if (!section.stimulusContent && question.stimulusContent) section.stimulusContent = question.stimulusContent
     section.questions.push({ question, index })
   }
+
+  const sectionList = [...sections.values()]
+  const namedRanges = sectionList
+    .filter((section) => section.sourceSectionTitle && section.majorSkill)
+    .map((section) => ({ section, range: declaredSectionRange(section) }))
+    .filter((entry) => entry.range)
+  const mergedSections = new Set()
+
+  // OCR chunks can lose the heading on continuation pages; attach them only when one skill range fits every source number.
+  for (const section of sectionList.filter((item) => !item.sourceSectionTitle && item.majorSkill)) {
+    const targets = section.questions.map(({ question }) => {
+      const number = parsedQuestionNumber(question.sourceQuestionNumber)
+      if (number == null) return null
+      const matches = namedRanges
+        .filter(({ section: target, range }) => target.majorSkill.topicId === section.majorSkill.topicId
+          && number >= range.start && number <= range.end)
+        .sort((a, b) => {
+          const aIsSection = /^section\b/i.test(a.section.sourceSectionTitle) ? 1 : 0
+          const bIsSection = /^section\b/i.test(b.section.sourceSectionTitle) ? 1 : 0
+          return bIsSection - aIsSection || (b.range.end - b.range.start) - (a.range.end - a.range.start)
+        })
+      return matches[0]?.section || null
+    })
+    const target = targets[0]
+    if (!target || targets.some((item) => item !== target)) continue
+    target.questions.push(...section.questions)
+    target.resourceKeys = [...new Set([...target.resourceKeys, ...section.resourceKeys])]
+    mergedSections.add(section)
+  }
+
   let majorIndex = 0
-  return [...sections.values()].map((section) => ({
+  return sectionList.filter((section) => !mergedSections.has(section)).map((section) => ({
     ...section,
+    rangeAudit: sectionQuestionAudit(section),
     roman: section.sourceSectionOrder != null
       ? romanNumeral(section.sourceSectionOrder - 1)
       : section.majorSkill ? romanNumeral(majorIndex++) : null,
@@ -121,6 +162,24 @@ function isListeningSection(section) {
   return /listening|nghe/i.test(`${section?.title || ''} ${section?.majorSkill?.name || ''}`)
 }
 
+function questionDisplayNumber(question, index) {
+  const sourceNumber = String(question?.sourceQuestionNumber || '').trim()
+  if (!sourceNumber) return String(index + 1).padStart(2, '0')
+  const match = sourceNumber.match(/\d+(?:\s*[-–]\s*\d+)?/)
+  return match ? match[0].replace(/\s*([-–])\s*/, '$1') : sourceNumber
+}
+
+function isSectionCollapsed(key) {
+  return collapsedSections.value.has(key)
+}
+
+function toggleSection(key) {
+  const next = new Set(collapsedSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedSections.value = next
+}
+
 function blankContentParts(question) {
   const content = String(question?.content || '')
   const parts = content.split(/(\[\s*\d+\s*\]|_{3,})/g).filter(Boolean)
@@ -133,14 +192,47 @@ function blankContentParts(question) {
   })
 }
 
+function parsedQuestionNumber(value) {
+  const match = String(value ?? '').match(/\d+/)
+  return match ? Number(match[0]) : null
+}
+
+function declaredSectionRange(section) {
+  const instructionRange = String(section.sectionInstructions || '').match(/\bquestions?\s*(\d+)\s*[-–]\s*(\d+)/i)
+  const start = parsedQuestionNumber(section.sourceQuestionStart) ?? (instructionRange ? Number(instructionRange[1]) : null)
+  const end = parsedQuestionNumber(section.sourceQuestionEnd) ?? (instructionRange ? Number(instructionRange[2]) : null)
+  return start != null && end != null && end >= start ? { start, end } : null
+}
+
+function sectionQuestionAudit(section) {
+  const actualCount = section.questions.length
+  const range = declaredSectionRange(section)
+  if (!range) return { expectedCount: null, actualCount, missingNumbers: [], mismatch: false }
+
+  const expectedCount = range.end - range.start + 1
+  const questionNumbers = section.questions.map(({ question }) => parsedQuestionNumber(question.sourceQuestionNumber))
+  const missingNumbers = questionNumbers.every((number) => number != null) && expectedCount <= 500
+    ? Array.from({ length: expectedCount }, (_, index) => range.start + index)
+      .filter((number) => !questionNumbers.includes(number))
+    : []
+
+  return {
+    expectedCount,
+    actualCount,
+    missingNumbers,
+    mismatch: expectedCount !== actualCount || missingNumbers.length > 0,
+  }
+}
+
 function sectionQuestionRange(section) {
   const questionNumbers = section.questions
     .map(({ question, index }) => question.sourceQuestionNumber || String(index + 1))
     .map((value) => String(value).match(/^\D*(\d+)/)?.[1])
     .filter(Boolean)
     .map(Number)
-  const start = section.sourceQuestionStart || (questionNumbers.length ? String(Math.min(...questionNumbers)) : '')
-  const end = section.sourceQuestionEnd || (questionNumbers.length ? String(Math.max(...questionNumbers)) : '')
+  const declaredRange = declaredSectionRange(section)
+  const start = declaredRange ? String(declaredRange.start) : section.sourceQuestionStart || (questionNumbers.length ? String(Math.min(...questionNumbers)) : '')
+  const end = declaredRange ? String(declaredRange.end) : section.sourceQuestionEnd || (questionNumbers.length ? String(Math.max(...questionNumbers)) : '')
   if (!start && !end) return ''
   return start === end ? `Question ${start}` : `Questions ${start || '?'}–${end || '?'}`
 }
@@ -150,8 +242,13 @@ function updateSectionText(section, field, value) {
 }
 
 function sectionResourcesFor(sectionKey, resourceType) {
+  const section = typeof sectionKey === 'object'
+    ? sectionKey
+    : reviewSections.value.find((item) => item.key === String(sectionKey))
+  const key = typeof sectionKey === 'object' ? sectionKey.key : String(sectionKey)
+  const sectionKeys = new Set(section?.resourceKeys || [key])
   return (selected.value?.resources || []).filter((resource) =>
-    resource.resourceType === resourceType && resource.sectionKey === String(sectionKey),
+    resource.resourceType === resourceType && sectionKeys.has(String(resource.sectionKey)),
   )
 }
 
@@ -390,6 +487,7 @@ async function uploadExam() {
     if (examInput.value) examInput.value.value = ''
     if (answerInput.value) answerInput.value.value = ''
     selected.value = created
+    collapsedSections.value = new Set()
     await loadSourcePdf(created)
     await loadResourcePreviews(created.importId, created.resources || [])
     notice.value = created.answerGenerated
@@ -411,6 +509,7 @@ async function openImport(item) {
   saving.value = true
   try {
     selected.value = await adminService.examImport(item.importId)
+    collapsedSections.value = new Set()
     await loadSourcePdf(selected.value)
     await loadResourcePreviews(selected.value.importId, selected.value.resources || [])
     if (selected.value?.certificateId) {
@@ -609,6 +708,19 @@ function changeQuestionType(question) {
           <progress :value="analysisProgress.progress" max="100" />
           <small v-if="analysisProgress.totalChunks">Đã xử lý {{ analysisProgress.completedChunks }} / {{ analysisProgress.totalChunks }} phần</small>
         </div>
+        <section v-if="liveOcrQuestions.length && analysisProgress?.status !== 'COMPLETED'" class="live-ocr-preview" aria-live="polite" aria-label="Câu hỏi đã nhận diện">
+          <header class="live-ocr-heading">
+            <div><strong>Đã nhận diện {{ liveOcrQuestions.length }} câu</strong><small>Câu hỏi sẽ xuất hiện khi OCR xử lý xong từng trang hoặc phần.</small></div>
+            <span>{{ analysisProgress?.completedChunks || 0 }} / {{ analysisProgress?.totalChunks || 0 }} phần</span>
+          </header>
+          <p v-if="analysisProgress?.status === 'FAILED'" class="live-ocr-error">{{ analysisProgress.errorMessage || 'Phân tích dừng trước khi hoàn tất. Các câu đã nhận diện bên dưới vẫn được giữ để đối chiếu.' }}</p>
+          <article v-for="(question, index) in liveOcrQuestions" :key="`${question.sourcePageNumber || 0}-${question.sourceQuestionNumber || index}-${index}`" class="live-ocr-question">
+            <header><strong>{{ questionDisplayNumber(question, index) }}</strong><span v-if="question.sourcePageNumber">Trang PDF {{ question.sourcePageNumber }}</span><span v-if="liveQuestionSkill(question)">{{ liveQuestionSkill(question) }}</span><span>{{ question.questionType?.replaceAll('_', ' ') || 'Câu hỏi' }}</span></header>
+            <p>{{ question.content }}</p>
+            <ul v-if="question.options?.length"><li v-for="option in question.options" :key="option.label"><strong>{{ option.label }}.</strong> {{ option.text }}</li></ul>
+            <small v-if="question.sectionInstructions">{{ question.sectionInstructions }}</small>
+          </article>
+        </section>
         <div class="form-actions"><button type="submit" :disabled="uploading"><LoaderCircle v-if="uploading" class="spin" :size="16" /><Upload v-else :size="16" />{{ uploading ? (analysisProgress?.message || 'Đang chuẩn bị phân tích…') : 'Nhập và phân tích' }}</button></div>
       </form>
     </section>
@@ -666,14 +778,36 @@ function changeQuestionType(question) {
           <label class="file-field"><span>Ghép file đáp án sau OCR</span><input ref="answerInput" type="file" accept="application/pdf,.pdf,.md,.markdown,.txt" @change="chooseFile($event, 'answer')" /><small>{{ answerFile?.name || 'Chọn PDF, Markdown hoặc TXT có đáp án' }}</small></label>
           <button type="button" :disabled="importingAnswerKey || saving || !answerFile" @click="importAnswerKey"><LoaderCircle v-if="importingAnswerKey" class="spin" :size="16" /><Upload v-else :size="16" />{{ importingAnswerKey ? 'Đang ghép đáp án…' : 'Ghép đáp án' }}</button>
         </section>
-        <section v-for="section in visibleReviewSections" :key="section.key" class="major-skill-section">
+        <section v-for="section in visibleReviewSections" :key="section.key" class="major-skill-section" :class="{ 'is-collapsed': isSectionCollapsed(section.key) }">
           <header class="major-skill-heading">
             <span v-if="section.majorSkill">{{ section.roman }}.</span>
             <h3>{{ section.title }}</h3>
             <small class="section-question-range">{{ sectionQuestionRange(section) }}</small>
             <small v-if="section.sourceSectionTitle && section.majorSkill" class="section-skill-name">{{ section.majorSkill.name }}</small>
-            <small class="section-question-count">{{ section.questions.length }} câu</small>
+            <small :class="['section-question-count', { 'section-count-mismatch': section.rangeAudit.mismatch }]">
+              {{ section.questions.length }}<template v-if="section.questions.length !== section.rangeAudit.actualCount"> / {{ section.rangeAudit.actualCount }} tổng</template><template v-else-if="section.rangeAudit.mismatch"> / {{ section.rangeAudit.expectedCount }} theo dải</template> câu
+            </small>
+            <button
+              type="button"
+              class="section-toggle"
+              :aria-expanded="!isSectionCollapsed(section.key)"
+              :aria-label="isSectionCollapsed(section.key) ? `Mở rộng ${section.title}` : `Thu gọn ${section.title}`"
+              :title="isSectionCollapsed(section.key) ? 'Mở rộng section' : 'Thu gọn section'"
+              @click.stop="toggleSection(section.key)"
+            >
+              <ChevronRight v-if="isSectionCollapsed(section.key)" :size="17" aria-hidden="true" />
+              <ChevronDown v-else :size="17" aria-hidden="true" />
+            </button>
           </header>
+          <div v-if="section.rangeAudit.mismatch" class="section-range-warning" role="status">
+            <AlertTriangle :size="16" aria-hidden="true" />
+            <div>
+              <strong>Dải câu và số câu nhận diện không khớp</strong>
+              <p>PDF ghi {{ sectionQuestionRange(section) }} ({{ section.rangeAudit.expectedCount }} câu), nhưng hệ thống chỉ nhận diện {{ section.rangeAudit.actualCount }} câu.</p>
+              <p v-if="section.rangeAudit.missingNumbers.length">Không thấy số câu {{ section.rangeAudit.missingNumbers.join(', ') }} trong dữ liệu nhận diện.</p>
+              <p v-else>Đối chiếu PDF để xác định câu bị bỏ sót hay dải section được đánh chưa đúng.</p>
+            </div>
+          </div>
           <div v-if="section.sectionInstructions || section.stimulusContent" class="section-guidance">
             <p v-if="section.sectionInstructions">{{ section.sectionInstructions }}</p>
             <div v-if="section.stimulusContent" class="section-stimulus"><strong>Nội dung dùng chung</strong><p>{{ section.stimulusContent }}</p></div>
@@ -688,7 +822,7 @@ function changeQuestionType(question) {
             <label>Nội dung dùng chung<textarea :value="section.stimulusContent" rows="4" placeholder="Đoạn văn hoặc tình huống được các câu trong phần này sử dụng." @input="updateSectionText(section, 'stimulusContent', $event.target.value)" /></label>
           </details>
           <div class="section-images">
-            <figure v-for="resource in sectionResourcesFor(section.key, 'IMAGE')" :key="resource.resourceId" class="section-image-resource">
+            <figure v-for="resource in sectionResourcesFor(section, 'IMAGE')" :key="resource.resourceId" class="section-image-resource">
               <img v-if="resourceUrls[resource.resourceId]" :src="resourceUrls[resource.resourceId]" :alt="resource.fileName" />
               <figcaption>{{ resource.fileName }}</figcaption>
             </figure>
@@ -706,7 +840,7 @@ function changeQuestionType(question) {
               <div><strong>File nghe cho mục này</strong><small>Dùng chung cho {{ section.questions.length }} câu Listening</small></div>
               <span v-if="!sectionResourcesFor(section.key, 'AUDIO').length" class="audio-empty-state">Chưa có audio</span>
             </div>
-            <div v-for="resource in sectionResourcesFor(section.key, 'AUDIO')" :key="resource.resourceId" class="section-audio-resource">
+            <div v-for="resource in sectionResourcesFor(section, 'AUDIO')" :key="resource.resourceId" class="section-audio-resource">
               <div class="section-audio-file"><FileText :size="16" /><span>{{ resource.fileName }}</span></div>
               <audio v-if="resourceUrls[resource.resourceId]" controls preload="metadata" :src="resourceUrls[resource.resourceId]" :aria-label="`Audio ${section.title}`" />
               <small v-else class="audio-loading">Đang tải audio…</small>
@@ -722,8 +856,7 @@ function changeQuestionType(question) {
           </div>
           <article v-for="entry in section.questions" :key="entry.index" class="question-editor" :class="{ 'needs-answer': !String(entry.question.correctAnswer ?? '').trim() }" @vue:mounted="normalizeAnswer(entry.question)">
             <header>
-              <span class="question-index">{{ String(entry.index + 1).padStart(2, '0') }}</span>
-              <small v-if="entry.question.sourceQuestionNumber" class="source-question-number">PDF câu {{ entry.question.sourceQuestionNumber }}</small>
+              <span class="question-index" :title="entry.question.sourceQuestionNumber ? `Số câu trong PDF: ${entry.question.sourceQuestionNumber}` : 'Thứ tự câu được nhận diện'">{{ questionDisplayNumber(entry.question, entry.index) }}</span>
               <span class="answer-state" :class="{ 'is-missing': !String(entry.question.correctAnswer ?? '').trim() }">{{ String(entry.question.correctAnswer ?? '').trim() ? 'Đã có đáp án' : 'Thiếu đáp án' }}</span>
               <label>Kỹ năng / Môn
                 <select v-model="entry.question.topicId">
@@ -743,7 +876,7 @@ function changeQuestionType(question) {
               <label>Loại câu<select v-model="entry.question.questionType" @change="changeQuestionType(entry.question)"><option value="MULTIPLE_CHOICE">Trắc nghiệm</option><option value="TRUE_FALSE">Đúng / sai</option><option value="FILL_BLANK">Điền khuyết</option><option value="ESSAY">Tự luận</option></select></label>
               <label>Độ khó<select v-model="entry.question.difficulty"><option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option></select></label>
             </header>
-            <div v-if="entry.question.questionType === 'FILL_BLANK'" class="question-form-preview" :aria-label="`Bản dựng câu ${entry.index + 1}`">
+            <div v-if="entry.question.questionType === 'FILL_BLANK'" class="question-form-preview" :aria-label="`Bản dựng câu ${questionDisplayNumber(entry.question, entry.index)}`">
               <template v-for="(part, partIndex) in blankContentParts(entry.question)" :key="partIndex">
                 <span v-if="part.blankNumber !== undefined" class="inline-answer-slot"><small>{{ part.blankNumber }}</small><span>................</span></span>
                 <span v-else>{{ part.text }}</span>
@@ -812,6 +945,20 @@ function changeQuestionType(question) {
 .form-grid { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 16px; }.form-grid label,.editor-label,.file-field { display: grid; gap: 7px; color: #3a4757; font-size: 12px; font-weight: 600; }.form-grid input,.form-grid select,.editor-label textarea,.editor-label select,.option-row input,.question-editor select { min-width: 0; min-height: 40px; padding: 8px 12px; border: 1px solid #cbd5df; border-radius: 6px; background: white; color: #17202d; font: inherit; font-weight: 400; }
 .answer-in-exam { display: flex; width: fit-content; align-items: center; gap: 8px; margin-top: 14px; color: #344256; font-size: 13px; }.answer-in-exam input { width: 16px; height: 16px; accent-color: #126b68; }
 .analysis-progress { display: grid; gap: 7px; margin-top: 16px; color: #344256; font-size: 12px; }.analysis-progress > div { display: flex; justify-content: space-between; gap: 12px; }.analysis-progress progress { width: 100%; height: 8px; accent-color: #126b68; }.analysis-progress small { color: #64748b; }
+.live-ocr-preview { display: grid; max-height: 520px; gap: 10px; margin-top: 16px; padding: 14px; overflow-y: auto; border: 1px solid #cfe3dc; border-radius: 8px; background: #f7fbf9; }
+.live-ocr-heading { position: sticky; top: -14px; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -14px -14px 2px; padding: 12px 14px; border-bottom: 1px solid #dcebe5; background: #f7fbf9; }
+.live-ocr-heading > div { display: grid; gap: 3px; }
+.live-ocr-heading strong { color: #145d50; font-size: 13px; }
+.live-ocr-heading small,.live-ocr-heading > span { color: #64748b; font-size: 11px; }
+.live-ocr-error { margin: 0; padding: 9px 11px; border: 1px solid #fecaca; border-radius: 6px; color: #991b1b; background: #fef2f2; font-size: 12px; line-height: 1.5; }
+.live-ocr-question { display: grid; min-width: 0; gap: 6px; padding: 10px 12px; border: 1px solid #dce8e3; border-radius: 6px; background: #fff; }
+.live-ocr-question > header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: #64748b; font-size: 11px; }
+.live-ocr-question > header strong { color: #126b68; font-size: 13px; }
+.live-ocr-question > p { margin: 0; color: #1f2937; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.live-ocr-question ul { display: grid; gap: 3px; margin: 0; padding: 0; color: #475569; font-size: 12px; list-style: none; }
+.live-ocr-question li { overflow-wrap: anywhere; }
+.live-ocr-question li strong { color: #126b68; }
+.live-ocr-question > small { color: #64748b; font-size: 11px; white-space: pre-wrap; }
 .answer-key-upload { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 16px; }.answer-key-upload .file-field { flex: 1; }.answer-key-upload button { display: inline-flex; min-height: 42px; align-items: center; gap: 8px; padding: 0 16px; border: 0; border-radius: 6px; background: #126b68; color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }.answer-key-upload button:disabled { opacity: .55; cursor: wait; }
 .file-grid { display: grid; width: 100%; max-width: 100%; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }.file-field { padding: 14px 16px; border: 1px dashed #b9c6d1; border-radius: 6px; }.file-field b { color: #b42318; }.file-field small { color: #64748b; font-weight: 400; }.file-field input { max-width: 100%; font-size: 12px; }
 .form-actions { justify-content: flex-end; margin-top: 16px; }.form-actions button,.review-actions button { display: inline-flex; min-height: 42px; align-items: center; gap: 8px; padding: 0 18px; border: 0; border-radius: 6px; background: #126b68; color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }.form-actions button:disabled,.review-actions button:disabled { opacity: .55; cursor: wait; }
@@ -829,6 +976,10 @@ function changeQuestionType(question) {
 .delete-review-btn:disabled { opacity: .55; cursor: wait; }
 .question-editor.needs-answer { border-color: #d92d20; box-shadow: inset 3px 0 #d92d20; }
 .major-skill-section { margin-bottom: 22px; }.major-skill-heading { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; padding: 10px 12px; border-bottom: 1px solid #cbd5df; color: #126b68; }.major-skill-heading h3 { margin: 0; color: #17202d; font-size: 16px; }.major-skill-heading small { margin-left: auto; color: #64748b; font-size: 11px; }
+.major-skill-section.is-collapsed > :not(.major-skill-heading) { display: none; }
+.section-toggle { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; margin-left: 2px; padding: 0; border: 1px solid #cbd5df; border-radius: 6px; background: #fff; color: #475569; cursor: pointer; }
+.section-toggle:hover { border-color: #94a3b8; background: #f8fafc; color: #0f172a; }
+.section-toggle:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .review-empty { display: grid; align-content: center; justify-items: center; min-height: 300px; color: #64748b; text-align: center; }.review-empty h2 { margin: 12px 0 0; color: #344256; font-size: 17px; }.review-empty p { font-size: 13px; }.feedback { padding: 12px 14px; border-radius: 6px; font-size: 13px; }.feedback.error { background: #fff1f0; color: #9f2f27; }.feedback.success { background: #eef8f2; color: #1e6a46; }.spin { animation: spin 1s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }
 .no-permission { padding: 28px 0; border-top: 1px solid #dce2e9; color: #64748b; }.no-permission h2 { margin: 0; color: #344256; font-size: 17px; }.no-permission p { font-size: 13px; }
 .delete-confirm-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, 0.48); backdrop-filter: blur(2px); }
@@ -914,6 +1065,11 @@ function changeQuestionType(question) {
 .section-image-upload button:disabled { opacity: .5; cursor: not-allowed; }
 .section-skill-name { color: #64748b !important; font-size: 11px !important; font-weight: 500 !important; }
 .section-question-count { margin-left: auto; }
+.section-question-count.section-count-mismatch { padding: 2px 7px; border: 1px solid #fcd34d; border-radius: 999px; background: #fffbeb; color: #92400e; font-weight: 700; }
+.section-range-warning { display: flex; align-items: flex-start; gap: 9px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #fcd34d; border-radius: 6px; background: #fffbeb; color: #854d0e; font-size: 12px; line-height: 1.5; }
+.section-range-warning > svg { flex: 0 0 auto; margin-top: 2px; }
+.section-range-warning p { margin: 3px 0 0; }
+.section-range-warning strong { color: #78350f; }
 .section-guidance { grid-column: 2; margin: 0 0 12px; padding: 12px 15px; border-left: 3px solid #91b8ad; background: #f7faf9; color: #344256; font-size: 12px; line-height: 1.65; white-space: pre-line; }
 .section-guidance > p { margin: 0; }.section-stimulus { margin-top: 9px; padding-top: 9px; border-top: 1px solid #dce8e3; }.section-stimulus p { margin: 4px 0 0; white-space: pre-wrap; }
 .section-context-editor { grid-column: 2; margin: 0 0 12px; border-bottom: 1px solid #e3e8ec; }

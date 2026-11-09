@@ -7,6 +7,7 @@ import adaptivelearning.module.examimports.dto.ExamImportResourceResponse;
 import adaptivelearning.module.examimports.dto.ExamImportAnswerKeyResult;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import org.springframework.web.multipart.MultipartFile;
 
 public interface ExamImportService {
@@ -22,6 +23,14 @@ public interface ExamImportService {
                                                   MultipartFile examFile, MultipartFile answerFile,
                                                   boolean answerInExam, BiConsumer<Integer, Integer> progress) {
         return create(userId, title, certificateId, topicId, examFile, answerFile, answerInExam);
+    }
+
+    default ExamImportResponse createWithProgress(Long userId, String title, Long certificateId, Long topicId,
+                                                  MultipartFile examFile, MultipartFile answerFile,
+                                                  boolean answerInExam, BiConsumer<Integer, Integer> progress,
+                                                  Consumer<List<ExamImportQuestion>> partialQuestions) {
+        return createWithProgress(userId, title, certificateId, topicId, examFile, answerFile,
+                answerInExam, progress);
     }
     List<ExamImportResponse> pending();
     List<ExamImportResponse> pending(Long viewerId);

@@ -361,6 +361,26 @@ class ExamImportServiceImplTest {
     }
 
     @Test
+    void scannedPdfUsesTargetPageForSourceQuestionPageNumber() throws Exception {
+        when(certificates.existsById(1L)).thenReturn(true);
+        when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt()))
+                .thenReturn(scannedQuestionJson("11", 1))
+                .thenReturn(scannedQuestionJson("12", 1));
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.create(3L, "Scanned exam", 1L, null,
+                blankPdfPages("scan.pdf", 2), null);
+
+        assertEquals(List.of("11", "12"), response.getQuestions().stream()
+                .map(adaptivelearning.module.examimports.dto.ExamImportQuestion::getSourceQuestionNumber)
+                .toList());
+        assertEquals(List.of(1, 2), response.getQuestions().stream()
+                .map(adaptivelearning.module.examimports.dto.ExamImportQuestion::getSourcePageNumber)
+                .toList());
+    }
+
+    @Test
     void scannedPdfDeduplicatesSameSourceQuestionWhenOcrTextDiffersAcrossContextPages() throws Exception {
         when(certificates.existsById(1L)).thenReturn(true);
         when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
@@ -577,5 +597,13 @@ class ExamImportServiceImplTest {
                                 + "\"options\":[{\"label\":\"A\",\"text\":\"One\"},{\"label\":\"B\",\"text\":\"Two\"}],"
                                 + "\"correctAnswer\":\"A\",\"explanation\":\"Because\",\"points\":1}")
                 .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    }
+
+    private String scannedQuestionJson(String number, int incorrectPage) {
+        return "[{\"questionType\":\"MULTIPLE_CHOICE\",\"difficulty\":\"MEDIUM\","
+                + "\"content\":\"Question " + number + "?\","
+                + "\"options\":[{\"label\":\"A\",\"text\":\"One\"},{\"label\":\"B\",\"text\":\"Two\"}],"
+                + "\"correctAnswer\":\"A\",\"explanation\":\"Because\",\"points\":1,"
+                + "\"sourceQuestionNumber\":\"" + number + "\",\"sourcePageNumber\":" + incorrectPage + "}]";
     }
 }

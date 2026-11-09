@@ -1,5 +1,6 @@
 package adaptivelearning.module.examimports.dto;
 
+import java.util.List;
 import lombok.Builder;
 import lombok.Value;
 
@@ -12,6 +13,7 @@ public class ExamImportAnalysisProgress {
     int completedChunks;
     int totalChunks;
     Long importId;
+    List<ExamImportQuestion> questions;
     String message;
     String errorMessage;
 }
