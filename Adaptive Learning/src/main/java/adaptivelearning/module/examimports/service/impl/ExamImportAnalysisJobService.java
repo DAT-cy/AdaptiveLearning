@@ -136,7 +136,7 @@ public class ExamImportAnalysisJobService {
             completedChunks = completed;
             progress = total == 0 ? 3 : 5 + (int) (85.0 * completed / total);
             message = completed >= total ? "Đang lưu bộ đề..."
-                    : "Đang phân tích phần " + Math.min(completed + 1, total) + " / " + total + "...";
+                    : "Đang xử lý bước " + Math.min(completed + 1, total) + " / " + total + "...";
         }
 
         private void updateQuestions(List<ExamImportQuestion> partialQuestions) {

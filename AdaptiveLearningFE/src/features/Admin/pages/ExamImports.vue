@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, LoaderCircle, Save, Search, Trash2, Upload } from 'lucide-vue-next'
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, LoaderCircle, RefreshCw, Save, Search, Trash2, Upload } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { adminService } from '@/services/adminService'
 import { useUserStore } from '@/stores/user'
@@ -32,6 +32,7 @@ const answerInput = ref(null)
 const loading = ref(false)
 const uploading = ref(false)
 const importingAnswerKey = ref(false)
+const rescanningMissing = ref(false)
 const deletingImportId = ref(null)
 const itemToDelete = ref(null)
 const analysisProgress = ref(null)
@@ -39,6 +40,16 @@ const saving = ref(false)
 const unansweredOnly = ref(false)
 const questionSearch = ref('')
 const collapsedSections = ref(new Set())
+const collapsedGroups = ref(new Set())
+function isGroupCollapsed(key) {
+  return collapsedGroups.value.has(key)
+}
+function toggleGroup(key) {
+  const next = new Set(collapsedGroups.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedGroups.value = next
+}
 const liveOcrQuestions = computed(() => analysisProgress.value?.questions || [])
 function liveQuestionSkill(question) {
   if (question.skill) return question.skill
@@ -66,11 +77,12 @@ const reviewSections = computed(() => {
     const sourceTitle = String(question.sourceSectionTitle || '').trim()
     const skillKey = majorSkill ? String(majorSkill.topicId) : 'unclassified'
     const sourceSlug = sourceTitle.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'section'
-    const key = sourceTitle ? `source:${skillKey}:${sourceSlug}` : skillKey
-    if (!sections.has(key)) {
-      sections.set(key, {
-        key,
-        resourceKeys: sourceTitle ? [key, `source:${sourceTitle.toLowerCase()}`] : [key],
+    const sectionKey = sourceTitle ? `source:${skillKey}:${sourceSlug}` : skillKey
+
+    if (!sections.has(sectionKey)) {
+      sections.set(sectionKey, {
+        key: sectionKey,
+        resourceKeys: sourceTitle ? [sectionKey, `source:${sourceTitle.toLowerCase()}`] : [sectionKey],
         title: sourceTitle || majorSkill?.name || 'Chưa phân loại kỹ năng',
         sourceSectionTitle: sourceTitle,
         sourceSectionOrder: question.sourceSectionOrder,
@@ -79,29 +91,54 @@ const reviewSections = computed(() => {
         sectionInstructions: question.sectionInstructions || '',
         stimulusContent: question.stimulusContent || '',
         majorSkill,
-        questions: [],
+        groups: new Map(),
       })
     }
-    const section = sections.get(key)
+    const section = sections.get(sectionKey)
     if (section.sourceSectionOrder == null && question.sourceSectionOrder != null) section.sourceSectionOrder = question.sourceSectionOrder
     if (!section.sourceQuestionStart && question.sourceSectionQuestionStart) section.sourceQuestionStart = question.sourceSectionQuestionStart
     if (!section.sourceQuestionEnd && question.sourceSectionQuestionEnd) section.sourceQuestionEnd = question.sourceSectionQuestionEnd
     if (!section.majorSkill && majorSkill) section.majorSkill = majorSkill
     if (!section.sectionInstructions && question.sectionInstructions) section.sectionInstructions = question.sectionInstructions
     if (!section.stimulusContent && question.stimulusContent) section.stimulusContent = question.stimulusContent
-    section.questions.push({ question, index })
+
+    // ── Question Group (child level) ──
+    const groupTitle = String(question.sourceGroupTitle || '').trim()
+    const groupOrder = question.sourceGroupOrder ?? 0
+    // Key = groupOrder + groupTitle to keep groups distinct within section
+    const groupKey = `${sectionKey}:g:${groupOrder}:${groupTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'default'}`
+    if (!section.groups.has(groupKey)) {
+      section.groups.set(groupKey, {
+        groupKey,
+        groupTitle,
+        groupOrder,
+        groupInstruction: question.groupInstruction || '',
+        groupStimulusContent: question.groupStimulusContent || '',
+        startQuestion: question.sourceGroupQuestionStart || '',
+        endQuestion: question.sourceGroupQuestionEnd || '',
+        questions: [],
+      })
+    }
+    const group = section.groups.get(groupKey)
+    if (!group.groupInstruction && question.groupInstruction) group.groupInstruction = question.groupInstruction
+    if (!group.groupStimulusContent && question.groupStimulusContent) group.groupStimulusContent = question.groupStimulusContent
+    if (!group.startQuestion && question.sourceGroupQuestionStart) group.startQuestion = question.sourceGroupQuestionStart
+    if (!group.endQuestion && question.sourceGroupQuestionEnd) group.endQuestion = question.sourceGroupQuestionEnd
+    group.questions.push({ question, index })
   }
 
   const sectionList = [...sections.values()]
+
+  // OCR merge: orphan questions (no sourceSectionTitle) → attach to named section by skill + range
   const namedRanges = sectionList
     .filter((section) => section.sourceSectionTitle && section.majorSkill)
     .map((section) => ({ section, range: declaredSectionRange(section) }))
     .filter((entry) => entry.range)
   const mergedSections = new Set()
 
-  // OCR chunks can lose the heading on continuation pages; attach them only when one skill range fits every source number.
   for (const section of sectionList.filter((item) => !item.sourceSectionTitle && item.majorSkill)) {
-    const targets = section.questions.map(({ question }) => {
+    const allQuestions = [...section.groups.values()].flatMap((g) => g.questions)
+    const targets = allQuestions.map(({ question }) => {
       const number = parsedQuestionNumber(question.sourceQuestionNumber)
       if (number == null) return null
       const matches = namedRanges
@@ -116,30 +153,73 @@ const reviewSections = computed(() => {
     })
     const target = targets[0]
     if (!target || targets.some((item) => item !== target)) continue
-    target.questions.push(...section.questions)
+    // Merge groups from orphan section into target section
+    for (const [gKey, group] of section.groups) {
+      const mergedKey = gKey.replace(section.key, target.key)
+      if (!target.groups.has(mergedKey)) {
+        target.groups.set(mergedKey, { ...group, groupKey: mergedKey })
+      } else {
+        target.groups.get(mergedKey).questions.push(...group.questions)
+      }
+    }
     target.resourceKeys = [...new Set([...target.resourceKeys, ...section.resourceKeys])]
     mergedSections.add(section)
   }
 
   let majorIndex = 0
-  return sectionList.filter((section) => !mergedSections.has(section)).map((section) => ({
-    ...section,
-    rangeAudit: sectionQuestionAudit(section),
-    roman: section.sourceSectionOrder != null
-      ? romanNumeral(section.sourceSectionOrder - 1)
-      : section.majorSkill ? romanNumeral(majorIndex++) : null,
-  }))
+  return sectionList.filter((section) => !mergedSections.has(section)).map((section) => {
+    // Sort groups by groupOrder then by first question index
+    const sortedGroups = [...section.groups.values()].sort((a, b) => {
+      if (a.groupOrder !== b.groupOrder) return a.groupOrder - b.groupOrder
+      const aFirst = a.questions[0]?.index ?? 0
+      const bFirst = b.questions[0]?.index ?? 0
+      return aFirst - bFirst
+    })
+    // For each group, compute start/end and audit
+    const groupsWithAudit = sortedGroups.map((group) => {
+      const qNums = group.questions
+        .map(({ question }) => parsedQuestionNumber(question.sourceQuestionNumber))
+        .filter((n) => n != null)
+      const minNum = qNums.length ? Math.min(...qNums) : null
+      const maxNum = qNums.length ? Math.max(...qNums) : null
+      const startQuestion = group.startQuestion || (minNum != null ? String(minNum) : '')
+      const endQuestion = group.endQuestion || (maxNum != null ? String(maxNum) : '')
+      const enrichedGroup = { ...group, startQuestion, endQuestion }
+      return {
+        ...enrichedGroup,
+        rangeAudit: groupQuestionAudit(enrichedGroup),
+      }
+    })
+    const allGroupQuestions = sortedGroups.flatMap((g) => g.questions)
+    const flatSection = { ...section, questions: allGroupQuestions }
+    return {
+      ...section,
+      groups: groupsWithAudit,
+      questions: allGroupQuestions, // kept for backward compat (audit, rescan, etc.)
+      rangeAudit: sectionQuestionAudit(flatSection),
+      roman: section.sourceSectionOrder != null
+        ? romanNumeral(section.sourceSectionOrder - 1)
+        : section.majorSkill ? romanNumeral(majorIndex++) : null,
+    }
+  })
 })
+const missingSourceQuestions = computed(() => reviewSections.value.flatMap((section) =>
+  section.rangeAudit.missingNumbers.map((number) => `${section.sourceSectionTitle || section.title} ${number}`),
+))
 const visibleReviewSections = computed(() => {
   const query = questionSearch.value.trim().toLowerCase()
-  return reviewSections.value.map((section) => ({
-    ...section,
-    questions: section.questions.filter(({ question, index }) => {
-      const hasAnswer = Boolean(String(question.correctAnswer ?? '').trim())
-      const matchesQuery = !query || `${index + 1} ${question.sourceQuestionNumber || ''} ${question.content || ''}`.toLowerCase().includes(query)
-      return (!unansweredOnly.value || !hasAnswer) && matchesQuery
-    }),
-  })).filter((section) => section.questions.length)
+  return reviewSections.value.map((section) => {
+    const filteredGroups = section.groups.map((group) => ({
+      ...group,
+      questions: group.questions.filter(({ question, index }) => {
+        const hasAnswer = Boolean(String(question.correctAnswer ?? '').trim())
+        const matchesQuery = !query || `${index + 1} ${question.sourceQuestionNumber || ''} ${question.content || ''}`.toLowerCase().includes(query)
+        return (!unansweredOnly.value || !hasAnswer) && matchesQuery
+      }),
+    })).filter((group) => group.questions.length)
+    const allVisible = filteredGroups.flatMap((g) => g.questions)
+    return { ...section, groups: filteredGroups, questions: allVisible }
+  }).filter((section) => section.questions.length)
 })
 
 function clearSourcePdf() {
@@ -224,6 +304,50 @@ function sectionQuestionAudit(section) {
   }
 }
 
+function declaredGroupRange(group) {
+  const start = parsedQuestionNumber(group.startQuestion)
+  const end = parsedQuestionNumber(group.endQuestion)
+  if (start != null && end != null && end >= start) return { start, end }
+  const rangeMatch = String(group.groupTitle || '').match(/(\d+)\s*[-–]\s*(\d+)/)
+    || String(group.groupInstruction || '').match(/questions?\s*(\d+)\s*[-–]\s*(\d+)/i)
+  if (rangeMatch) {
+    const s = Number(rangeMatch[1])
+    const e = Number(rangeMatch[2])
+    if (e >= s && e - s <= 499) return { start: s, end: e }
+  }
+  return null
+}
+
+function groupQuestionAudit(group) {
+  const actualCount = group.questions.length
+  const range = declaredGroupRange(group)
+  if (!range) return { expectedCount: null, actualCount, missingNumbers: [], mismatch: false }
+  const expectedCount = range.end - range.start + 1
+  const numbers = group.questions
+    .map(({ question }) => parsedQuestionNumber(question.sourceQuestionNumber))
+    .filter((n) => n != null)
+  const missingNumbers = numbers.every((n) => n != null) && expectedCount <= 500
+    ? Array.from({ length: expectedCount }, (_, i) => range.start + i).filter((n) => !numbers.includes(n))
+    : []
+  return { expectedCount, actualCount, missingNumbers, mismatch: expectedCount !== actualCount || missingNumbers.length > 0 }
+}
+
+function groupRangeLabel(group) {
+  if (group.groupTitle) return group.groupTitle
+  const start = group.startQuestion || ''
+  const end = group.endQuestion || ''
+  if (start && end) {
+    return start === end ? `Question ${start}` : `Questions ${start}–${end}`
+  }
+  const numbers = group.questions
+    .map(({ question }) => parsedQuestionNumber(question.sourceQuestionNumber))
+    .filter((n) => n != null)
+  if (!numbers.length) return 'Nhóm câu hỏi'
+  const min = Math.min(...numbers)
+  const max = Math.max(...numbers)
+  return min === max ? `Question ${min}` : `Questions ${min}–${max}`
+}
+
 function sectionQuestionRange(section) {
   const questionNumbers = section.questions
     .map(({ question, index }) => question.sourceQuestionNumber || String(index + 1))
@@ -238,7 +362,17 @@ function sectionQuestionRange(section) {
 }
 
 function updateSectionText(section, field, value) {
+  // Propagate section-level field changes to ALL questions in ALL groups
   section.questions.forEach(({ question }) => { question[field] = value })
+}
+
+function updateGroupText(group, field, value) {
+  if (field === 'sourceGroupTitle') group.groupTitle = value
+  if (field === 'sourceGroupQuestionStart') group.startQuestion = value
+  if (field === 'sourceGroupQuestionEnd') group.endQuestion = value
+  if (field === 'groupInstruction') group.groupInstruction = value
+  if (field === 'groupStimulusContent') group.groupStimulusContent = value
+  group.questions.forEach(({ question }) => { question[field] = value })
 }
 
 function sectionResourcesFor(sectionKey, resourceType) {
@@ -488,6 +622,7 @@ async function uploadExam() {
     if (answerInput.value) answerInput.value.value = ''
     selected.value = created
     collapsedSections.value = new Set()
+    collapsedGroups.value = new Set()
     await loadSourcePdf(created)
     await loadResourcePreviews(created.importId, created.resources || [])
     notice.value = created.answerGenerated
@@ -510,6 +645,7 @@ async function openImport(item) {
   try {
     selected.value = await adminService.examImport(item.importId)
     collapsedSections.value = new Set()
+    collapsedGroups.value = new Set()
     await loadSourcePdf(selected.value)
     await loadResourcePreviews(selected.value.importId, selected.value.resources || [])
     if (selected.value?.certificateId) {
@@ -585,6 +721,35 @@ async function importAnswerKey() {
     error.value = exception?.response?.data?.responseMessage || exception?.response?.data?.message || 'Không thể ghép file đáp án.'
   } finally {
     importingAnswerKey.value = false
+  }
+}
+
+function questionIdentity(question) {
+  return [question.sourceSectionOrder || '', question.sourceSectionTitle || '',
+    question.sourceQuestionNumber || '', String(question.content || '').trim().toLowerCase()].join('|')
+}
+
+async function rescanMissingQuestions() {
+  if (!selected.value || !missingSourceQuestions.value.length || rescanningMissing.value) return
+  rescanningMissing.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const current = selected.value
+    const updated = await adminService.rescanMissingExamImportQuestions(current.importId)
+    const known = new Set((current.questions || []).map(questionIdentity))
+    const additions = (updated.questions || []).filter((question) => !known.has(questionIdentity(question)))
+    selected.value = { ...updated, canDelete: current.canDelete,
+      questions: [...(current.questions || []), ...additions] }
+    notice.value = additions.length
+      ? `Đã quét bổ sung ${additions.length} câu. Còn thiếu ${missingSourceQuestions.value.length} câu theo dải trong PDF.`
+      : `Lần quét này chưa bổ sung được câu mới. Còn thiếu ${missingSourceQuestions.value.length} câu theo dải trong PDF.`
+    await loadImports()
+  } catch (exception) {
+    error.value = exception?.response?.data?.responseMessage
+      || exception?.response?.data?.message || exception?.message || 'Không thể quét bổ sung các câu còn thiếu.'
+  } finally {
+    rescanningMissing.value = false
   }
 }
 
@@ -706,12 +871,12 @@ function changeQuestionType(question) {
         <div v-if="analysisProgress" class="analysis-progress" role="status">
           <div><span>{{ analysisProgress.message }}</span><strong>{{ analysisProgress.progress }}%</strong></div>
           <progress :value="analysisProgress.progress" max="100" />
-          <small v-if="analysisProgress.totalChunks">Đã xử lý {{ analysisProgress.completedChunks }} / {{ analysisProgress.totalChunks }} phần</small>
+          <small v-if="analysisProgress.totalChunks">Đã xử lý {{ analysisProgress.completedChunks }} / {{ analysisProgress.totalChunks }} bước</small>
         </div>
         <section v-if="liveOcrQuestions.length && analysisProgress?.status !== 'COMPLETED'" class="live-ocr-preview" aria-live="polite" aria-label="Câu hỏi đã nhận diện">
           <header class="live-ocr-heading">
             <div><strong>Đã nhận diện {{ liveOcrQuestions.length }} câu</strong><small>Câu hỏi sẽ xuất hiện khi OCR xử lý xong từng trang hoặc phần.</small></div>
-            <span>{{ analysisProgress?.completedChunks || 0 }} / {{ analysisProgress?.totalChunks || 0 }} phần</span>
+            <span>{{ analysisProgress?.completedChunks || 0 }} / {{ analysisProgress?.totalChunks || 0 }} bước</span>
           </header>
           <p v-if="analysisProgress?.status === 'FAILED'" class="live-ocr-error">{{ analysisProgress.errorMessage || 'Phân tích dừng trước khi hoàn tất. Các câu đã nhận diện bên dưới vẫn được giữ để đối chiếu.' }}</p>
           <article v-for="(question, index) in liveOcrQuestions" :key="`${question.sourcePageNumber || 0}-${question.sourceQuestionNumber || index}-${index}`" class="live-ocr-question">
@@ -750,6 +915,14 @@ function changeQuestionType(question) {
             <p>{{ selected.questionCount }} câu · {{ selected.questions?.length || 0 }} câu đang xem</p>
           </div>
           <div class="review-heading-actions">
+            <button v-if="selected.sourceFileName?.toLowerCase().endsWith('.pdf') && missingSourceQuestions.length" class="rescan-missing-btn" type="button"
+              :disabled="rescanningMissing || saving || importingAnswerKey"
+              :title="`Quét lại các câu còn thiếu: ${missingSourceQuestions.join(', ')}`"
+              @click="rescanMissingQuestions">
+              <LoaderCircle v-if="rescanningMissing" class="spin" :size="14" />
+              <RefreshCw v-else :size="14" />
+              <span>{{ rescanningMissing ? 'Đang quét câu thiếu' : `Quét ${missingSourceQuestions.length} câu thiếu` }}</span>
+            </button>
             <button v-if="isAdmin || selected.canDelete" class="delete-header-btn" type="button" title="Xóa bộ đề đang xem" :disabled="deletingImportId === selected.importId" @click="deleteImport(selected)">
               <LoaderCircle v-if="deletingImportId === selected.importId" class="spin" :size="14" />
               <Trash2 v-else :size="14" />
@@ -808,9 +981,10 @@ function changeQuestionType(question) {
               <p v-else>Đối chiếu PDF để xác định câu bị bỏ sót hay dải section được đánh chưa đúng.</p>
             </div>
           </div>
+          <!-- Section-level instruction / stimulus -->
           <div v-if="section.sectionInstructions || section.stimulusContent" class="section-guidance">
             <p v-if="section.sectionInstructions">{{ section.sectionInstructions }}</p>
-            <div v-if="section.stimulusContent" class="section-stimulus"><strong>Nội dung dùng chung</strong><p>{{ section.stimulusContent }}</p></div>
+            <div v-if="section.stimulusContent" class="section-stimulus"><strong>Nội dung dùng chung (Section)</strong><p>{{ section.stimulusContent }}</p></div>
           </div>
           <details class="section-context-editor">
             <summary>{{ section.sectionInstructions || section.stimulusContent ? 'Chỉnh sửa hướng dẫn và nội dung chung' : 'Thêm hướng dẫn hoặc nội dung chung' }}</summary>
@@ -818,8 +992,8 @@ function changeQuestionType(question) {
               <label>Câu bắt đầu<input :value="section.sourceQuestionStart" inputmode="numeric" placeholder="1" @input="updateSectionText(section, 'sourceSectionQuestionStart', $event.target.value)" /></label>
               <label>Câu kết thúc<input :value="section.sourceQuestionEnd" inputmode="numeric" placeholder="10" @input="updateSectionText(section, 'sourceSectionQuestionEnd', $event.target.value)" /></label>
             </div>
-            <label>Hướng dẫn của phần<textarea :value="section.sectionInstructions" rows="2" placeholder="Ví dụ: Questions 1-4. Complete the sentences below." @input="updateSectionText(section, 'sectionInstructions', $event.target.value)" /></label>
-            <label>Nội dung dùng chung<textarea :value="section.stimulusContent" rows="4" placeholder="Đoạn văn hoặc tình huống được các câu trong phần này sử dụng." @input="updateSectionText(section, 'stimulusContent', $event.target.value)" /></label>
+            <label>Hướng dẫn chung của Section<textarea :value="section.sectionInstructions" rows="2" placeholder="Ví dụ: This section has 40 questions." @input="updateSectionText(section, 'sectionInstructions', $event.target.value)" /></label>
+            <label>Nội dung dùng chung (Section)<textarea :value="section.stimulusContent" rows="4" placeholder="Đoạn văn hoặc tình huống dùng chung cho toàn Section." @input="updateSectionText(section, 'stimulusContent', $event.target.value)" /></label>
           </details>
           <div class="section-images">
             <figure v-for="resource in sectionResourcesFor(section, 'IMAGE')" :key="resource.resourceId" class="section-image-resource">
@@ -854,44 +1028,84 @@ function changeQuestionType(question) {
               </button>
             </div>
           </div>
-          <article v-for="entry in section.questions" :key="entry.index" class="question-editor" :class="{ 'needs-answer': !String(entry.question.correctAnswer ?? '').trim() }" @vue:mounted="normalizeAnswer(entry.question)">
-            <header>
-              <span class="question-index" :title="entry.question.sourceQuestionNumber ? `Số câu trong PDF: ${entry.question.sourceQuestionNumber}` : 'Thứ tự câu được nhận diện'">{{ questionDisplayNumber(entry.question, entry.index) }}</span>
-              <span class="answer-state" :class="{ 'is-missing': !String(entry.question.correctAnswer ?? '').trim() }">{{ String(entry.question.correctAnswer ?? '').trim() ? 'Đã có đáp án' : 'Thiếu đáp án' }}</span>
-              <label>Kỹ năng / Môn
-                <select v-model="entry.question.topicId">
-                  <option v-if="!entry.question.topicId && !form.topicId" :value="null" disabled>Chọn kỹ năng</option>
-                  <template v-for="group in reviewTopicGroups" :key="group.id">
-                    <option v-if="group.topics.length === 1 && group.topics[0].topicId === group.id" :value="group.id">
-                      {{ group.name }}
-                    </option>
-                    <optgroup v-else :label="group.name">
-                      <option v-for="topic in group.topics" :key="topic.topicId" :value="topic.topicId">
-                        {{ topicPath(topic, reviewTopics) }}
-                      </option>
-                    </optgroup>
-                  </template>
-                </select>
-              </label>
-              <label>Loại câu<select v-model="entry.question.questionType" @change="changeQuestionType(entry.question)"><option value="MULTIPLE_CHOICE">Trắc nghiệm</option><option value="TRUE_FALSE">Đúng / sai</option><option value="FILL_BLANK">Điền khuyết</option><option value="ESSAY">Tự luận</option></select></label>
-              <label>Độ khó<select v-model="entry.question.difficulty"><option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option></select></label>
+
+          <!-- ══════════════════════════════════════════
+               Question Groups (child level of Section)
+               ══════════════════════════════════════════ -->
+          <div v-for="group in section.groups" :key="group.groupKey" class="question-group" :class="{ 'is-collapsed': isGroupCollapsed(group.groupKey) }">
+            <header class="group-heading">
+              <span class="group-range-label">{{ groupRangeLabel(group) }}</span>
+              <span v-if="group.rangeAudit.mismatch" class="group-mismatch-badge" :title="`Thiếu câu: ${group.rangeAudit.missingNumbers.join(', ')}`">
+                <AlertTriangle :size="12" />{{ group.rangeAudit.missingNumbers.length }} thiếu
+              </span>
+              <span class="group-question-count">{{ group.questions.length }} câu</span>
+              <button
+                type="button"
+                class="group-toggle"
+                :aria-expanded="!isGroupCollapsed(group.groupKey)"
+                :aria-label="isGroupCollapsed(group.groupKey) ? `Mở rộng ${group.groupTitle || 'nhóm'}` : `Thu gọn ${group.groupTitle || 'nhóm'}`"
+                :title="isGroupCollapsed(group.groupKey) ? 'Mở rộng nhóm câu hỏi' : 'Thu gọn nhóm câu hỏi'"
+                @click.stop="toggleGroup(group.groupKey)"
+              >
+                <ChevronRight v-if="isGroupCollapsed(group.groupKey)" :size="15" aria-hidden="true" />
+                <ChevronDown v-else :size="15" aria-hidden="true" />
+              </button>
             </header>
-            <div v-if="entry.question.questionType === 'FILL_BLANK'" class="question-form-preview" :aria-label="`Bản dựng câu ${questionDisplayNumber(entry.question, entry.index)}`">
-              <template v-for="(part, partIndex) in blankContentParts(entry.question)" :key="partIndex">
-                <span v-if="part.blankNumber !== undefined" class="inline-answer-slot"><small>{{ part.blankNumber }}</small><span>................</span></span>
-                <span v-else>{{ part.text }}</span>
-              </template>
+            <div v-show="!isGroupCollapsed(group.groupKey)" class="group-body">
+              <div v-if="group.groupInstruction || group.groupStimulusContent" class="group-guidance">
+                <p v-if="group.groupInstruction" class="group-instruction">{{ group.groupInstruction }}</p>
+                <div v-if="group.groupStimulusContent" class="group-stimulus"><strong>Đoạn trích dùng chung (Nhóm)</strong><p>{{ group.groupStimulusContent }}</p></div>
+              </div>
+              <details class="group-context-editor">
+                <summary>{{ group.groupInstruction || group.groupStimulusContent ? 'Chỉnh sửa hướng dẫn và phạm vi nhóm' : 'Thêm hướng dẫn cho nhóm câu này' }}</summary>
+                <div class="group-range-editor">
+                  <label>Câu bắt đầu<input :value="group.startQuestion" inputmode="numeric" placeholder="1" @input="updateGroupText(group, 'sourceGroupQuestionStart', $event.target.value)" /></label>
+                  <label>Câu kết thúc<input :value="group.endQuestion" inputmode="numeric" placeholder="4" @input="updateGroupText(group, 'sourceGroupQuestionEnd', $event.target.value)" /></label>
+                </div>
+                <label>Tiêu đề nhóm<input :value="group.groupTitle" placeholder="Ví dụ: Questions 1–4" @input="updateGroupText(group, 'sourceGroupTitle', $event.target.value)" /></label>
+                <label>Hướng dẫn nhóm<textarea :value="group.groupInstruction" rows="2" placeholder="Ví dụ: Complete the sentences below using NO MORE THAN TWO WORDS." @input="updateGroupText(group, 'groupInstruction', $event.target.value)" /></label>
+                <label>Đoạn văn / nội dung riêng của nhóm<textarea :value="group.groupStimulusContent" rows="3" placeholder="Đoạn đọc, bảng hoặc tình huống dành riêng cho nhóm câu này." @input="updateGroupText(group, 'groupStimulusContent', $event.target.value)" /></label>
+              </details>
+              <article v-for="entry in group.questions" :key="entry.index" class="question-editor" :class="{ 'needs-answer': !String(entry.question.correctAnswer ?? '').trim() }" @vue:mounted="normalizeAnswer(entry.question)">
+                <header>
+                  <span class="question-index" :title="entry.question.sourceQuestionNumber ? `Số câu trong PDF: ${entry.question.sourceQuestionNumber}` : 'Thứ tự câu được nhận diện'">{{ questionDisplayNumber(entry.question, entry.index) }}</span>
+                  <span class="answer-state" :class="{ 'is-missing': !String(entry.question.correctAnswer ?? '').trim() }">{{ String(entry.question.correctAnswer ?? '').trim() ? 'Đã có đáp án' : 'Thiếu đáp án' }}</span>
+                  <label>Kỹ năng / Môn
+                    <select v-model="entry.question.topicId">
+                      <option v-if="!entry.question.topicId && !form.topicId" :value="null" disabled>Chọn kỹ năng</option>
+                      <template v-for="topicGroup in reviewTopicGroups" :key="topicGroup.id">
+                        <option v-if="topicGroup.topics.length === 1 && topicGroup.topics[0].topicId === topicGroup.id" :value="topicGroup.id">
+                          {{ topicGroup.name }}
+                        </option>
+                        <optgroup v-else :label="topicGroup.name">
+                          <option v-for="topic in topicGroup.topics" :key="topic.topicId" :value="topic.topicId">
+                            {{ topicPath(topic, reviewTopics) }}
+                          </option>
+                        </optgroup>
+                      </template>
+                    </select>
+                  </label>
+                  <label>Loại câu<select v-model="entry.question.questionType" @change="changeQuestionType(entry.question)"><option value="MULTIPLE_CHOICE">Trắc nghiệm</option><option value="TRUE_FALSE">Đúng / sai</option><option value="FILL_BLANK">Điền khuyết</option><option value="ESSAY">Tự luận</option></select></label>
+                  <label>Độ khó<select v-model="entry.question.difficulty"><option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option></select></label>
+                </header>
+                <div v-if="entry.question.questionType === 'FILL_BLANK'" class="question-form-preview" :aria-label="`Bản dựng câu ${questionDisplayNumber(entry.question, entry.index)}`">
+                  <template v-for="(part, partIndex) in blankContentParts(entry.question)" :key="partIndex">
+                    <span v-if="part.blankNumber !== undefined" class="inline-answer-slot"><small>{{ part.blankNumber }}</small><span>................</span></span>
+                    <span v-else>{{ part.text }}</span>
+                  </template>
+                </div>
+                <label class="editor-label">Nội dung<textarea v-model.trim="entry.question.content" rows="3" /></label>
+                <div v-if="entry.question.questionType === 'MULTIPLE_CHOICE'" class="options-editor">
+                  <div class="editor-subheading"><strong>Lựa chọn</strong><button type="button" @click="addOption(entry.question)">Thêm lựa chọn</button></div>
+                  <div v-for="(option, optionIndex) in entry.question.options" :key="optionIndex" class="option-row"><b>{{ option.label }}</b><input v-model.trim="option.text" /><button type="button" :aria-label="`Xóa lựa chọn ${option.label}`" @click="removeOption(entry.question, optionIndex)">×</button></div>
+                  <label class="editor-label answer-field">Đáp án đúng<select v-model="entry.question.correctAnswer"><option v-for="option in entry.question.options" :key="option.label" :value="option.label">{{ option.label }} · {{ option.text }}</option></select></label>
+                </div>
+                <label v-else-if="entry.question.questionType === 'FILL_BLANK'" class="editor-label answer-field">Đáp án<input v-model.trim="entry.question.correctAnswer" type="text" autocomplete="off" /></label>
+                <label v-else class="editor-label answer-field">Đáp án<textarea v-model.trim="entry.question.correctAnswer" rows="2" /></label>
+                <details class="editor-explanation"><summary>Giải thích</summary><textarea v-model.trim="entry.question.explanation" rows="2" /></details>
+              </article>
             </div>
-            <label class="editor-label">Nội dung<textarea v-model.trim="entry.question.content" rows="3" /></label>
-            <div v-if="entry.question.questionType === 'MULTIPLE_CHOICE'" class="options-editor">
-              <div class="editor-subheading"><strong>Lựa chọn</strong><button type="button" @click="addOption(entry.question)">Thêm lựa chọn</button></div>
-              <div v-for="(option, optionIndex) in entry.question.options" :key="optionIndex" class="option-row"><b>{{ option.label }}</b><input v-model.trim="option.text" /><button type="button" :aria-label="`Xóa lựa chọn ${option.label}`" @click="removeOption(entry.question, optionIndex)">×</button></div>
-              <label class="editor-label answer-field">Đáp án đúng<select v-model="entry.question.correctAnswer"><option v-for="option in entry.question.options" :key="option.label" :value="option.label">{{ option.label }} · {{ option.text }}</option></select></label>
-            </div>
-            <label v-else-if="entry.question.questionType === 'FILL_BLANK'" class="editor-label answer-field">Đáp án<input v-model.trim="entry.question.correctAnswer" type="text" autocomplete="off" /></label>
-            <label v-else class="editor-label answer-field">Đáp án<textarea v-model.trim="entry.question.correctAnswer" rows="2" /></label>
-            <details class="editor-explanation"><summary>Giải thích</summary><textarea v-model.trim="entry.question.explanation" rows="2" /></details>
-          </article>
+          </div>
         </section>
         <p v-if="!visibleReviewSections.length" class="review-no-results">Không có câu hỏi khớp với bộ lọc.</p>
         <footer class="review-actions">
@@ -968,6 +1182,8 @@ function changeQuestionType(question) {
 .source-details { margin-bottom: 16px; border: 1px solid #dce2e9; border-radius: 6px; }.source-details summary { padding: 10px 12px; color: #435565; font-size: 12px; cursor: pointer; }.source-details > div { max-height: 260px; overflow: auto; padding: 0 12px 12px; }.source-details h3 { font-size: 12px; }.source-details pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #475569; font-family: inherit; font-size: 12px; line-height: 1.5; }
 .question-editor { margin: 0 0 14px; padding: 16px; border: 1px solid #dce2e9; border-radius: 6px; }.question-editor > header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }.question-editor > header > span { color: #126b68; font-size: 13px; font-weight: 700; }.question-editor > header label { display: flex; align-items: center; gap: 7px; color: #64748b; font-size: 11px; }.question-editor select { min-height: 36px; }.editor-label { margin-top: 11px; }.editor-label textarea { resize: vertical; line-height: 1.45; }.editor-subheading { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 8px; color: #3a4757; font-size: 12px; }.editor-subheading button { border: 0; background: transparent; color: #126b68; font-size: 12px; cursor: pointer; }.option-row { display: grid; grid-template-columns: 28px minmax(0,1fr) 30px; gap: 8px; align-items: center; margin-bottom: 7px; }.option-row b { color: #126b68; }.option-row button { height: 32px; border: 0; background: transparent; color: #9b3028; font-size: 20px; cursor: pointer; }.answer-field { width: 100%; max-width: 100%; }.review-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }.review-primary-actions { display: flex; align-items: center; gap: 12px; }.review-actions .save-button { border: 1px solid #cbd5df; background: white; color: #344256; }.review-actions .confirm-button { background: #126b68; }
 .review-heading-actions { display: flex; align-items: center; gap: 10px; }
+.rescan-missing-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid #b7d8d6; border-radius: 5px; background: #f0f8f7; color: #075e5c; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.rescan-missing-btn:disabled { opacity: .55; cursor: wait; }
 .delete-header-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #fecdd3; border-radius: 6px; background: #fff1f2; color: #be123c; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
 .delete-header-btn:hover { background: #ffe4e6; border-color: #fda4af; }
 .delete-header-btn:disabled { opacity: .55; cursor: wait; }
@@ -1095,5 +1311,27 @@ function changeQuestionType(question) {
   .question-editor .options-editor .answer-field { grid-column: 1; grid-row: auto; }
   .section-audio-heading,.section-audio-resource { align-items: flex-start; flex-direction: column; }
   .section-audio-resource audio { width: 100%; }
+  .group-heading { flex-wrap: wrap; }
 }
+/* ── Question Group (child level) ── */
+.question-group { margin: 0 0 18px; border: 1px solid #dce2e9; border-radius: 7px; overflow: hidden; }
+.group-heading { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f4f8f6; border-bottom: 1px solid #d8e6e1; }
+.group-range-label { font-size: 12px; font-weight: 700; color: #126b68; }
+.group-question-count { margin-left: auto; font-size: 11px; color: #64748b; }
+.group-mismatch-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid #fcd34d; border-radius: 999px; background: #fffbeb; color: #92400e; font-size: 10px; font-weight: 700; }
+.group-guidance { padding: 10px 14px 2px; background: #f9fbfa; border-bottom: 1px solid #e8eeeb; font-size: 12px; color: #344256; line-height: 1.6; }
+.group-instruction { margin: 0 0 6px; white-space: pre-line; }
+.group-stimulus { margin-top: 6px; padding: 8px 11px; border-left: 3px solid #91b8ad; background: #fff; border-radius: 4px; }
+.group-stimulus p { margin: 0; white-space: pre-wrap; font-size: 12px; }
+.group-context-editor { padding: 0 14px; border-bottom: 1px solid #e8eeeb; }
+.group-context-editor summary { width: fit-content; padding: 7px 0; color: #64748b; font-size: 11px; cursor: pointer; }
+.group-context-editor label { display: grid; gap: 5px; margin: 0 0 9px; color: #435565; font-size: 11px; }
+.group-context-editor textarea { width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid #cbd5df; border-radius: 5px; font: inherit; font-size: 12px; resize: vertical; }
+.group-context-editor input { width: 100%; min-height: 32px; padding: 5px 8px; border: 1px solid #cbd5df; border-radius: 5px; font: inherit; font-size: 12px; }
+.group-range-editor { display: grid; grid-template-columns: repeat(2, minmax(80px, 140px)); gap: 10px; margin-bottom: 8px; }
+.group-toggle { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; margin-left: 6px; padding: 0; border: 1px solid #cbd5df; border-radius: 4px; background: #fff; color: #475569; cursor: pointer; }
+.group-toggle:hover { border-color: #94a3b8; background: #f8fafc; color: #0f172a; }
+.question-group.is-collapsed .group-body { display: none; }
+.question-group > .question-editor { margin: 9px 14px; border-radius: 6px; }
+.question-group > .question-editor:last-child { margin-bottom: 14px; }
 </style>

@@ -1,8 +1,8 @@
 package adaptivelearning.module.rag.service;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.ByteArrayOutputStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -53,5 +53,31 @@ class PdfTextExtractorTest {
     void rejectsNonPdfContent() {
         assertThrows(IllegalArgumentException.class,
                 () -> PdfTextExtractor.extract("not a pdf".getBytes()));
+    }
+
+    @Test
+    void extractsEveryPageInSourceOrderWithoutTruncatingLongDocuments() throws Exception {
+        byte[] pdf;
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            for (int pageNumber = 1; pageNumber <= 3; pageNumber++) {
+                PDPage page = new PDPage();
+                document.addPage(page);
+                try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                    content.beginText();
+                    content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                    content.newLineAtOffset(40, 700);
+                    content.showText("Page " + pageNumber + " " + "x".repeat(300));
+                    content.endText();
+                }
+            }
+            document.save(output);
+            pdf = output.toByteArray();
+        }
+
+        var pages = PdfTextExtractor.extractPages(pdf);
+        assertEquals(3, pages.size());
+        assertTrue(pages.get(0).startsWith("Page 1"));
+        assertTrue(pages.get(2).startsWith("Page 3"));
+        assertTrue(PdfTextExtractor.extract(pdf).length() > 500);
     }
 }

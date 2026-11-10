@@ -18,12 +18,20 @@ public class ExamImportQuestion {
     private String skill;
     private String sourceQuestionNumber;
     private Integer sourcePageNumber;
+    // === Section (parent level: SECTION I, SECTION II, PART I...) ===
     private Integer sourceSectionOrder;
     private String sourceSectionTitle;
     private String sourceSectionQuestionStart;
     private String sourceSectionQuestionEnd;
     private String sectionInstructions;
     private String stimulusContent;
+    // === Question Group (child level: "Questions 1-4", "Questions 5-10"...) ===
+    private Integer sourceGroupOrder;
+    private String sourceGroupTitle;
+    private String sourceGroupQuestionStart;
+    private String sourceGroupQuestionEnd;
+    private String groupInstruction;
+    private String groupStimulusContent;
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)

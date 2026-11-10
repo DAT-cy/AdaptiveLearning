@@ -154,6 +154,13 @@ public class ExamImportController {
                 service.updateQuestions(id, request.getQuestions()));
     }
 
+    @PostMapping("/{id}/rescan-missing")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'EXAM_APPROVER')")
+    public DefaultRes<ExamImportResponse> rescanMissingQuestions(@PathVariable Long id) {
+        return DefaultRes.res(HttpStatus.OK.value(), "Missing exam questions rescanned",
+                service.rescanMissingQuestions(id));
+    }
+
     @PostMapping(value = "/{id}/answers", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'EXAM_APPROVER')")
     public DefaultRes<ExamImportAnswerKeyResult> importAnswerKey(

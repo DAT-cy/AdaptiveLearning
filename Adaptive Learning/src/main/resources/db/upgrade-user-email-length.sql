@@ -1,2 +1,0 @@
-ALTER TABLE tbl_users
-    MODIFY COLUMN username VARCHAR(254) NOT NULL;

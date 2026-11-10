@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import adaptivelearning.config.response.CommonException;
 import adaptivelearning.config.response.ErrorCode;
 import adaptivelearning.module.certificates.repository.CertificateRepository;
+import adaptivelearning.module.ai.gateway.AiProvider;
 import adaptivelearning.module.rag.dto.request.DocumentUploadRequest;
 import adaptivelearning.module.rag.dto.request.KnowledgeBaseUploadRequest;
 import adaptivelearning.module.rag.entity.DocumentChunk;
@@ -41,7 +42,7 @@ class RagServiceImplTest {
         chunks = mock(DocumentChunkRepository.class);
         topics = mock(TopicRepository.class);
         certificates = mock(CertificateRepository.class);
-        service = new RagServiceImpl(documents, chunks, topics, certificates);
+        service = new RagServiceImpl(documents, chunks, topics, certificates, mock(AiProvider.class));
         when(documents.save(any(StudyDocument.class))).thenAnswer(invocation -> {
             StudyDocument document = invocation.getArgument(0);
             if (document.getDocumentId() == null) document.setDocumentId(41L);
@@ -145,8 +146,9 @@ class RagServiceImplTest {
         MockMultipartFile invalidPdf = new MockMultipartFile("file", "fake.pdf", "application/pdf",
                 "not a PDF".getBytes());
         when(certificates.existsById(2L)).thenReturn(true);
-        assertThrows(IllegalArgumentException.class,
-                () -> service.uploadKnowledgePdf(9L, "PDF", 2L, null, invalidPdf));
+        assertEquals(ErrorCode.BAD_REQUEST,
+                assertThrows(CommonException.class,
+                        () -> service.uploadKnowledgePdf(9L, "PDF", 2L, null, invalidPdf)).getErrorCode());
     }
 
     @Test

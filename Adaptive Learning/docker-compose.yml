@@ -59,7 +59,7 @@ services:
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-775450545173-dg1fks5jjs667s0ek3d2lj4s5sf07si2.apps.googleusercontent.com}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      AI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in environment or .env}
+      AI_API_KEY: ${GEMINI_API_KEY:-AQ.Ab8RN6LGt_65V979fUqLXuVfjvYQiTT9wl_ovPb1eElw_3O_1A}
       BKT_URL: http://pybkt:8001
       MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
       MAIL_PORT: ${MAIL_PORT:-587}

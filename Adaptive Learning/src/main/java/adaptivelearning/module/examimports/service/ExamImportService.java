@@ -45,6 +45,7 @@ public interface ExamImportService {
     ExamImportSourceFile getResourceFile(Long importId, Long resourceId);
     void deleteOwned(Long importId, Long viewerId);
     ExamImportResponse updateQuestions(Long importId, List<ExamImportQuestion> questions);
+    ExamImportResponse rescanMissingQuestions(Long importId);
     ExamImportAnswerKeyResult importAnswerKey(Long importId, MultipartFile answerFile);
     ExamImportResponse confirm(Long importId);
 }

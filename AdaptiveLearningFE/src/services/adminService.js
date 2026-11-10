@@ -67,6 +67,9 @@ export const adminService = {
     headers: { 'Content-Type': 'multipart/form-data' },
   })),
   updateExamImport: (id, payload) => data(Axios.put(`/api/v1/exam-imports/${id}`, payload)),
+  rescanMissingExamImportQuestions: (id) => data(Axios.post(`/api/v1/exam-imports/${id}/rescan-missing`, null, {
+    timeout: 180000,
+  })),
   confirmExamImport: (id) => data(Axios.post(`/api/v1/exam-imports/${id}/confirm`)),
   createExamTemplate: (payload) =>
     data(Axios.post('/api/v1/exam-templates', payload)),

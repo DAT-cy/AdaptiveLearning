@@ -16,6 +16,7 @@ import adaptivelearning.module.rag.repository.DocumentChunkRepository;
 import adaptivelearning.module.rag.repository.StudyDocumentRepository;
 import adaptivelearning.module.rag.service.RagService;
 import adaptivelearning.module.rag.service.PdfTextExtractor;
+import adaptivelearning.module.ai.gateway.AiProvider;
 import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.topics.repository.TopicRepository;
 import adaptivelearning.shared.enums.DocumentStatus;
@@ -26,10 +27,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.io.ByteArrayOutputStream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
 
 @Service
 @Transactional
@@ -37,11 +41,13 @@ import org.springframework.web.multipart.MultipartFile;
 public class RagServiceImpl implements RagService {
     private static final int CHUNK_SIZE = 700;
     private static final int CHUNK_OVERLAP = 120;
+    private static final int PDF_PAGE_OCR_TOKENS = 6000;
 
     private final StudyDocumentRepository documents;
     private final DocumentChunkRepository chunks;
     private final TopicRepository topics;
     private final CertificateRepository certificates;
+    private final AiProvider aiProvider;
 
     @Override
     public StudyDocumentResponse uploadDocument(Long userId, DocumentUploadRequest request) {
@@ -172,7 +178,9 @@ public class RagServiceImpl implements RagService {
 
         final String text;
         try {
-            text = PdfTextExtractor.extract(file.getBytes());
+            text = extractPdfContent(file.getBytes());
+        } catch (IllegalArgumentException exception) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
         } catch (java.io.IOException exception) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
@@ -314,10 +322,34 @@ public class RagServiceImpl implements RagService {
         String text = rawText.replace("\r\n", "\n").trim();
         if (text.isEmpty()) throw new CommonException(ErrorCode.BAD_REQUEST);
         List<DocumentChunk> parts = new ArrayList<>();
-        int start = 0;
-        while (start < text.length()) {
-            int end = Math.min(start + CHUNK_SIZE, text.length());
-            String part = text.substring(start, end).trim();
+        StringBuilder current = new StringBuilder();
+        for (String unit : text.split("(?<=\\n)|(?<=[.!?])\\s+")) {
+            if (current.length() > 0 && current.length() + unit.length() > CHUNK_SIZE) {
+                addChunk(parts, document, current.toString());
+                String prior = current.toString();
+                int overlapAt = prior.lastIndexOf(' ', Math.max(0, prior.length() - CHUNK_OVERLAP));
+                current.setLength(0);
+                if (overlapAt >= 0) current.append(prior.substring(overlapAt + 1)).append(' ');
+            }
+            if (unit.length() > CHUNK_SIZE) {
+                if (current.length() > 0) {
+                    addChunk(parts, document, current.toString());
+                    current.setLength(0);
+                }
+                for (int offset = 0; offset < unit.length(); offset += CHUNK_SIZE - CHUNK_OVERLAP) {
+                    addChunk(parts, document, unit.substring(offset, Math.min(unit.length(), offset + CHUNK_SIZE)));
+                }
+            } else {
+                current.append(unit);
+            }
+        }
+        if (!current.isEmpty()) addChunk(parts, document, current.toString());
+        chunks.saveAll(parts);
+        document.setChunkCount(parts.size());
+    }
+
+    private void addChunk(List<DocumentChunk> parts, StudyDocument document, String value) {
+            String part = value.trim();
             if (!part.isEmpty()) {
                 parts.add(DocumentChunk.builder()
                         .documentId(document.getDocumentId())
@@ -326,11 +358,31 @@ public class RagServiceImpl implements RagService {
                         .keywords(keywords(part))
                         .build());
             }
-            if (end == text.length()) break;
-            start = end - CHUNK_OVERLAP;
+    }
+
+    private String extractPdfContent(byte[] bytes) throws java.io.IOException {
+        List<String> extracted = PdfTextExtractor.extractPages(bytes);
+        List<String> completePages = new ArrayList<>(extracted.size());
+        try (PDDocument source = Loader.loadPDF(bytes)) {
+            for (int index = 0; index < extracted.size(); index++) {
+                String text = extracted.get(index);
+                if (text.isBlank()) {
+                    try (PDDocument page = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                        page.importPage(source.getPage(index));
+                        page.save(output);
+                        text = aiProvider.analyzeDocumentSync(
+                                "Transcribe all readable content from this PDF page. Preserve question numbering, choices, tables, formulas, and figure references. Do not summarize or omit content. Return plain text only.",
+                                "OCR page " + (index + 1) + " of " + extracted.size() + ".",
+                                output.toByteArray(), "application/pdf", PDF_PAGE_OCR_TOKENS).trim();
+                    }
+                }
+                if (text.isBlank()) {
+                    throw new IllegalArgumentException("OCR did not return content for PDF page " + (index + 1));
+                }
+                completePages.add("[Page " + (index + 1) + "]\n" + text);
+            }
         }
-        chunks.saveAll(parts);
-        document.setChunkCount(parts.size());
+        return String.join("\n\n", completePages);
     }
 
     private Set<String> terms(String value) {

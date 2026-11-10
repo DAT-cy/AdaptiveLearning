@@ -32,7 +32,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -53,9 +52,9 @@ import org.springframework.web.multipart.MultipartFile;
 public class ExamImportServiceImpl implements ExamImportService {
     private static final long MAX_FILE_BYTES = 20L * 1024 * 1024;
     private static final int MAX_PROMPT_CHARS = 120_000;
-    private static final int MAX_CHUNK_CHARS = 10_000;
-    private static final int MAX_CHUNK_OUTPUT_TOKENS = 6_000;
-    private static final int MAX_SCANNED_PAGE_OUTPUT_TOKENS = 10_000;
+    private static final int MAX_EXAM_OUTPUT_TOKENS = 48_000;
+    private static final int MAX_ANSWER_MATCH_OUTPUT_TOKENS = 6_000;
+    private static final int MAX_SCANNED_PAGE_OCR_TOKENS = 8_000;
     private static final Set<String> QUESTION_TYPES = Set.of("MULTIPLE_CHOICE", "TRUE_FALSE", "FILL_BLANK", "ESSAY");
 
     private final ExamImportRepository imports;
@@ -126,6 +125,19 @@ public class ExamImportServiceImpl implements ExamImportService {
                 throw ex;
             }
         }
+        String examFilename = examFile == null ? "" : examFile.getOriginalFilename();
+        if (!isExamScannedPdf && examFilename != null
+                && examFilename.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+            try {
+                if (PdfTextExtractor.extractPages(examFile.getBytes()).stream().anyMatch(String::isBlank)) {
+                    isExamScannedPdf = true;
+                    examFileBytes = examFile.getBytes();
+                    examText = "";
+                }
+            } catch (IOException exception) {
+                throw new IllegalArgumentException("Không đọc được tệp đề thi.", exception);
+            }
+        }
 
         String answerText = answerFile == null || answerFile.isEmpty() ? null : extract(answerFile, "đáp án");
         if (!isExamScannedPdf && examText.length() + (answerText == null ? 0 : answerText.length()) > MAX_PROMPT_CHARS) {
@@ -138,27 +150,71 @@ public class ExamImportServiceImpl implements ExamImportService {
         String topicsHint = buildTopicHierarchyHint(certTopics);
 
         String system = "Extract the complete existing exam as structured questions. Preserve the source wording and choices; "
-                + "do not invent, omit, combine, or rewrite questions. If an answer key is supplied, match its answers. "
+                + "do not invent, omit, combine, or rewrite questions. OCR page markers are not section breaks: continue sections "
+                + "across page boundaries. Every printed question in every declared section range must be represented. If an answer key is supplied, match its answers. "
                 + "If no answer key is supplied, leave correctAnswer and explanation empty; never solve or infer answers. "
                 + "Classify every question individually using its section heading, section instructions, passage/task context, and question range. "
                 + "The allowed topics are hierarchical: first identify the major skill/section, then select the most specific matching child topic. "
                 + "Use the major topic itself when no child topic clearly matches. Never mix questions across major sections and never guess or use a default topic. "
                 + "Return the exact topicId and exact topic name/code in skill. Use null only when the source gives no reliable skill context. "
                 + "For every question include sourceQuestionNumber exactly as printed in the source, or null if no number is shown. "
-                + "Also include sourceSectionOrder, sourceSectionTitle, sourceSectionQuestionStart, sourceSectionQuestionEnd, and sectionInstructions copied from the nearest original section headings and directions; repeat section metadata for every question in that section. The start/end fields must preserve the printed range such as Questions 1-10, not just the current question number. Include stimulusContent when questions depend on a shared passage, note, chart description, or scenario; otherwise use an empty string. "
+                + "For FILL_BLANK questions, include the numbered blank marker such as [8] at the exact answer location in content; "
+                + "never leave a blank's number as an unmarked trailing digit. Represent each numbered blank as its own question. "
+                + "CRITICAL — TWO-LEVEL EXAM STRUCTURE: Exams have two distinct hierarchy levels that must NOT be confused:\n"
+                + "LEVEL 1 — SECTION (parent): Top-level headings such as 'SECTION I', 'SECTION II', 'PART I', 'PART II', "
+                + "'Listening Section', 'Reading Part', or any equivalent major division of the exam. "
+                + "Populate: sourceSectionOrder (1,2,3...), sourceSectionTitle (the exact heading, e.g. 'SECTION I'), "
+                + "sourceSectionQuestionStart (the overall start of the section, e.g. 'Questions 1'), "
+                + "sourceSectionQuestionEnd (overall end, e.g. 'Questions 40'), sectionInstructions (section-level general directions). "
+                + "stimulusContent is for a shared reading passage or scenario that covers the entire section.\n"
+                + "LEVEL 2 — QUESTION GROUP (child): Sub-headings inside a section, typically 'Questions 1-4', 'Questions 5-10', "
+                + "or task-specific instructions like 'Complete the table below. Write NO MORE THAN TWO WORDS'. "
+                + "Populate: sourceGroupOrder (1,2,3... within the section), sourceGroupTitle (the printed sub-heading, e.g. 'Questions 1-4'), "
+                + "sourceGroupQuestionStart (the starting question of this group, e.g. '1'), "
+                + "sourceGroupQuestionEnd (the ending question of this group, e.g. '4'), "
+                + "groupInstruction (the specific task instruction for this group, e.g. 'Choose the correct letter, A, B or C'), "
+                + "groupStimulusContent (a passage/text shared only by questions in this group, if different from the section stimulus).\n"
+                + "RULE: NEVER put a 'Questions X-Y' group header in sourceSectionTitle. That belongs in sourceGroupTitle. "
+                + "If there is no explicit parent section heading printed in the PDF, set sourceSectionTitle to null. "
+                + "Repeat all section metadata (sourceSectionOrder, sourceSectionTitle, sourceSectionQuestionStart, sourceSectionQuestionEnd, sectionInstructions, stimulusContent) "
+                + "for EVERY question in that section. Repeat all group metadata (sourceGroupOrder, sourceGroupTitle, sourceGroupQuestionStart, sourceGroupQuestionEnd, groupInstruction, groupStimulusContent) "
+                + "for EVERY question in that group. The printed ranges like 'Questions 1-10' in start/end fields must reflect the full section range, not just the current question number.\n"
                 + topicsHint
                 + "Return only a JSON array. Each object: questionType (MULTIPLE_CHOICE, TRUE_FALSE, FILL_BLANK, ESSAY), "
                 + "difficulty (EASY, MEDIUM, HARD), topicId (Long, matching one of available topics if detected, or null), "
                 + "skill (string name/code of skill if detected), sourceQuestionNumber (string or null), sourcePageNumber (integer or null), "
-                + "sourceSectionOrder (integer or null), sourceSectionTitle (string or null), sourceSectionQuestionStart (string or null), sourceSectionQuestionEnd (string or null), sectionInstructions (string or empty), stimulusContent (string or empty), "
+                + "sourceSectionOrder (integer or null), sourceSectionTitle (string or null), "
+                + "sourceSectionQuestionStart (string or null), sourceSectionQuestionEnd (string or null), "
+                + "sectionInstructions (string or empty), stimulusContent (string or empty), "
+                + "sourceGroupOrder (integer or null), sourceGroupTitle (string or null), "
+                + "sourceGroupQuestionStart (string or null), sourceGroupQuestionEnd (string or null), "
+                + "groupInstruction (string or empty), groupStimulusContent (string or empty), "
                 + "content, options [{label,text}], correctAnswer, explanation, points. "
                 + "For MCQ correctAnswer must be an option label. Use [] for options on non-MCQ questions. "
                 + "Do not claim certainty when a question is ambiguous; state uncertainty in explanation.";
-        List<AnalysisChunk> chunks = isExamScannedPdf ? splitPdf(examFileBytes) : splitText(examText);
+        List<AnalysisChunk> scannedPdfSource = isExamScannedPdf ? fullPdfChunk(examFileBytes) : List.of();
+        final int scanPageCount = isExamScannedPdf ? scannedPdfSource.get(0).lastPage() : 0;
+        final int scanOcrProgressTotal = isExamScannedPdf ? scanPageCount + 1 : 0;
+        int progressTotal = scanOcrProgressTotal;
+        List<AnalysisChunk> chunks;
+        if (isExamScannedPdf) {
+            progress.accept(0, progressTotal);
+            examText = ocrScannedPdf(examFileBytes,
+                    completed -> progress.accept(completed, scanOcrProgressTotal));
+            if (examText.length() > MAX_PROMPT_CHARS) {
+                throw new IllegalArgumentException("Bản OCR đầy đủ vượt giới hạn một lần phân tích. Không có nội dung nào bị cắt; "
+                        + "hãy dùng PDF gọn hơn hoặc chia tài liệu theo section hoàn chỉnh.");
+            }
+            chunks = List.of(new AnalysisChunk(examText, null, 1, scanPageCount));
+            progressTotal = scanPageCount + 1;
+            progress.accept(scanPageCount, progressTotal);
+        } else {
+            chunks = List.of(new AnalysisChunk(examText, null, 0, 0));
+            progressTotal = 1;
+            progress.accept(0, progressTotal);
+        }
         if (chunks.isEmpty()) throw new IllegalArgumentException("Không tìm thấy nội dung đề để phân tích.");
-        progress.accept(0, chunks.size());
         List<ExamImportQuestion> parsed;
-        Set<String> seenScannedQuestionKeys = new HashSet<>();
         int currentChunk = 0;
         try {
             parsed = new ArrayList<>();
@@ -166,27 +222,39 @@ public class ExamImportServiceImpl implements ExamImportService {
                 currentChunk = index + 1;
                 AnalysisChunk chunk = chunks.get(index);
                 String prompt = "Exam title: " + title.trim() + "\n"
-                        + "This is chunk " + (index + 1) + " of " + chunks.size() + ". Extract only questions present in this chunk; "
-                        + "preserve their original question numbers and do not invent missing questions.\n"
-                        + (chunk.pdfBytes() != null
-                                ? "The exam is a scanned PDF. Perform OCR. This chunk covers target pages "
-                                    + chunk.firstPage() + "-" + chunk.lastPage()
-                                    + "; neighboring pages may be included only as context. Emit questions that begin on target pages only; "
-                                    + "do not repeat questions shown on context-only pages. The application assigns sourcePageNumber from the target page; "
-                                    + "do not infer or change that field.\n"
-                                : "Exam source text:\n[Chunk " + (index + 1) + "/" + chunks.size() + "]\n" + chunk.text())
+                        + (isExamScannedPdf
+                                ? "Analyze the complete OCR transcript as one exam. Preserve all printed question numbers and do not omit items. "
+                                    + "Page markers are context only; sections may continue across page boundaries.\n"
+                                : "Analyze the complete exam source. Preserve original question numbers and do not invent or omit questions.\n")
+                        + (isExamScannedPdf
+                                ? "Complete OCR transcript of the scanned PDF, in original page order. Page markers are context only; "
+                                    + "do not interrupt a section at a page boundary. Include all questions in the declared ranges.\n"
+                                    + chunk.text()
+                                : "Complete exam source text:\n" + chunk.text())
                         + (answerInExam ? "\nThe exam document itself contains the official answer key. Find and match those answers; do not infer answers." : "")
                         + (answerText == null ? "\n\nNo answer-key file was provided. Return empty strings for correctAnswer and explanation." : "\n\nAnswer-key source text:\n" + answerText);
                 String raw = chunk.pdfBytes() != null
-                        ? aiProvider.analyzeDocumentSync(system, prompt, chunk.pdfBytes(), "application/pdf", MAX_SCANNED_PAGE_OUTPUT_TOKENS).trim()
-                        : aiProvider.chatCompletionSync(system, prompt, model, MAX_CHUNK_OUTPUT_TOKENS).trim();
-                List<ExamImportQuestion> partQuestions = parseQuestions(raw);
+                        ? aiProvider.analyzeDocumentSync(system, prompt, chunk.pdfBytes(), "application/pdf", MAX_EXAM_OUTPUT_TOKENS).trim()
+                        : aiProvider.chatCompletionSync(system, prompt, model, MAX_EXAM_OUTPUT_TOKENS).trim();
+                List<ExamImportQuestion> partQuestions;
+                try {
+                    partQuestions = parseQuestions(raw);
+                } catch (JsonProcessingException firstParseFailure) {
+                    log.warn("AI question response was not valid JSON (chunk={}, chars={}); requesting one format correction",
+                            currentChunk, raw.length());
+                    String repairPrompt = "The previous response did not match the required JSON format. "
+                            + "Return only a valid JSON array using the exact question schema from the original task. "
+                            + "Preserve only questions and facts present in the source; do not add, infer, or omit questions. "
+                            + "Correct JSON syntax and required field types only.\n\nOriginal task:\n" + prompt
+                            + "\n\nYour previous response to repair:\n" + raw;
+                    raw = aiProvider.chatCompletionSync(system, repairPrompt, model, MAX_EXAM_OUTPUT_TOKENS).trim();
+                    partQuestions = parseQuestions(raw);
+                }
                 if (partQuestions != null) {
                     for (ExamImportQuestion question : partQuestions) {
-                        if (chunk.pdfBytes() != null) {
+                        if (chunk.pdfBytes() != null && chunk.firstPage() == chunk.lastPage()) {
                             question.setSourcePageNumber(chunk.firstPage());
                         }
-                        if (isExamScannedPdf && !seenScannedQuestionKeys.add(scannedQuestionKey(question))) continue;
                         parsed.add(question);
                     }
                 }
@@ -194,13 +262,14 @@ public class ExamImportServiceImpl implements ExamImportService {
                     prepareQuestionsForPreview(parsed, certTopics, topicId, answerText != null || answerInExam);
                     partialQuestions.accept(List.copyOf(parsed));
                 }
-                progress.accept(index + 1, chunks.size());
+                progress.accept(isExamScannedPdf ? progressTotal : index + 1, progressTotal);
             }
         } catch (Exception exception) {
             log.error("Exam import AI analysis failed (scannedPdf={}, chunk={}/{}): {}",
                     isExamScannedPdf, currentChunk, chunks.size(), deepestMessage(exception), exception);
             throw new IllegalStateException(userFacingAiError(exception), exception);
         }
+        if (isExamScannedPdf) progress.accept(progressTotal, progressTotal);
         if (parsed == null || parsed.isEmpty()) {
             throw new IllegalArgumentException("AI không nhận diện được câu hỏi trong đề.");
         }
@@ -230,6 +299,7 @@ public class ExamImportServiceImpl implements ExamImportService {
             }
             validateQuestion(q, false);
         }
+        enrichQuestionGroups(parsed, examText);
 
         ExamImport examImport = new ExamImport();
         examImport.setTitle(title.trim());
@@ -276,65 +346,450 @@ public class ExamImportServiceImpl implements ExamImportService {
                 question.setExplanation("");
             }
         }
+        enrichQuestionGroups(questions, null);
     }
 
-    private List<AnalysisChunk> splitText(String text) {
-        List<AnalysisChunk> chunks = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        for (String line : text.split("(?<=\\n)")) {
-            String remaining = line;
-            while (remaining.length() > MAX_CHUNK_CHARS) {
-                int splitAt = remaining.lastIndexOf(' ', MAX_CHUNK_CHARS);
-                if (splitAt <= 0) splitAt = MAX_CHUNK_CHARS;
-                appendTextUnit(chunks, current, remaining.substring(0, splitAt));
-                remaining = remaining.substring(splitAt);
-            }
-            appendTextUnit(chunks, current, remaining);
+    private record ExtractedGroupRange(int start, int end, String title, String instruction) {}
+
+    private void enrichQuestionGroups(List<ExamImportQuestion> questions, String sourceContent) {
+        if (questions == null || questions.isEmpty()) return;
+
+        List<ExtractedGroupRange> extractedGroups = extractGroupsFromText(sourceContent);
+
+        for (ExamImportQuestion q : questions) {
+            extractGroupFromInstruction(q.getSectionInstructions(), extractedGroups);
+            extractGroupFromInstruction(q.getGroupInstruction(), extractedGroups);
+            extractGroupFromInstruction(q.getSourceGroupTitle(), extractedGroups);
         }
-        if (!current.isEmpty()) chunks.add(new AnalysisChunk(current.toString(), null, 0, 0));
-        return chunks;
-    }
 
-    private void appendTextUnit(List<AnalysisChunk> chunks, StringBuilder current, String unit) {
-        if (current.length() > 0 && current.length() + unit.length() > MAX_CHUNK_CHARS) {
-            chunks.add(new AnalysisChunk(current.toString(), null, 0, 0));
-            current.setLength(0);
+        java.util.Map<String, List<ExamImportQuestion>> bySection = new java.util.LinkedHashMap<>();
+        for (ExamImportQuestion q : questions) {
+            String secKey = (q.getSourceSectionOrder() != null ? q.getSourceSectionOrder() : 0)
+                    + "|" + (q.getSourceSectionTitle() != null ? q.getSourceSectionTitle().trim().toLowerCase(Locale.ROOT) : "");
+            bySection.computeIfAbsent(secKey, k -> new ArrayList<>()).add(q);
         }
-        current.append(unit);
-    }
 
-    private List<AnalysisChunk> splitPdf(byte[] bytes) {
-        List<AnalysisChunk> chunks = new ArrayList<>();
-        try (PDDocument source = Loader.loadPDF(bytes)) {
-            int pageCount = source.getNumberOfPages();
-            for (int start = 0; start < pageCount; start++) {
-                int end = start;
-                try (PDDocument part = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-                    part.importPage(source.getPage(start));
-                    part.save(output);
-                    chunks.add(new AnalysisChunk(null, output.toByteArray(), start + 1, end + 1));
+        for (List<ExamImportQuestion> sectionQuestions : bySection.values()) {
+            List<Integer> questionNumbers = sectionQuestions.stream()
+                    .map(q -> firstNumber(q.getSourceQuestionNumber()))
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            int minNum = questionNumbers.isEmpty() ? 1 : java.util.Collections.min(questionNumbers);
+            int maxNum = questionNumbers.isEmpty() ? sectionQuestions.size() : java.util.Collections.max(questionNumbers);
+
+            List<ExtractedGroupRange> sectionGroups = extractedGroups.stream()
+                    .filter(g -> g.start <= maxNum && g.end >= minNum)
+                    .sorted(java.util.Comparator.comparingInt(g -> g.start))
+                    .toList();
+
+            if (sectionGroups.size() > 1) {
+                List<ExtractedGroupRange> subGroups = sectionGroups.stream()
+                        .filter(g -> !(g.start == minNum && g.end == maxNum))
+                        .toList();
+                if (!subGroups.isEmpty()) {
+                    sectionGroups = subGroups;
                 }
             }
-        } catch (IOException exception) {
-            throw new IllegalArgumentException("Không thể chia PDF scan thành các phần để OCR.", exception);
+
+            long distinctAiGroups = sectionQuestions.stream()
+                    .map(q -> q.getSourceGroupTitle() != null ? q.getSourceGroupTitle().trim() : "")
+                    .filter(t -> !t.isEmpty() && !t.equalsIgnoreCase(sectionQuestions.get(0).getSourceSectionTitle()))
+                    .distinct().count();
+
+            if (distinctAiGroups > 1) {
+                java.util.Map<String, Integer> groupOrderMap = new java.util.LinkedHashMap<>();
+                for (ExamImportQuestion q : sectionQuestions) {
+                    String title = q.getSourceGroupTitle() != null ? q.getSourceGroupTitle().trim() : "Nhóm 1";
+                    int order = groupOrderMap.computeIfAbsent(title, k -> groupOrderMap.size() + 1);
+                    if (q.getSourceGroupOrder() == null) q.setSourceGroupOrder(order);
+                    if (q.getSourceGroupQuestionStart() == null || q.getSourceGroupQuestionEnd() == null) {
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)\\s*[-–to]+\\s*(\\d+)").matcher(title);
+                        if (m.find()) {
+                            if (q.getSourceGroupQuestionStart() == null) q.setSourceGroupQuestionStart(m.group(1));
+                            if (q.getSourceGroupQuestionEnd() == null) q.setSourceGroupQuestionEnd(m.group(2));
+                        }
+                    }
+                }
+            } else if (!sectionGroups.isEmpty()) {
+                int order = 1;
+                for (ExtractedGroupRange eg : sectionGroups) {
+                    final int currentOrder = order++;
+                    for (ExamImportQuestion q : sectionQuestions) {
+                        Integer qNum = firstNumber(q.getSourceQuestionNumber());
+                        if (qNum != null && qNum >= eg.start && qNum <= eg.end) {
+                            q.setSourceGroupOrder(currentOrder);
+                            q.setSourceGroupTitle(eg.title);
+                            q.setSourceGroupQuestionStart(String.valueOf(eg.start));
+                            q.setSourceGroupQuestionEnd(String.valueOf(eg.end));
+                            if ((q.getGroupInstruction() == null || q.getGroupInstruction().isBlank())
+                                    && eg.instruction != null && !eg.instruction.isBlank()) {
+                                q.setGroupInstruction(eg.instruction);
+                            }
+                        }
+                    }
+                }
+                for (ExamImportQuestion q : sectionQuestions) {
+                    if (q.getSourceGroupOrder() == null) {
+                        q.setSourceGroupOrder(order);
+                        q.setSourceGroupTitle("Questions " + (q.getSourceQuestionNumber() != null ? q.getSourceQuestionNumber() : "1"));
+                    }
+                }
+            } else {
+                String defaultStart = sectionQuestions.get(0).getSourceSectionQuestionStart() != null
+                        ? sectionQuestions.get(0).getSourceSectionQuestionStart() : String.valueOf(minNum);
+                String defaultEnd = sectionQuestions.get(0).getSourceSectionQuestionEnd() != null
+                        ? sectionQuestions.get(0).getSourceSectionQuestionEnd() : String.valueOf(maxNum);
+                String defaultTitle = "Questions " + defaultStart + "–" + defaultEnd;
+                for (ExamImportQuestion q : sectionQuestions) {
+                    if (q.getSourceGroupOrder() == null) q.setSourceGroupOrder(1);
+                    if (q.getSourceGroupTitle() == null || q.getSourceGroupTitle().isBlank()
+                            || q.getSourceGroupTitle().equalsIgnoreCase(q.getSourceSectionTitle())) {
+                        q.setSourceGroupTitle(defaultTitle);
+                    }
+                    if (q.getSourceGroupQuestionStart() == null) q.setSourceGroupQuestionStart(defaultStart);
+                    if (q.getSourceGroupQuestionEnd() == null) q.setSourceGroupQuestionEnd(defaultEnd);
+                    if ((q.getGroupInstruction() == null || q.getGroupInstruction().isBlank())
+                            && q.getSectionInstructions() != null && !q.getSectionInstructions().isBlank()) {
+                        q.setGroupInstruction(q.getSectionInstructions());
+                    }
+                }
+            }
         }
-        return chunks;
+    }
+
+    private List<ExtractedGroupRange> extractGroupsFromText(String text) {
+        List<ExtractedGroupRange> list = new ArrayList<>();
+        if (text == null || text.isBlank()) return list;
+
+        String[] lines = text.split("\\r?\\n");
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "(?i)^\\s*(?:Questions?|Part|Task)?\\s*(\\d+)\\s*[-–to]+\\s*(\\d+)[.:]?\\s*(.*)$");
+
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            java.util.regex.Matcher m = p.matcher(line);
+            if (m.find()) {
+                try {
+                    int start = Integer.parseInt(m.group(1));
+                    int end = Integer.parseInt(m.group(2));
+                    if (end >= start && end - start <= 400) {
+                        String title = "Questions " + start + "–" + end;
+                        String sameLineInstr = m.group(3) != null ? m.group(3).trim() : "";
+                        StringBuilder instr = new StringBuilder();
+                        if (!sameLineInstr.isEmpty()) {
+                            instr.append(sameLineInstr);
+                        } else {
+                            int j = i + 1;
+                            while (j < lines.length && j <= i + 3) {
+                                String nextLine = lines[j].trim();
+                                if (nextLine.isEmpty()) {
+                                    j++;
+                                    continue;
+                                }
+                                if (p.matcher(nextLine).find()
+                                        || nextLine.matches("(?i)^(?:SECTION\\b|PART\\b|[A-D][.)]|\\d+[.)]).*")) {
+                                    break;
+                                }
+                                if (instr.length() > 0) instr.append(" ");
+                                instr.append(nextLine);
+                                j++;
+                            }
+                        }
+                        String finalInstr = instr.toString().trim();
+                        if (finalInstr.matches("(?i)^(?:[A-D][.)]|SECTION\\b|PART\\b).*")) {
+                            finalInstr = "";
+                        }
+                        boolean exists = list.stream().anyMatch(g -> g.start == start && g.end == end);
+                        if (!exists) {
+                            list.add(new ExtractedGroupRange(start, end, title, finalInstr));
+                        }
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return list;
+    }
+
+    private void extractGroupFromInstruction(String text, List<ExtractedGroupRange> target) {
+        if (text == null || text.isBlank()) return;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?i)Questions?\\s*(\\d+)\\s*[-–to]+\\s*(\\d+)").matcher(text);
+        while (m.find()) {
+            try {
+                int start = Integer.parseInt(m.group(1));
+                int end = Integer.parseInt(m.group(2));
+                if (end >= start && end - start <= 400) {
+                    boolean exists = target.stream().anyMatch(g -> g.start == start && g.end == end);
+                    if (!exists) {
+                        String title = "Questions " + start + "–" + end;
+                        String instr = text.substring(m.end()).replaceAll("^[:.\\s-]+", "").trim();
+                        target.add(new ExtractedGroupRange(start, end, title, instr));
+                    }
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+    }
+
+    private List<AnalysisChunk> fullPdfChunk(byte[] bytes) {
+        try (PDDocument source = Loader.loadPDF(bytes)) {
+            int pageCount = source.getNumberOfPages();
+            if (pageCount == 0) throw new IllegalArgumentException("PDF không có trang để OCR.");
+            return List.of(new AnalysisChunk(null, bytes, 1, pageCount));
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Không thể chuẩn bị PDF scan để OCR.", exception);
+        }
+    }
+
+    private String ocrScannedPdf(byte[] bytes, java.util.function.IntConsumer progress) {
+        StringBuilder transcript = new StringBuilder();
+        try (PDDocument source = Loader.loadPDF(bytes)) {
+            int pageCount = source.getNumberOfPages();
+            for (int index = 0; index < pageCount; index++) {
+                String pageText;
+                try (PDDocument page = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    page.importPage(source.getPage(index));
+                    page.save(output);
+                    pageText = aiProvider.analyzeDocumentSync(
+                            "Transcribe all readable text from this scanned exam page verbatim. Preserve printed question numbers, "
+                                    + "headings, instructions, answer choices, blanks, tables, formulas, chart labels, and reading order. "
+                                    + "Keep columns and grouped content distinguishable. Do not summarize, solve, create questions, or omit text. "
+                                    + "Return plain text only.",
+                            "Transcribe PDF page " + (index + 1) + " of " + pageCount
+                                    + ". Preserve section headings, sub-group headings (e.g. Questions 1-4, Questions 5-10), task instructions, and all question ranges verbatim.",
+                            output.toByteArray(), "application/pdf", MAX_SCANNED_PAGE_OCR_TOKENS);
+                }
+                transcript.append("\n\n[PDF PAGE ").append(index + 1).append(" / ").append(pageCount).append("]\n")
+                        .append(pageText == null ? "" : pageText.trim());
+                progress.accept(index + 1);
+            }
+            return transcript.toString().trim();
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Không thể đọc toàn bộ trang PDF để OCR.", exception);
+        }
     }
 
     private record AnalysisChunk(String text, byte[] pdfBytes, int firstPage, int lastPage) {}
 
-    private String scannedQuestionKey(ExamImportQuestion question) {
-        String number = question.getSourceQuestionNumber() == null ? "" : question.getSourceQuestionNumber().trim();
-        String topic = question.getTopicId() == null ? "" : question.getTopicId().toString();
-        if (!number.isBlank()) {
-            return "number:" + number.toLowerCase(Locale.ROOT) + "|topic:" + topic;
+    private void retryMissingScannedQuestions(List<ExamImportQuestion> parsed, List<AnalysisChunk> chunks,
+                                              String system, String title, String answerText,
+                                              boolean answerInExam) {
+        java.util.Map<String, SectionQuestionRange> ranges = new java.util.LinkedHashMap<>();
+        for (ExamImportQuestion question : parsed) {
+            Integer start = firstNumber(question.getSourceSectionQuestionStart());
+            Integer end = firstNumber(question.getSourceSectionQuestionEnd());
+            if (start == null || end == null || end < start || end - start > 499) continue;
+            String key = question.getSourceSectionOrder() + "|" + question.getSourceSectionTitle()
+                    + "|" + start + "|" + end;
+            SectionQuestionRange range = ranges.computeIfAbsent(key, ignored ->
+                    new SectionQuestionRange(question, start, end));
+            Integer questionNumber = firstNumber(question.getSourceQuestionNumber());
+            if (questionNumber != null) range.presentNumbers.add(questionNumber);
+            if (questionNumber != null && question.getSourcePageNumber() != null) {
+                range.pageByQuestionNumber.put(questionNumber, question.getSourcePageNumber());
+            }
         }
-        String content = normalizeAnswerText(question.getContent());
-        String options = question.getOptions() == null ? "" : question.getOptions().stream()
-                .map(option -> option == null ? "" : normalizeAnswerText(option.getLabel())
-                        + ":" + normalizeAnswerText(option.getText()))
-                .collect(java.util.stream.Collectors.joining("|"));
-        return "content:" + topic + "|" + question.getQuestionType() + "|" + content + "|" + options;
+
+        java.util.Map<Integer, List<SectionQuestionRange>> retriesByPage = new java.util.LinkedHashMap<>();
+        for (SectionQuestionRange range : ranges.values()) {
+            for (int number = range.start; number <= range.end; number++) {
+                if (range.presentNumbers.contains(number)) continue;
+                Integer closestPage = range.closestPageFor(number);
+                AnalysisChunk targetChunk = closestPage == null && chunks.size() == 1
+                        ? chunks.get(0)
+                        : chunks.stream()
+                                .filter(item -> item.pdfBytes() != null && closestPage != null
+                                        && closestPage >= item.firstPage() && closestPage <= item.lastPage())
+                                .findFirst().orElse(null);
+                if (targetChunk != null && closestPage != null) retriesByPage.computeIfAbsent(closestPage,
+                        ignored -> new ArrayList<>()).add(range);
+            }
+        }
+
+        if (!ranges.isEmpty() && retriesByPage.isEmpty()
+                && ranges.values().stream().anyMatch(range -> !range.missingNumbers().isEmpty())) {
+            throw new IllegalArgumentException("Chưa xác định được trang PDF của câu thiếu. Hãy đối chiếu cảnh báo và kiểm tra PDF gốc.");
+        }
+
+        for (var retry : retriesByPage.entrySet()) {
+            AnalysisChunk chunk = chunks.stream()
+                    .filter(item -> item.pdfBytes() != null && retry.getKey() >= item.firstPage()
+                            && retry.getKey() <= item.lastPage())
+                    .findFirst().orElse(null);
+            if (chunk == null) continue;
+            List<SectionQuestionRange> pageRanges = retry.getValue().stream().distinct().toList();
+            String targets = pageRanges.stream().map(SectionQuestionRange::retryInstruction)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            String prompt = "Recovery OCR pass for PDF page " + retry.getKey() + ". "
+                    + "The first pass missed the following printed question numbers. Inspect the page carefully, "
+                    + "including its lower portion, columns, tables, labels, and continuation text. "
+                    + "Return every listed question that is actually printed on this page, with all choices/blanks and exact number. "
+                    + "Do not return questions from other sections or invent content.\n" + targets
+                    + (answerInExam ? "\nUse an answer key only if printed on this page." : "\nLeave correctAnswer and explanation empty.")
+                    + (answerText == null ? "" : "\nAnswer-key source text:\n" + answerText);
+            byte[] pageBytes;
+            try {
+                pageBytes = extractPdfPage(chunk.pdfBytes(), retry.getKey());
+            } catch (IOException exception) {
+                throw new IllegalStateException("Không thể tạo trang " + retry.getKey() + " để quét bổ sung.", exception);
+            }
+            String raw = aiProvider.analyzeDocumentSync(system, prompt, pageBytes,
+                    "application/pdf", MAX_EXAM_OUTPUT_TOKENS).trim();
+            List<ExamImportQuestion> recovered;
+            try {
+                recovered = parseQuestions(raw);
+            } catch (JsonProcessingException exception) {
+                throw new IllegalStateException("Không thể đọc kết quả OCR bổ sung cho trang "
+                        + retry.getKey() + ".", exception);
+            }
+            acceptRecoveredQuestions(parsed, recovered, pageRanges, retry.getKey());
+        }
+
+        if (ranges.values().stream().anyMatch(range -> !range.missingNumbers().isEmpty())
+                && chunks.size() == 1) {
+            AnalysisChunk fullDocument = chunks.get(0);
+            java.util.Set<Integer> pagesToRetry = new java.util.TreeSet<>();
+            int pageCount = fullDocument.lastPage();
+            for (SectionQuestionRange range : ranges.values()) {
+                if (range.missingNumbers().isEmpty()) continue;
+                for (int missing : range.missingNumbers()) {
+                    Integer closestPage = range.closestPageFor(missing);
+                    if (closestPage == null) continue;
+                    for (int page = Math.max(1, closestPage - 1);
+                            page <= Math.min(pageCount, closestPage + 2); page++) {
+                        pagesToRetry.add(page);
+                    }
+                }
+            }
+            for (int pageNumber : pagesToRetry) {
+                List<SectionQuestionRange> pageRanges = ranges.values().stream()
+                        .filter(range -> !range.missingNumbers().isEmpty())
+                        .filter(range -> range.closestPageFor(range.missingNumbers().get(0)) == null
+                                || pageNumber >= range.closestPageFor(range.missingNumbers().get(0)) - 1
+                                        && pageNumber <= range.closestPageFor(range.missingNumbers().get(0)) + 2)
+                        .toList();
+                if (pageRanges.isEmpty()) continue;
+                String targets = pageRanges.stream().map(SectionQuestionRange::retryInstruction)
+                        .collect(java.util.stream.Collectors.joining("\n"));
+                String prompt = "The full-PDF OCR and full-PDF recovery both missed some questions. "
+                        + "This is a targeted verification of PDF page " + pageNumber + ". Read this page carefully. "
+                        + "Return only the listed questions that are visibly printed on this page, preserving their exact numbers, "
+                        + "complete text, choices, blanks, and section metadata. Do not invent questions.\n" + targets;
+                String raw;
+                try {
+                    raw = aiProvider.analyzeDocumentSync(system, prompt,
+                            extractPdfPage(fullDocument.pdfBytes(), pageNumber), "application/pdf",
+                            MAX_EXAM_OUTPUT_TOKENS).trim();
+                } catch (IOException exception) {
+                    throw new IllegalStateException("Không thể tạo trang " + pageNumber + " để OCR bổ sung.", exception);
+                }
+                List<ExamImportQuestion> recovered;
+                try {
+                    recovered = parseQuestions(raw);
+                } catch (JsonProcessingException exception) {
+                    throw new IllegalStateException("Không thể đọc kết quả OCR bổ sung cho trang " + pageNumber + ".", exception);
+                }
+                acceptRecoveredQuestions(parsed, recovered, pageRanges, pageNumber);
+            }
+        }
+
+        List<String> stillMissing = ranges.values().stream()
+                .flatMap(range -> range.missingNumbers().stream().map(number ->
+                        (range.sample.getSourceSectionTitle() == null ? "Section" : range.sample.getSourceSectionTitle())
+                                + " " + number))
+                .toList();
+        if (!stillMissing.isEmpty()) log.info("Exam OCR still missing declared questions: {}", String.join(", ", stillMissing));
+    }
+
+    private Integer firstNumber(String value) {
+        if (value == null) return null;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\d+").matcher(value);
+        return matcher.find() ? Integer.valueOf(matcher.group()) : null;
+    }
+
+    private byte[] extractPdfPage(byte[] pdf, int pageNumber) throws IOException {
+        try (PDDocument source = Loader.loadPDF(pdf);
+                PDDocument page = new PDDocument();
+                ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            page.importPage(source.getPage(pageNumber - 1));
+            page.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    private void acceptRecoveredQuestions(List<ExamImportQuestion> parsed,
+                                         List<ExamImportQuestion> recovered,
+                                         List<SectionQuestionRange> ranges,
+                                         Integer fallbackPage) {
+        if (recovered == null) return;
+        for (ExamImportQuestion question : recovered) {
+            Integer number = firstNumber(question.getSourceQuestionNumber());
+            List<SectionQuestionRange> candidates = ranges.stream()
+                    .filter(range -> number != null && range.isMissing(number)).toList();
+            if (question.getSourceSectionOrder() != null) {
+                List<SectionQuestionRange> matchingOrder = candidates.stream()
+                        .filter(range -> question.getSourceSectionOrder().equals(range.sample.getSourceSectionOrder()))
+                        .toList();
+                if (!matchingOrder.isEmpty()) candidates = matchingOrder;
+            }
+            if (candidates.size() != 1) continue;
+            SectionQuestionRange owner = candidates.get(0);
+            question.setSourceSectionOrder(owner.sample.getSourceSectionOrder());
+            question.setSourceSectionTitle(owner.sample.getSourceSectionTitle());
+            question.setSourceSectionQuestionStart(owner.sample.getSourceSectionQuestionStart());
+            question.setSourceSectionQuestionEnd(owner.sample.getSourceSectionQuestionEnd());
+            question.setSectionInstructions(owner.sample.getSectionInstructions());
+            if (question.getSourceGroupOrder() == null) question.setSourceGroupOrder(owner.sample.getSourceGroupOrder());
+            if (question.getSourceGroupTitle() == null) question.setSourceGroupTitle(owner.sample.getSourceGroupTitle());
+            if (question.getSourceGroupQuestionStart() == null) question.setSourceGroupQuestionStart(owner.sample.getSourceGroupQuestionStart());
+            if (question.getSourceGroupQuestionEnd() == null) question.setSourceGroupQuestionEnd(owner.sample.getSourceGroupQuestionEnd());
+            if (question.getGroupInstruction() == null || question.getGroupInstruction().isBlank()) {
+                question.setGroupInstruction(owner.sample.getGroupInstruction());
+            }
+            if (question.getGroupStimulusContent() == null || question.getGroupStimulusContent().isBlank()) {
+                question.setGroupStimulusContent(owner.sample.getGroupStimulusContent());
+            }
+            if (question.getSourcePageNumber() == null) {
+                question.setSourcePageNumber(fallbackPage != null ? fallbackPage : owner.closestPageFor(number));
+            }
+            owner.presentNumbers.add(number);
+            parsed.add(question);
+        }
+    }
+
+    private static final class SectionQuestionRange {
+        private final ExamImportQuestion sample;
+        private final int start;
+        private final int end;
+        private final Set<Integer> presentNumbers = new java.util.HashSet<>();
+        private final java.util.Map<Integer, Integer> pageByQuestionNumber = new java.util.HashMap<>();
+
+        private SectionQuestionRange(ExamImportQuestion sample, int start, int end) {
+            this.sample = sample;
+            this.start = start;
+            this.end = end;
+        }
+
+        private Integer closestPageFor(int missingNumber) {
+            return pageByQuestionNumber.entrySet().stream()
+                    .filter(entry -> entry.getKey() >= start && entry.getKey() <= end)
+                    .min(java.util.Comparator.comparingInt(entry -> Math.abs(entry.getKey() - missingNumber)))
+                    .map(java.util.Map.Entry::getValue)
+                    .orElse(null);
+        }
+
+        private boolean isMissing(int number) {
+            return number >= start && number <= end && !presentNumbers.contains(number);
+        }
+
+        private List<Integer> missingNumbers() {
+            return java.util.stream.IntStream.rangeClosed(start, end)
+                    .filter(number -> !presentNumbers.contains(number)).boxed().toList();
+        }
+
+        private String retryInstruction() {
+            return "Section " + sample.getSourceSectionOrder() + " " + sample.getSourceSectionTitle()
+                    + ", Questions " + start + "-" + end + ": missing " + missingNumbers();
+        }
     }
 
     private void normalizeMultipleChoiceAnswer(ExamImportQuestion question) {
@@ -367,13 +822,36 @@ public class ExamImportServiceImpl implements ExamImportService {
     }
 
     private void normalizeAiQuestion(ExamImportQuestion question) {
-        if (question == null || "MULTIPLE_CHOICE".equalsIgnoreCase(question.getQuestionType())
-                || question.getOptions() == null || question.getOptions().isEmpty()) {
-            return;
+        if (question == null) return;
+        if ("FILL_BLANK".equalsIgnoreCase(question.getQuestionType())) {
+            ensureNumberedBlankMarker(question);
         }
+        if ("MULTIPLE_CHOICE".equalsIgnoreCase(question.getQuestionType())
+                || question.getOptions() == null || question.getOptions().isEmpty()) return;
         log.warn("AI returned answer options for non-MCQ question {}. Ignoring those options.",
                 question.getSourceQuestionNumber() == null ? "without a source number" : question.getSourceQuestionNumber());
         question.setOptions(List.of());
+    }
+
+    private void ensureNumberedBlankMarker(ExamImportQuestion question) {
+        Integer number = firstNumber(question.getSourceQuestionNumber());
+        if (number == null || question.getContent() == null || question.getContent().isBlank()) return;
+        String content = question.getContent();
+        String marker = "[" + number + "]";
+        if (java.util.regex.Pattern.compile("\\[\\s*" + number + "\\s*\\]").matcher(content).find()) return;
+        java.util.regex.Matcher blank = java.util.regex.Pattern.compile("_{2,}|\\.{3,}|\\[\\s*\\]").matcher(content);
+        if (blank.find()) {
+            question.setContent(blank.replaceFirst(java.util.regex.Matcher.quoteReplacement(marker)));
+            return;
+        }
+        java.util.regex.Matcher printedNumber = java.util.regex.Pattern
+                .compile("(?<![\\p{L}\\p{N}])" + number + "(?![\\p{L}\\p{N}])")
+                .matcher(content);
+        if (printedNumber.find()) {
+            question.setContent(printedNumber.replaceFirst(java.util.regex.Matcher.quoteReplacement(marker)));
+            return;
+        }
+        question.setContent(content.trim() + " " + marker);
     }
 
     private boolean sameAnswerText(String answer, String optionText) {
@@ -689,6 +1167,28 @@ public class ExamImportServiceImpl implements ExamImportService {
     }
 
     @Override
+    public ExamImportResponse rescanMissingQuestions(Long importId) {
+        ExamImport item = findPending(importId);
+        if (item.getSourceFileKey() == null || item.getSourceFileName() == null
+                || !item.getSourceFileName().toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+            throw new IllegalArgumentException("Chỉ có thể quét bổ sung từ file PDF gốc đã lưu.");
+        }
+        List<ExamImportQuestion> questions = read(item.getQuestionsJson());
+        ExamImportSourceFile source = getSourceFile(importId);
+        List<AnalysisChunk> sourcePdf = fullPdfChunk(source.content());
+        List<adaptivelearning.module.topics.entity.Topic> certTopics = topics.findByCertificateId(item.getCertificateId()).stream()
+                .filter(adaptivelearning.module.topics.entity.Topic::isActive).toList();
+        String system = "Read only the requested missing questions from the attached exam page. "
+                + "Return a JSON array using the exam question schema. Preserve the exact printed question number and wording; "
+                + "do not invent content or return questions that are not requested. For multiple choice, include all visible choices. "
+                + buildTopicHierarchyHint(certTopics);
+        retryMissingScannedQuestions(questions, sourcePdf, system, item.getTitle(), item.getAnswerContent(), false);
+        prepareQuestionsForPreview(questions, certTopics, item.getTopicId(), item.getAnswerContent() != null);
+        item.setQuestionsJson(write(questions));
+        return toResponse(imports.save(item), questions);
+    }
+
+    @Override
     public ExamImportAnswerKeyResult importAnswerKey(Long importId, MultipartFile answerFile) {
         ExamImport item = findPending(importId);
         if (answerFile == null || answerFile.isEmpty() || answerFile.getSize() > MAX_FILE_BYTES) {
@@ -748,9 +1248,9 @@ public class ExamImportServiceImpl implements ExamImportService {
                     + (answerText == null ? "The answer key is attached as a scanned PDF document." : answerText);
             try {
                 String raw = scannedAnswerPdf == null
-                        ? aiProvider.chatCompletionSync(system, prompt, model, MAX_CHUNK_OUTPUT_TOKENS).trim()
+                        ? aiProvider.chatCompletionSync(system, prompt, model, MAX_ANSWER_MATCH_OUTPUT_TOKENS).trim()
                         : aiProvider.analyzeDocumentSync(system, prompt, scannedAnswerPdf, "application/pdf",
-                                MAX_CHUNK_OUTPUT_TOKENS).trim();
+                                MAX_ANSWER_MATCH_OUTPUT_TOKENS).trim();
                 for (AnswerKeyMatch match : parseAnswerMatches(raw)) {
                     if (match.getQuestionIndex() == null || match.getQuestionIndex() < start + 1
                             || match.getQuestionIndex() > end || match.getCorrectAnswer() == null
@@ -830,6 +1330,16 @@ public class ExamImportServiceImpl implements ExamImportService {
             }
             if (source.getStimulusContent() != null && !source.getStimulusContent().isBlank()) {
                 metadata.put("stimulusContent", source.getStimulusContent());
+            }
+            if (source.getSourceGroupOrder() != null) metadata.put("sourceGroupOrder", source.getSourceGroupOrder());
+            if (source.getSourceGroupTitle() != null) metadata.put("sourceGroupTitle", source.getSourceGroupTitle());
+            if (source.getSourceGroupQuestionStart() != null) metadata.put("sourceGroupQuestionStart", source.getSourceGroupQuestionStart());
+            if (source.getSourceGroupQuestionEnd() != null) metadata.put("sourceGroupQuestionEnd", source.getSourceGroupQuestionEnd());
+            if (source.getGroupInstruction() != null && !source.getGroupInstruction().isBlank()) {
+                metadata.put("groupInstruction", source.getGroupInstruction());
+            }
+            if (source.getGroupStimulusContent() != null && !source.getGroupStimulusContent().isBlank()) {
+                metadata.put("groupStimulusContent", source.getGroupStimulusContent());
             }
             return Question.builder()
                     .certificateId(item.getCertificateId()).topicId(resolvedTopicId)

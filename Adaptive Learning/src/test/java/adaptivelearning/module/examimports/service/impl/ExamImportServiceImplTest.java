@@ -301,7 +301,9 @@ class ExamImportServiceImplTest {
     void scannedPdfUsesDocumentAnalysisAndCreatesPendingImport() throws Exception {
         when(certificates.existsById(1L)).thenReturn(true);
         when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
-                eq("application/pdf"), anyInt())).thenReturn(mcqJson());
+                eq("application/pdf"), anyInt())).thenReturn("Question 1: transcribed question and choices.");
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn(mcqJson());
         when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         var response = service.create(3L, "Scanned exam", 1L, null, blankPdf("scan.pdf"), null);
@@ -310,15 +312,15 @@ class ExamImportServiceImplTest {
         assertEquals(1, response.getQuestionCount());
         verify(aiProvider).analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
                 eq("application/pdf"), anyInt());
-        verify(aiProvider, never()).chatCompletionSync(anyString(), anyString(), anyString(), anyInt());
+        verify(aiProvider).chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt());
         verify(imports).save(any(ExamImport.class));
     }
 
     @Test
-    void longTextIsAnalyzedInSmallChunksAndReportsRealProgress() {
+    void longTextIsAnalyzedAsOneCompleteSourceAndReportsProgress() {
         when(certificates.existsById(1L)).thenReturn(true);
         when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
-                .thenReturn(mcqJson());
+                .thenReturn(questionListJson(12));
         when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
         String content = IntStream.range(1, 13)
                 .mapToObj(index -> "Question " + index + ": " + "context ".repeat(850))
@@ -330,13 +332,27 @@ class ExamImportServiceImplTest {
                 (completed, total) -> progressUpdates.add(completed + "/" + total));
 
         assertEquals(12, response.getQuestionCount());
-        assertEquals("0/12", progressUpdates.get(0));
-        assertEquals("12/12", progressUpdates.get(progressUpdates.size() - 1));
-        verify(aiProvider, times(12)).chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt());
+        assertEquals("0/1", progressUpdates.get(0));
+        assertEquals("1/1", progressUpdates.get(progressUpdates.size() - 1));
+        verify(aiProvider).chatCompletionSync(anyString(), anyString(), eq("test-model"), eq(48_000));
     }
 
     @Test
-    void scannedPdfIsSplitByPagesDeduplicatesContextAndReportsProgress() throws Exception {
+    void retriesOnceWhenAiReturnsInvalidQuestionJson() {
+        when(certificates.existsById(1L)).thenReturn(true);
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn("I found one question, here it is:", mcqJson());
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.create(3L, "Sample exam", 1L, null,
+                textFile("exam.md", "Question text"), null);
+
+        assertEquals(1, response.getQuestionCount());
+        verify(aiProvider, times(2)).chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt());
+    }
+
+    @Test
+    void scannedPdfIsSentWholeAndReportsSinglePassProgress() throws Exception {
         when(certificates.existsById(1L)).thenReturn(true);
         when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
                 eq("application/pdf"), anyInt())).thenAnswer(invocation -> {
@@ -344,20 +360,71 @@ class ExamImportServiceImplTest {
                     try (PDDocument document = Loader.loadPDF(part)) {
                         assertEquals(1, document.getNumberOfPages());
                     }
-                    return mcqJson();
+                    return "Transcribed page content";
+                });
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenAnswer(invocation -> {
+                    String fullTranscriptPrompt = invocation.getArgument(1);
+                    assertTrue(fullTranscriptPrompt.contains("[PDF PAGE 1 / 22]"));
+                    assertTrue(fullTranscriptPrompt.contains("[PDF PAGE 22 / 22]"));
+                    return sectionQuestionsJson(1, 10);
                 });
         when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
         List<String> progressUpdates = new ArrayList<>();
 
         var response = service.createWithProgress(3L, "Scanned exam", 1L, null,
-                blankPdfPages("scan.pdf", 5), null, false,
+                blankPdfPages("scan.pdf", 22), null, false,
                 (completed, total) -> progressUpdates.add(completed + "/" + total));
 
-        assertEquals(1, response.getQuestionCount());
-        assertEquals("0/5", progressUpdates.get(0));
-        assertEquals("5/5", progressUpdates.get(progressUpdates.size() - 1));
-        verify(aiProvider, times(5)).analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+        assertEquals(10, response.getQuestionCount());
+        assertEquals("0/23", progressUpdates.get(0));
+        assertEquals("23/23", progressUpdates.get(progressUpdates.size() - 1));
+        verify(aiProvider, times(22)).analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
                 eq("application/pdf"), anyInt());
+        verify(aiProvider).chatCompletionSync(anyString(), anyString(), eq("test-model"), eq(48_000));
+    }
+
+    @Test
+    void scannedPdfAnalyzesLongOcrTranscriptInOneRequest() throws Exception {
+        when(certificates.existsById(1L)).thenReturn(true);
+        when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt())).thenReturn("x".repeat(7_000));
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenAnswer(new org.mockito.stubbing.Answer<>() {
+                    @Override
+                    public String answer(org.mockito.invocation.InvocationOnMock invocation) {
+                        String prompt = invocation.getArgument(1);
+                        assertTrue(prompt.contains("complete OCR transcript"));
+                        assertTrue(prompt.contains("[PDF PAGE 1 / 2]"));
+                        assertTrue(prompt.contains("[PDF PAGE 2 / 2]"));
+                        return questionListJson(3);
+                    }
+                });
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        List<String> progressUpdates = new ArrayList<>();
+
+        var response = service.createWithProgress(3L, "Scanned exam", 1L, null,
+                blankPdfPages("scan.pdf", 2), null, false,
+                (completed, total) -> progressUpdates.add(completed + "/" + total));
+
+        assertEquals(3, response.getQuestionCount());
+        verify(aiProvider).chatCompletionSync(anyString(), anyString(), eq("test-model"), eq(48_000));
+        assertEquals("3/3", progressUpdates.get(progressUpdates.size() - 1));
+    }
+
+    @Test
+    void fillBlankQuestionMarksItsNumberAtTheBlankLocation() {
+        when(certificates.existsById(1L)).thenReturn(true);
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn("[{\"questionType\":\"FILL_BLANK\",\"difficulty\":\"MEDIUM\","
+                        + "\"content\":\"Now perform dances for the benefit of 8\","
+                        + "\"sourceQuestionNumber\":\"8\",\"points\":1}]");
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.create(3L, "Listening section", 1L, null,
+                textFile("exam.txt", "Questions 1-10. Complete the sentences."), null);
+
+        assertEquals("Now perform dances for the benefit of [8]", response.getQuestions().get(0).getContent());
     }
 
     @Test
@@ -365,8 +432,9 @@ class ExamImportServiceImplTest {
         when(certificates.existsById(1L)).thenReturn(true);
         when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
                 eq("application/pdf"), anyInt()))
-                .thenReturn(scannedQuestionJson("11", 1))
-                .thenReturn(scannedQuestionJson("12", 1));
+                .thenReturn("Transcribed page content");
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn(scannedQuestionsJson());
         when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         var response = service.create(3L, "Scanned exam", 1L, null,
@@ -381,32 +449,146 @@ class ExamImportServiceImplTest {
     }
 
     @Test
-    void scannedPdfDeduplicatesSameSourceQuestionWhenOcrTextDiffersAcrossContextPages() throws Exception {
+    void scannedPdfKeepsInitialResultsAndReportsMissingQuestionsForLaterRescan() throws Exception {
+        when(certificates.existsById(1L)).thenReturn(true);
+        when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt())).thenReturn("Transcribed page");
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn(sectionQuestionsJson(1, 7));
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.create(3L, "Scanned exam", 1L, null,
+                blankPdfPages("scan.pdf", 2), null);
+
+        assertEquals(7, response.getQuestionCount());
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7"),
+                response.getQuestions().stream()
+                        .map(adaptivelearning.module.examimports.dto.ExamImportQuestion::getSourceQuestionNumber)
+                        .toList());
+        verify(aiProvider, times(2)).analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt());
+    }
+
+    @Test
+    void scannedPdfDoesNotAutomaticallyRescanMissingQuestions() throws Exception {
+        when(certificates.existsById(1L)).thenReturn(true);
+        when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt())).thenAnswer(invocation -> {
+                    String prompt = invocation.getArgument(1);
+                    if (prompt.contains("Transcribe all readable text")) return "Transcribed page";
+                    return "[]";
+                });
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn(sectionQuestionJson(26, 26, 36, 16, 3));
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.create(3L, "Scanned exam", 1L, null,
+                blankPdfPages("scan.pdf", 18), null);
+
+        assertEquals(1, response.getQuestionCount());
+        assertEquals("26", response.getQuestions().get(0).getSourceQuestionNumber());
+        verify(aiProvider, times(18)).analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt());
+    }
+
+    @Test
+    void rescanMissingQuestionsReadsOnlyTargetPagesAndMergesRecoveredItems() throws Exception {
+        ExamImport item = pendingImport(61L, 3L);
+        item.setCertificateId(1L);
+        item.setTitle("Scanned exam");
+        item.setSourceFileKey("source-key");
+        item.setSourceFileName("scan.pdf");
+        item.setSourceFileContentType("application/pdf");
+        item.setQuestionsJson("[" + scannedQuestionWithRangeJson(1, 1, 1, 3, 1) + ","
+                + scannedQuestionWithRangeJson(3, 2, 1, 3, 1) + "]");
+        when(imports.findById(61L)).thenReturn(Optional.of(item));
+        when(topics.findByCertificateId(1L)).thenReturn(List.of());
+        when(fileStorage.read("source-key")).thenReturn(blankPdfPages("scan.pdf", 2).getBytes());
+        when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt())).thenAnswer(invocation -> {
+                    byte[] pageBytes = invocation.getArgument(2);
+                    try (PDDocument page = Loader.loadPDF(pageBytes)) {
+                        assertEquals(1, page.getNumberOfPages());
+                    }
+                    String prompt = invocation.getArgument(1);
+                    return prompt.contains("page 2")
+                            ? "[" + scannedQuestionWithRangeJson(2, 2, 1, 3, 1) + "]" : "[]";
+                });
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.rescanMissingQuestions(61L);
+
+        assertEquals(3, response.getQuestionCount());
+        assertEquals(List.of("1", "3", "2"), response.getQuestions().stream()
+                .map(adaptivelearning.module.examimports.dto.ExamImportQuestion::getSourceQuestionNumber).toList());
+        verify(aiProvider, org.mockito.Mockito.atLeastOnce()).analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
+                eq("application/pdf"), anyInt());
+    }
+
+    @Test
+    void scannedPdfKeepsSameQuestionNumberWhenSeparatePagesContainDifferentQuestions() throws Exception {
         when(certificates.existsById(1L)).thenReturn(true);
         when(aiProvider.analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
                 eq("application/pdf"), anyInt())).thenAnswer(new org.mockito.stubbing.Answer<>() {
-                    private int page;
-
                     @Override
                     public String answer(org.mockito.invocation.InvocationOnMock invocation) {
-                        page++;
-                        return "[{\"questionType\":\"MULTIPLE_CHOICE\",\"difficulty\":\"MEDIUM\","
-                                + "\"content\":\"OCR variant " + page + "?\",\"options\":["
-                                + "{\"label\":\"A\",\"text\":\"One " + page + "\"},"
-                                + "{\"label\":\"B\",\"text\":\"Two\"}],\"correctAnswer\":\"A\","
-                                + "\"sourceQuestionNumber\":\"24\",\"topicId\":2,"
-                                + "\"explanation\":\"From source\",\"points\":1}]";
+                        String first = scannedQuestionJson("24", 2);
+                        String second = scannedQuestionJson("24", 4).replace("Question 24?", "Different Question 24?");
+                        return "[" + first.substring(1, first.length() - 1) + ","
+                                + second.substring(1, second.length() - 1) + "]";
                     }
                 });
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn(scannedRepeatedQuestionsJson());
         when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         var response = service.create(3L, "Scanned exam", 1L, null,
                 blankPdfPages("scan.pdf", 5), null);
 
-        assertEquals(1, response.getQuestionCount());
+        assertEquals(2, response.getQuestionCount());
         assertEquals("24", response.getQuestions().get(0).getSourceQuestionNumber());
+        assertEquals(List.of(2, 4), response.getQuestions().stream()
+                .map(adaptivelearning.module.examimports.dto.ExamImportQuestion::getSourcePageNumber).toList());
         verify(aiProvider, times(5)).analyzeDocumentSync(anyString(), anyString(), any(byte[].class),
                 eq("application/pdf"), anyInt());
+    }
+
+    @Test
+    void extractsQuestionGroupsWithRangesAndInstructionsWithinSection() throws Exception {
+        when(certificates.existsById(1L)).thenReturn(true);
+        String aiResponse = sectionQuestionsJsonWithRange(1, 10, 1, 10, 1);
+        when(aiProvider.chatCompletionSync(anyString(), anyString(), eq("test-model"), anyInt()))
+                .thenReturn(aiResponse);
+        when(imports.save(any(ExamImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        String sourceExam = "SECTION 1\nQuestions 1-10\n\n"
+                + "Questions 1-4\nComplete the sentences below.\n\n"
+                + "Questions 5-10\nChoose the correct answer.\n";
+
+        var response = service.create(3L, "Exam with groups", 1L, null,
+                textFile("exam.md", sourceExam), null);
+
+        assertEquals(10, response.getQuestionCount());
+        var q1 = response.getQuestions().get(0);
+        var q4 = response.getQuestions().get(3);
+        var q5 = response.getQuestions().get(4);
+        var q10 = response.getQuestions().get(9);
+
+        // Group 1: Questions 1-4
+        assertEquals(1, q1.getSourceGroupOrder());
+        assertEquals("Questions 1–4", q1.getSourceGroupTitle());
+        assertEquals("1", q1.getSourceGroupQuestionStart());
+        assertEquals("4", q1.getSourceGroupQuestionEnd());
+        assertEquals("Complete the sentences below.", q1.getGroupInstruction());
+        assertEquals(1, q4.getSourceGroupOrder());
+
+        // Group 2: Questions 5-10
+        assertEquals(2, q5.getSourceGroupOrder());
+        assertEquals("Questions 5–10", q5.getSourceGroupTitle());
+        assertEquals("5", q5.getSourceGroupQuestionStart());
+        assertEquals("10", q5.getSourceGroupQuestionEnd());
+        assertEquals("Choose the correct answer.", q5.getGroupInstruction());
+        assertEquals(2, q10.getSourceGroupOrder());
     }
 
     @Test
@@ -605,5 +787,49 @@ class ExamImportServiceImplTest {
                 + "\"options\":[{\"label\":\"A\",\"text\":\"One\"},{\"label\":\"B\",\"text\":\"Two\"}],"
                 + "\"correctAnswer\":\"A\",\"explanation\":\"Because\",\"points\":1,"
                 + "\"sourceQuestionNumber\":\"" + number + "\",\"sourcePageNumber\":" + incorrectPage + "}]";
+    }
+
+    private String scannedQuestionsJson() {
+        String first = scannedQuestionJson("11", 1);
+        String second = scannedQuestionJson("12", 2);
+        return "[" + first.substring(1, first.length() - 1) + ","
+                + second.substring(1, second.length() - 1) + "]";
+    }
+
+    private String scannedRepeatedQuestionsJson() {
+        String first = scannedQuestionJson("24", 2);
+        String second = scannedQuestionJson("24", 4).replace("Question 24?", "Different Question 24?");
+        return "[" + first.substring(1, first.length() - 1) + ","
+                + second.substring(1, second.length() - 1) + "]";
+    }
+
+    private String sectionQuestionsJson(int start, int end) {
+        return sectionQuestionsJsonWithRange(start, end, 1, 10, 2);
+    }
+
+    private String sectionQuestionsJsonWithRange(int start, int end, int rangeStart, int rangeEnd, int page) {
+        return IntStream.rangeClosed(start, end).mapToObj(number ->
+                        "{\"questionType\":\"MULTIPLE_CHOICE\",\"difficulty\":\"MEDIUM\","
+                                + "\"content\":\"Question " + number + "?\","
+                                + "\"options\":[{\"label\":\"A\",\"text\":\"One\"},{\"label\":\"B\",\"text\":\"Two\"}],"
+                                + "\"correctAnswer\":\"A\",\"points\":1,"
+                                + "\"sourceQuestionNumber\":\"" + number + "\","
+                                + "\"sourcePageNumber\":" + page + ","
+                                + "\"sourceSectionOrder\":1,\"sourceSectionTitle\":\"SECTION 1\","
+                                + "\"sourceSectionQuestionStart\":\"" + rangeStart + "\","
+                                + "\"sourceSectionQuestionEnd\":\"" + rangeEnd + "\","
+                                + "\"sectionInstructions\":\"Questions " + rangeStart + "-" + rangeEnd + "\"}")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    }
+
+    private String sectionQuestionJson(int number, int start, int end, int page, int sectionOrder) {
+        return sectionQuestionsJsonWithRange(number, number, start, end, page)
+                .replace("\"sourceSectionOrder\":1", "\"sourceSectionOrder\":" + sectionOrder);
+    }
+
+    private String scannedQuestionWithRangeJson(int number, int page, int rangeStart, int rangeEnd, int sectionOrder) {
+        return sectionQuestionsJsonWithRange(number, number, rangeStart, rangeEnd, page)
+                .replace("\"sourceSectionOrder\":1", "\"sourceSectionOrder\":" + sectionOrder)
+                .substring(1, sectionQuestionsJsonWithRange(number, number, rangeStart, rangeEnd, page).length() - 1);
     }
 }
