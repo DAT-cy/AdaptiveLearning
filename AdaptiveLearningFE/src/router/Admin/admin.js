@@ -43,7 +43,7 @@ export default [
     component: adminHome,
   },
   {
-    path: '/admin/:section(overview|accounts|billing|results|programs|exams|knowledge)',
+    path: '/admin/:section(overview|accounts|billing|results|programs|exams|knowledge|question-bank|exam-sets)',
     name: 'AdminSection',
     meta: {
       title: 'Quản trị hệ thống',

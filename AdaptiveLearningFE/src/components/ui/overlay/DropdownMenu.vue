@@ -4,10 +4,6 @@ import {
   DropdownMenuPortal,
   DropdownMenuRoot,
   DropdownMenuTrigger,
-  TooltipContent,
-  TooltipPortal,
-  TooltipRoot,
-  TooltipTrigger,
 } from 'reka-ui'
 
 /** Keyboard-navigable dropdown menu with collision-aware positioning. */
@@ -29,13 +25,7 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 
 <template>
   <DropdownMenuRoot v-bind="open !== undefined ? { open } : {}" @update:open="emit('update:open', $event)">
-    <TooltipRoot v-if="triggerLabel" :delay-duration="400" ignore-non-keyboard-focus>
-      <TooltipTrigger as-child>
-        <DropdownMenuTrigger as-child><slot name="trigger" /></DropdownMenuTrigger>
-      </TooltipTrigger>
-      <TooltipPortal><TooltipContent class="overlay-tooltip" :side-offset="6">{{ triggerLabel }}</TooltipContent></TooltipPortal>
-    </TooltipRoot>
-    <DropdownMenuTrigger v-else as-child><slot name="trigger" /></DropdownMenuTrigger>
+    <DropdownMenuTrigger as-child :title="triggerLabel"><slot name="trigger" /></DropdownMenuTrigger>
     <DropdownMenuPortal>
       <DropdownMenuContent class="overlay-menu" :side="side" :align="align" :side-offset="sideOffset" :collision-padding="8" :avoid-collisions="true" loop>
         <slot />

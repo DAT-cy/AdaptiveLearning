@@ -7,7 +7,11 @@ export type OverlayVariant = 'default' | 'danger' | 'success'
 export interface ConfirmOptions {
   title: string
   description?: string
+  /** Backwards-compatible alias used by older pages. */
+  message?: string
   confirmText?: string
+  /** Backwards-compatible alias used by older pages. */
+  confirmLabel?: string
   cancelText?: string
   variant?: 'default' | 'danger'
 }

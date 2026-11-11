@@ -21,7 +21,7 @@ public class StudyDocument extends BaseEntity {
     @Column(name = "is_active", nullable = false, columnDefinition = "BOOLEAN DEFAULT TRUE")
     private boolean active = true;
     @NotBlank @Size(max = 200) @Column(nullable = false, length = 200) private String title;
-    private String fileName; private String storagePath; private String mimeType;
+    private String fileName; @Column(length = 1000) private String storagePath; private String mimeType;
     @Column(name = "source_content", columnDefinition = "LONGTEXT")
     private String sourceContent;
     @Enumerated(EnumType.STRING) @Builder.Default @Column(nullable = false) private DocumentStatus status = DocumentStatus.UPLOADED;

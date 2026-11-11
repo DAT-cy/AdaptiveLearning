@@ -52,8 +52,15 @@ public class ExamController {
     @GetMapping("/{id}/detail")
     @Operation(summary = "Get exam detail including questions")
     public ResponseEntity<DefaultRes<ExamDetailResponse>> detail(@PathVariable Long id) {
-        ExamDetailResponse data = examService.getVisibleDetail(id, SecurityUtils.getCurrentUserId(),
-                SecurityUtils.hasRole(adaptivelearning.module.users.entity.Role.ROLE_ADMIN));
+        boolean admin = SecurityUtils.hasRole(adaptivelearning.module.users.entity.Role.ROLE_ADMIN);
+        ExamDetailResponse data = examService.getVisibleDetail(id, SecurityUtils.getCurrentUserId(), admin);
+        if (!admin && data.getQuestions() != null) {
+            data.getQuestions().forEach(question -> {
+                question.setCorrectAnswer(null);
+                question.setExplanation(null);
+                question.setQuestionStatus(null);
+            });
+        }
         return ResponseEntity.ok(DefaultRes.res(StatusCode.OK, ResponseMessage.GET_ONE, data));
     }
 

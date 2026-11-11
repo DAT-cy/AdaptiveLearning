@@ -48,4 +48,6 @@ public interface ExamImportService {
     ExamImportResponse rescanMissingQuestions(Long importId);
     ExamImportAnswerKeyResult importAnswerKey(Long importId, MultipartFile answerFile);
     ExamImportResponse confirm(Long importId);
+    List<ExamImportResponse> confirmed();
+    ExamImportResponse setActive(Long importId, boolean active);
 }

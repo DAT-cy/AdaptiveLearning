@@ -10,8 +10,10 @@ import java.util.HexFormat;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 @Service
+@ConditionalOnProperty(name = "cloudinary.enabled", havingValue = "false", matchIfMissing = true)
 public class LocalFileStorage implements FileStorage {
     private final Path root;
 

@@ -1043,7 +1043,7 @@ onUnmounted(() => {
         </div>
       </div>
       <template #footer>
-        <button class="primary-button" @click="supportModalOpen = false">Đã hiểu</button>
+        <button type="button" class="primary-button" @click="supportModalOpen = false">Đã hiểu</button>
       </template>
     </Modal>
 
@@ -1057,7 +1057,7 @@ onUnmounted(() => {
         </div>
       </div>
       <template #footer>
-        <button class="primary-button" @click="aboutModalOpen = false">Đóng</button>
+        <button type="button" class="primary-button" @click="aboutModalOpen = false">Đóng</button>
       </template>
     </Modal>
 
@@ -1067,7 +1067,7 @@ onUnmounted(() => {
         <p class="notice notice-danger" role="status">Tính năng đổi mật khẩu chưa được kết nối với API. Mật khẩu của bạn chưa thay đổi.</p>
       </div>
       <template #footer>
-        <button class="primary-button" @click="passwordModalOpen = false">Đóng</button>
+        <button type="button" class="primary-button" @click="passwordModalOpen = false">Đóng</button>
       </template>
     </Modal>
   </main>

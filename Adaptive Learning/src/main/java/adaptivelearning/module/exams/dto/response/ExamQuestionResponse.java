@@ -1,6 +1,8 @@
 package adaptivelearning.module.exams.dto.response;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import adaptivelearning.shared.enums.ContentStatus;
+import adaptivelearning.shared.enums.QuestionDifficulty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -30,4 +32,16 @@ public class ExamQuestionResponse {
 
     @Schema(description = "Section name", example = "Reading Part 1")
     private String sectionName;
+
+    private Long topicId;
+    private String questionType;
+    private QuestionDifficulty difficulty;
+    private String content;
+    private String contentJson;
+    private String optionsJson;
+    private String correctAnswer;
+    private String explanation;
+    private double points;
+    private String tags;
+    private ContentStatus questionStatus;
 }

@@ -1,0 +1,124 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "org.springframework",
+    "module": "spring-webflux",
+    "version": "6.1.4",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.6"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.springframework",
+          "module": "spring-beans",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-core",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-web",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "io.projectreactor",
+          "module": "reactor-core",
+          "version": {
+            "requires": "3.6.3"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spring-webflux-6.1.4.jar",
+          "url": "spring-webflux-6.1.4.jar",
+          "size": 978216,
+          "sha512": "4d57ad59cf6ad975ba97de56189a9d27cee1aee98162c9498be907a311ad3cd94c6ab0a83079b11abc8c684c35047c5a4d11ed080ab304196b30b09a4fcaeb72",
+          "sha256": "d12b899255a8c7cbe08c905dc39287236198f9327fa2ea46705bf2c210147378",
+          "sha1": "c559d4e0c44a735dc4fcd09bed6e7981903f9e0a",
+          "md5": "1a1aa8fb4554ae82097a246600a3b1c0"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.springframework",
+          "module": "spring-beans",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-core",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-web",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "io.projectreactor",
+          "module": "reactor-core",
+          "version": {
+            "requires": "3.6.3"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spring-webflux-6.1.4.jar",
+          "url": "spring-webflux-6.1.4.jar",
+          "size": 978216,
+          "sha512": "4d57ad59cf6ad975ba97de56189a9d27cee1aee98162c9498be907a311ad3cd94c6ab0a83079b11abc8c684c35047c5a4d11ed080ab304196b30b09a4fcaeb72",
+          "sha256": "d12b899255a8c7cbe08c905dc39287236198f9327fa2ea46705bf2c210147378",
+          "sha1": "c559d4e0c44a735dc4fcd09bed6e7981903f9e0a",
+          "md5": "1a1aa8fb4554ae82097a246600a3b1c0"
+        }
+      ]
+    }
+  ]
+}

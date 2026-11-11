@@ -34,6 +34,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -139,7 +140,28 @@ public class ExamImportServiceImpl implements ExamImportService {
             }
         }
 
-        String answerText = answerFile == null || answerFile.isEmpty() ? null : extract(answerFile, "đáp án");
+        String answerText = null;
+        byte[] scannedAnswerPdf = null;
+        if (answerFile != null && !answerFile.isEmpty()) {
+            try {
+                answerText = extract(answerFile, "đáp án");
+            } catch (IllegalArgumentException exception) {
+                String answerFilename = answerFile.getOriginalFilename();
+                if (answerFilename == null || !answerFilename.toLowerCase(Locale.ROOT).endsWith(".pdf")
+                        || !exception.getMessage().contains("không có lớp văn bản")) {
+                    throw exception;
+                }
+                try {
+                    scannedAnswerPdf = answerFile.getBytes();
+                    answerText = aiProvider.analyzeDocumentSync(
+                            "Transcribe the complete answer key from this scanned PDF verbatim. Preserve every question number and answer label or answer text. Return plain text only; do not solve or infer missing answers.",
+                            "Transcribe this answer key in its original order.", scannedAnswerPdf, "application/pdf",
+                            MAX_EXAM_OUTPUT_TOKENS).trim();
+                } catch (IOException ioException) {
+                    throw new IllegalArgumentException("Không thể đọc file đáp án.", ioException);
+                }
+            }
+        }
         if (!isExamScannedPdf && examText.length() + (answerText == null ? 0 : answerText.length()) > MAX_PROMPT_CHARS) {
             throw new IllegalArgumentException("Tổng nội dung vượt giới hạn phân tích 120.000 ký tự.");
         }
@@ -166,7 +188,9 @@ public class ExamImportServiceImpl implements ExamImportService {
                 + "Populate: sourceSectionOrder (1,2,3...), sourceSectionTitle (the exact heading, e.g. 'SECTION I'), "
                 + "sourceSectionQuestionStart (the overall start of the section, e.g. 'Questions 1'), "
                 + "sourceSectionQuestionEnd (overall end, e.g. 'Questions 40'), sectionInstructions (section-level general directions). "
-                + "stimulusContent is for a shared reading passage or scenario that covers the entire section.\n"
+                + "stimulusContent is for a shared reading passage or scenario that covers the entire section. "
+                + "For Reading sections, always preserve the complete passage text in stimulusContent or groupStimulusContent "
+                + "and keep the question content separate; never omit a passage merely because it is shared by multiple questions.\n"
                 + "LEVEL 2 — QUESTION GROUP (child): Sub-headings inside a section, typically 'Questions 1-4', 'Questions 5-10', "
                 + "or task-specific instructions like 'Complete the table below. Write NO MORE THAN TWO WORDS'. "
                 + "Populate: sourceGroupOrder (1,2,3... within the section), sourceGroupTitle (the printed sub-heading, e.g. 'Questions 1-4'), "
@@ -228,14 +252,15 @@ public class ExamImportServiceImpl implements ExamImportService {
                                 : "Analyze the complete exam source. Preserve original question numbers and do not invent or omit questions.\n")
                         + (isExamScannedPdf
                                 ? "Complete OCR transcript of the scanned PDF, in original page order. Page markers are context only; "
-                                    + "do not interrupt a section at a page boundary. Include all questions in the declared ranges.\n"
+                                    + "do not interrupt a section at a page boundary. Include all questions in the declared ranges. "
+                                    + "Set sourcePageNumber to the PDF page marker where each question is printed.\n"
                                     + chunk.text()
                                 : "Complete exam source text:\n" + chunk.text())
                         + (answerInExam ? "\nThe exam document itself contains the official answer key. Find and match those answers; do not infer answers." : "")
                         + (answerText == null ? "\n\nNo answer-key file was provided. Return empty strings for correctAnswer and explanation." : "\n\nAnswer-key source text:\n" + answerText);
-                String raw = chunk.pdfBytes() != null
-                        ? aiProvider.analyzeDocumentSync(system, prompt, chunk.pdfBytes(), "application/pdf", MAX_EXAM_OUTPUT_TOKENS).trim()
-                        : aiProvider.chatCompletionSync(system, prompt, model, MAX_EXAM_OUTPUT_TOKENS).trim();
+                // Scanned PDFs were transcribed page by page above. Analyze the transcript as text so the
+                // model can see every page marker instead of repeating a lossy multimodal OCR pass.
+                String raw = aiProvider.chatCompletionSync(system, prompt, model, MAX_EXAM_OUTPUT_TOKENS).trim();
                 List<ExamImportQuestion> partQuestions;
                 try {
                     partQuestions = parseQuestions(raw);
@@ -552,7 +577,9 @@ public class ExamImportServiceImpl implements ExamImportService {
                     pageText = aiProvider.analyzeDocumentSync(
                             "Transcribe all readable text from this scanned exam page verbatim. Preserve printed question numbers, "
                                     + "headings, instructions, answer choices, blanks, tables, formulas, chart labels, and reading order. "
-                                    + "Keep columns and grouped content distinguishable. Do not summarize, solve, create questions, or omit text. "
+                            + "Keep columns and grouped content distinguishable. For Reading passages, preserve the complete passage "
+                            + "including paragraphs, headings, and continuation text before or beside its questions. Do not summarize, "
+                            + "solve, create questions, or omit text. "
                                     + "Return plain text only.",
                             "Transcribe PDF page " + (index + 1) + " of " + pageCount
                                     + ". Preserve section headings, sub-group headings (e.g. Questions 1-4, Questions 5-10), task instructions, and all question ranges verbatim.",
@@ -600,8 +627,15 @@ public class ExamImportServiceImpl implements ExamImportService {
                                 .filter(item -> item.pdfBytes() != null && closestPage != null
                                         && closestPage >= item.firstPage() && closestPage <= item.lastPage())
                                 .findFirst().orElse(null);
-                if (targetChunk != null && closestPage != null) retriesByPage.computeIfAbsent(closestPage,
-                        ignored -> new ArrayList<>()).add(range);
+                if (targetChunk != null && closestPage != null) {
+                    retriesByPage.computeIfAbsent(closestPage, ignored -> new ArrayList<>()).add(range);
+                } else if (targetChunk != null && chunks.size() == 1) {
+                    // Older imports may not have page metadata on their questions. In that case
+                    // verify every page instead of failing the whole request before OCR starts.
+                    for (int page = targetChunk.firstPage(); page <= targetChunk.lastPage(); page++) {
+                        retriesByPage.computeIfAbsent(page, ignored -> new ArrayList<>()).add(range);
+                    }
+                }
             }
         }
 
@@ -634,13 +668,7 @@ public class ExamImportServiceImpl implements ExamImportService {
             }
             String raw = aiProvider.analyzeDocumentSync(system, prompt, pageBytes,
                     "application/pdf", MAX_EXAM_OUTPUT_TOKENS).trim();
-            List<ExamImportQuestion> recovered;
-            try {
-                recovered = parseQuestions(raw);
-            } catch (JsonProcessingException exception) {
-                throw new IllegalStateException("Không thể đọc kết quả OCR bổ sung cho trang "
-                        + retry.getKey() + ".", exception);
-            }
+            List<ExamImportQuestion> recovered = parseRecoveryQuestions(raw, system, prompt, retry.getKey());
             acceptRecoveredQuestions(parsed, recovered, pageRanges, retry.getKey());
         }
 
@@ -682,13 +710,36 @@ public class ExamImportServiceImpl implements ExamImportService {
                 } catch (IOException exception) {
                     throw new IllegalStateException("Không thể tạo trang " + pageNumber + " để OCR bổ sung.", exception);
                 }
-                List<ExamImportQuestion> recovered;
-                try {
-                    recovered = parseQuestions(raw);
-                } catch (JsonProcessingException exception) {
-                    throw new IllegalStateException("Không thể đọc kết quả OCR bổ sung cho trang " + pageNumber + ".", exception);
-                }
+                List<ExamImportQuestion> recovered = parseRecoveryQuestions(raw, system, prompt, pageNumber);
                 acceptRecoveredQuestions(parsed, recovered, pageRanges, pageNumber);
+            }
+
+            // Page metadata from the first OCR pass is only a hint. If the targeted
+            // retries still leave gaps, verify every page so an incorrect page marker
+            // cannot make the missing questions impossible to recover.
+            if (ranges.values().stream().anyMatch(range -> !range.missingNumbers().isEmpty())) {
+                for (int pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+                    List<SectionQuestionRange> pageRanges = ranges.values().stream()
+                            .filter(range -> !range.missingNumbers().isEmpty())
+                            .toList();
+                    if (pageRanges.isEmpty()) break;
+                    String targets = pageRanges.stream().map(SectionQuestionRange::retryInstruction)
+                            .collect(java.util.stream.Collectors.joining("\n"));
+                    String prompt = "Exhaustive verification of PDF page " + pageNumber + ". "
+                            + "Read this page carefully and return only listed questions that are visibly printed here. "
+                            + "Preserve exact printed numbers, complete wording, choices, and section metadata. "
+                            + "Do not invent questions.\n" + targets;
+                    String raw;
+                    try {
+                        raw = aiProvider.analyzeDocumentSync(system, prompt,
+                                extractPdfPage(fullDocument.pdfBytes(), pageNumber), "application/pdf",
+                                MAX_EXAM_OUTPUT_TOKENS).trim();
+                    } catch (IOException exception) {
+                        throw new IllegalStateException("KhĂ´ng thá»ƒ táº¡o trang " + pageNumber + " Ä‘á»ƒ OCR bá»• sung.", exception);
+                    }
+                    acceptRecoveredQuestions(parsed, parseRecoveryQuestions(raw, system, prompt, pageNumber),
+                            pageRanges, pageNumber);
+                }
             }
         }
 
@@ -698,6 +749,24 @@ public class ExamImportServiceImpl implements ExamImportService {
                                 + " " + number))
                 .toList();
         if (!stillMissing.isEmpty()) log.info("Exam OCR still missing declared questions: {}", String.join(", ", stillMissing));
+    }
+
+    private List<ExamImportQuestion> parseRecoveryQuestions(String raw, String system, String prompt, int pageNumber) {
+        try {
+            return parseQuestions(raw);
+        } catch (JsonProcessingException firstFailure) {
+            try {
+                String repairPrompt = "Return only a valid JSON array using the exact exam question schema. "
+                        + "Preserve only questions visibly present on the requested page; do not add, omit, or solve questions.\n\n"
+                        + prompt + "\n\nPrevious OCR response:\n" + raw;
+                return parseQuestions(aiProvider.chatCompletionSync(system, repairPrompt, model,
+                        MAX_EXAM_OUTPUT_TOKENS).trim());
+            } catch (Exception repairFailure) {
+                log.warn("Skipping malformed recovery OCR response for PDF page {}: {}", pageNumber,
+                        deepestMessage(repairFailure));
+                return List.of();
+            }
+        }
     }
 
     private Integer firstNumber(String value) {
@@ -1016,6 +1085,22 @@ public class ExamImportServiceImpl implements ExamImportService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<ExamImportResponse> confirmed() {
+        return imports.findByStatusOrderByCreatedAtDesc(ExamImportStatus.CONFIRMED)
+                .stream().map(this::toSummary).toList();
+    }
+
+    @Override
+    public ExamImportResponse setActive(Long importId, boolean active) {
+        ExamImport item = imports.findById(importId)
+                .filter(candidate -> candidate.getStatus() == ExamImportStatus.CONFIRMED)
+                .orElseThrow(() -> new IllegalArgumentException("Bộ đề chưa được xác nhận hoặc không tồn tại."));
+        item.setActive(active);
+        return toSummary(imports.save(item));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public ExamImportResponse get(Long importId) {
         return get(importId, null);
     }
@@ -1023,7 +1108,8 @@ public class ExamImportServiceImpl implements ExamImportService {
     @Override
     @Transactional(readOnly = true)
     public ExamImportResponse get(Long importId, Long viewerId) {
-        ExamImport item = findPending(importId);
+        ExamImport item = imports.findById(importId)
+                .orElseThrow(() -> new IllegalArgumentException("Bộ đề không tồn tại."));
         return toResponse(item, read(item.getQuestionsJson()), viewerId);
     }
 
@@ -1150,10 +1236,10 @@ public class ExamImportServiceImpl implements ExamImportService {
 
     @Override
     public ExamImportResponse updateQuestions(Long importId, List<ExamImportQuestion> reviewed) {
-        ExamImport item = findPending(importId);
-        List<ExamImportQuestion> existing = read(item.getQuestionsJson());
-        if (reviewed == null || reviewed.size() != existing.size()) {
-            throw new IllegalArgumentException("Cần giữ nguyên số câu đã trích xuất trong bộ đề.");
+        ExamImport item = imports.findById(importId)
+                .orElseThrow(() -> new IllegalArgumentException("Bộ đề không tồn tại."));
+        if (reviewed == null || reviewed.isEmpty()) {
+            throw new IllegalArgumentException("Bộ đề phải có ít nhất một câu hỏi.");
         }
         List<Long> allowedTopicIds = topics.findByCertificateId(item.getCertificateId()).stream()
                 .filter(adaptivelearning.module.topics.entity.Topic::isActive)
@@ -1163,7 +1249,39 @@ public class ExamImportServiceImpl implements ExamImportService {
             validateTopic(question.getTopicId(), item.getTopicId(), allowedTopicIds, false);
         });
         item.setQuestionsJson(write(reviewed));
+        if (item.getStatus() == ExamImportStatus.CONFIRMED) {
+            syncApprovedQuestions(item, reviewed);
+        }
         return toResponse(imports.save(item), reviewed);
+    }
+
+    private void syncApprovedQuestions(ExamImport item, List<ExamImportQuestion> reviewed) {
+        questions.findAll().stream()
+                .filter(question -> question.getTags() != null
+                        && question.getTags().contains("CONFIRMED_EXAM_IMPORT"))
+                .filter(question -> {
+                    try {
+                        var metadata = mapper.readTree(question.getContentJson());
+                        return metadata.path("examImportId").asLong(-1) == item.getImportId();
+                    } catch (Exception ignored) {
+                        return false;
+                    }
+                })
+                .forEach(question -> {
+                    int number;
+                    try { number = mapper.readTree(question.getContentJson()).path("questionNumber").asInt(0); }
+                    catch (Exception ignored) { number = 0; }
+                    if (number < 1 || number > reviewed.size()) return;
+                    ExamImportQuestion source = reviewed.get(number - 1);
+                    question.setTopicId(source.getTopicId() != null ? source.getTopicId() : item.getTopicId());
+                    question.setQuestionType(source.getQuestionType().toUpperCase(Locale.ROOT));
+                    question.setDifficulty(QuestionDifficulty.valueOf(source.getDifficulty().toUpperCase(Locale.ROOT)));
+                    question.setContent(source.getContent().trim());
+                    question.setOptionsJson(write(source.getOptions() == null ? List.of() : source.getOptions()));
+                    question.setCorrectAnswer(write(source.getCorrectAnswer() == null ? "" : source.getCorrectAnswer().trim()));
+                    question.setExplanation(source.getExplanation());
+                    question.setPoints(source.getPoints() == null ? 1.0 : source.getPoints());
+                });
     }
 
     @Override
@@ -1223,6 +1341,21 @@ public class ExamImportServiceImpl implements ExamImportService {
 
         List<ExamImportQuestion> questions = read(item.getQuestionsJson());
         Set<Integer> matchedIndexes = new java.util.HashSet<>();
+        // Answer keys commonly use a compact, deterministic format ("1. A", "2 B",
+        // or "3: C"). Resolve those entries locally so the AI cannot silently omit them.
+        Map<Integer, String> explicitAnswers = parseExplicitAnswerKey(answerText);
+        for (Map.Entry<Integer, String> entry : explicitAnswers.entrySet()) {
+            int index = findQuestionIndex(questions, entry.getKey());
+            if (index < 0) continue;
+            String answer = entry.getValue();
+            if (answer == null || answer.isBlank()) continue;
+            ExamImportQuestion target = questions.get(index);
+            target.setCorrectAnswer(answer.trim());
+            normalizeMultipleChoiceAnswer(target);
+            if (target.getCorrectAnswer() != null && !target.getCorrectAnswer().isBlank()) {
+                matchedIndexes.add(index + 1);
+            }
+        }
         String answerSource = answerText == null ? "Scanned PDF answer key: " + filename : answerText;
         for (int start = 0; start < questions.size(); start += 20) {
             int end = Math.min(start + 20, questions.size());
@@ -1241,7 +1374,8 @@ public class ExamImportServiceImpl implements ExamImportService {
                     + "Do not create questions, change question text, or infer answers not present in the key. "
                     + "Return only a JSON array with questionIndex (the exact 1-based index supplied) and correctAnswer. "
                     + "For MULTIPLE_CHOICE return an existing option label. For other question types return the answer text. "
-                    + "Omit questions whose answer cannot be matched confidently.";
+                    + "Return one mapping for every question in this batch that has an answer in the key; do not omit "
+                    + "a clearly numbered answer. Omit only questions with no corresponding answer at all.";
             String prompt = "Answer key mapping request:\nExam title: " + item.getTitle()
                     + "\nQuestions " + (start + 1) + "-" + end + ":\n"
                     + write(questionSlice) + "\nAnswer key:\n"
@@ -1282,6 +1416,56 @@ public class ExamImportServiceImpl implements ExamImportService {
         ExamImport saved = imports.save(item);
         return ExamImportAnswerKeyResult.builder().examImport(toResponse(saved, questions))
                 .matchedAnswerCount(matchedIndexes.size()).totalQuestionCount(questions.size()).build();
+    }
+
+    private Map<Integer, String> parseExplicitAnswerKey(String answerText) {
+        if (answerText == null || answerText.isBlank()) return Map.of();
+        Map<Integer, String> answers = new java.util.LinkedHashMap<>();
+        // Keep this deliberately line-oriented: it avoids treating numbers in explanations
+        // or question text as answer numbers while accepting the usual key separators.
+        java.util.regex.Pattern line = java.util.regex.Pattern.compile(
+                "(?i)(?:^|[\\n;])\\s*(?:question\\s*)?(\\d{1,4})\\s*[\\.\\):\\-]?\\s*([^\\n;]+)");
+        java.util.regex.Matcher matcher = line.matcher(answerText);
+        while (matcher.find()) {
+            int number;
+            try {
+                number = Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            String value = matcher.group(2).trim();
+            if (value.isEmpty()) continue;
+            // For compact "1. A 2. B" keys, retain only the first token here;
+            // the per-line form above handles the unambiguous common case.
+            String token = value.split("\\s+", 2)[0].replaceAll("[,.)]+$", "");
+            if (!token.isBlank()) answers.putIfAbsent(number, token);
+        }
+        // PDF text extraction often collapses a whole answer-key row onto one line
+        // (for example: "1. A 2. C 3. B"). Pick up those MCQ/true-false tokens too.
+        java.util.regex.Pattern compact = java.util.regex.Pattern.compile(
+                "(?i)(?:^|[\\s;])(?:question\\s*)?(\\d{1,4})\\s*[\\.\\):\\-]\\s*(A|B|C|D|TRUE|FALSE)(?=\\s|$|[,;])");
+        java.util.regex.Matcher compactMatcher = compact.matcher(answerText);
+        while (compactMatcher.find()) {
+            answers.putIfAbsent(Integer.parseInt(compactMatcher.group(1)), compactMatcher.group(2));
+        }
+        java.util.regex.Pattern compactWhitespace = java.util.regex.Pattern.compile(
+                "(?i)(?:^|[\\s;])(?:question\\s*)?(\\d{1,4})\\s+(A|B|C|D|TRUE|FALSE)(?=\\s|$|[,;])");
+        java.util.regex.Matcher compactWhitespaceMatcher = compactWhitespace.matcher(answerText);
+        while (compactWhitespaceMatcher.find()) {
+            answers.putIfAbsent(Integer.parseInt(compactWhitespaceMatcher.group(1)), compactWhitespaceMatcher.group(2));
+        }
+        return answers;
+    }
+
+    private int findQuestionIndex(List<ExamImportQuestion> questions, int answerNumber) {
+        for (int index = 0; index < questions.size(); index++) {
+            String sourceNumber = questions.get(index).getSourceQuestionNumber();
+            if (sourceNumber != null) {
+                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\d+").matcher(sourceNumber);
+                if (matcher.find() && Integer.parseInt(matcher.group()) == answerNumber) return index;
+            }
+        }
+        return answerNumber >= 1 && answerNumber <= questions.size() ? answerNumber - 1 : -1;
     }
 
     private List<AnswerKeyMatch> parseAnswerMatches(String raw) throws JsonProcessingException {
@@ -1407,7 +1591,9 @@ public class ExamImportServiceImpl implements ExamImportService {
             throw new IllegalArgumentException("Câu hỏi thiếu nội dung, loại hoặc độ khó.");
         }
         boolean hasAnswer = question.getCorrectAnswer() != null && !question.getCorrectAnswer().isBlank();
-        if (requireAnswer && !hasAnswer) throw new IllegalArgumentException("Mỗi câu cần có đáp án trước khi xác nhận.");
+        if (requireAnswer && requiresAnswer(question) && !hasAnswer) {
+            throw new IllegalArgumentException("Mỗi câu cần có đáp án trước khi xác nhận.");
+        }
         QuestionDifficulty.valueOf(question.getDifficulty().trim().toUpperCase(Locale.ROOT));
         if ("MULTIPLE_CHOICE".equalsIgnoreCase(question.getQuestionType())) {
             if (question.getOptions() == null || question.getOptions().size() < 2) {
@@ -1431,6 +1617,12 @@ public class ExamImportServiceImpl implements ExamImportService {
         if (question.getPoints() != null && (question.getPoints() <= 0 || question.getPoints() > 100)) {
             throw new IllegalArgumentException("Điểm câu hỏi phải trong khoảng 0 đến 100.");
         }
+    }
+
+    private boolean requiresAnswer(ExamImportQuestion question) {
+        if (question == null) return true;
+        String type = String.valueOf(question.getQuestionType()).trim().toUpperCase(Locale.ROOT);
+        return !Set.of("ESSAY", "WRITING", "OPEN_ENDED", "FREE_TEXT").contains(type);
     }
 
     private List<ExamImportQuestion> read(String json) {
@@ -1459,7 +1651,7 @@ public class ExamImportServiceImpl implements ExamImportService {
                 .sourceFileName(item.getSourceFileName()).sourceFileContentType(item.getSourceFileContentType())
                 .sourceFileSize(item.getSourceFileSize())
                 .resources(resources)
-                .status(item.getStatus()).questionCount(questions.size())
+                .status(item.getStatus()).active(item.isActive()).questionCount(questions.size())
                 .questions(questions).sourceContent(item.getSourceContent()).answerContent(item.getAnswerContent())
                 .createdAt(item.getCreatedAt()).build();
     }
@@ -1477,7 +1669,7 @@ public class ExamImportServiceImpl implements ExamImportService {
                         question.getCorrectAnswer() != null && !question.getCorrectAnswer().isBlank()))
                 .sourceFileName(item.getSourceFileName()).sourceFileContentType(item.getSourceFileContentType())
                 .sourceFileSize(item.getSourceFileSize())
-                .status(item.getStatus()).questionCount(questions.size()).createdAt(item.getCreatedAt()).build();
+                .status(item.getStatus()).active(item.isActive()).questionCount(questions.size()).createdAt(item.getCreatedAt()).build();
     }
 
     private ExamImportResourceResponse toResourceResponse(ExamImportResource resource) {

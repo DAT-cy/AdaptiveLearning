@@ -75,6 +75,8 @@ import '../styles/shared.css'
   import ProgramsView from '../components/views/ProgramsView.vue'
   import ExamsView from '../components/views/ExamsView.vue'
   import KnowledgeView from '../components/views/KnowledgeView.vue'
+  import QuestionBankView from '../components/views/QuestionBankView.vue'
+  import ExamSetManagementView from '../components/views/ExamSetManagementView.vue'
 
 
   const router = useRouter()
@@ -89,6 +91,8 @@ import '../styles/shared.css'
     'programs',
     'exams',
     'knowledge',
+    'question-bank',
+    'exam-sets',
   ]
   function resolveSectionId(sec) {
     const raw = String(sec || 'overview')
@@ -160,6 +164,7 @@ import '../styles/shared.css'
   const knowledgeDetail = ref(null)
   const loadingKnowledgeDetail = ref(false)
   const knowledgePreviewRequest = ref(0)
+  const knowledgePreviewOpen = ref(false)
   const knowledgeEditorOpen = ref(false)
   const editingKnowledgeDocumentId = ref(null)
   const savingKnowledgeEdit = ref(false)
@@ -273,12 +278,6 @@ import '../styles/shared.css'
     ? 'Tạo thông tin đăng nhập và phân quyền cho người dùng.'
     : 'Cấu hình danh mục kỳ thi, thang điểm và các kỹ năng áp dụng.')
   const adminModalIcon = computed(() => modal.value === 'account' ? Users : GraduationCap)
-  const knowledgePreviewOpen = computed({
-    get: () => Boolean(knowledgeDetail.value || loadingKnowledgeDetail.value),
-    set: (open) => {
-      if (!open) closeKnowledgePreview()
-    },
-  })
   const knowledgePreviewChunks = computed(() =>
     Array.isArray(knowledgeDetail.value?.chunks)
       ? knowledgeDetail.value.chunks
@@ -304,6 +303,8 @@ import '../styles/shared.css'
     { id: 'programs', label: 'Kỳ thi & chứng chỉ', icon: GraduationCap, group: 'QUẢN LÝ ĐÀO TẠO' },
     { id: 'exams', label: 'Bài kiểm tra', icon: ClipboardCheck, group: 'QUẢN LÝ ĐÀO TẠO' },
     { id: 'knowledge', label: 'Kho kiến thức', icon: Database, group: 'QUẢN LÝ ĐÀO TẠO' },
+    { id: 'question-bank', label: 'Ngân hàng câu hỏi', icon: BookOpen, group: 'QUẢN LÝ ĐÀO TẠO' },
+    { id: 'exam-sets', label: 'Quản lý bộ đề', icon: Layers, group: 'QUẢN LÝ ĐÀO TẠO' },
     { id: 'accounts', label: 'Quản lý tài khoản', icon: Users, group: 'VẬN HÀNH & HỆ THỐNG' },
     { id: 'billing', label: 'Gói cước & Thanh toán', icon: CreditCard, group: 'VẬN HÀNH & HỆ THỐNG' },
   ]
@@ -1168,15 +1169,21 @@ import '../styles/shared.css'
   }
 
   async function viewKnowledgeDocument(document) {
+    knowledgePreviewOpen.value = true
     knowledgeDetail.value = null
     const detail = await loadKnowledgeDocumentDetail(document)
-    if (detail) knowledgeDetail.value = detail
+    if (detail) {
+      knowledgeDetail.value = detail
+    } else {
+      knowledgePreviewOpen.value = false
+    }
   }
 
   async function closeKnowledgePreview() {
     knowledgePreviewRequest.value += 1
     loadingKnowledgeDetail.value = false
     knowledgeDetail.value = null
+    knowledgePreviewOpen.value = false
   }
 
   async function editKnowledgeDocument(document = knowledgeDetail.value) {
@@ -2082,6 +2089,8 @@ import '../styles/shared.css'
         <ProgramsView v-else-if="activeSection === 'programs'" />
         <ExamsView v-else-if="activeSection === 'exams'" />
         <KnowledgeView v-else-if="activeSection === 'knowledge'" />
+        <QuestionBankView v-else-if="activeSection === 'question-bank'" />
+        <ExamSetManagementView v-else-if="activeSection === 'exam-sets'" />
 
       </div>
     </section>
@@ -2189,32 +2198,49 @@ import '../styles/shared.css'
       :description="knowledgeEditForm.title || 'Cập nhật thông tin và nội dung tài liệu.'"
       :dirty="knowledgeEditDirty"
       :submitting="savingKnowledgeEdit"
-      size="lg"
+      size="xl"
       @update:open="onKnowledgeEditorOpenChange"
     >
       <form id="knowledge-edit-form" class="knowledge-edit-form" @submit.prevent="saveKnowledgeEdit">
-        <label class="overlay-field">Tên tài liệu <b aria-hidden="true">*</b>
-          <input v-model.trim="knowledgeEditForm.title" required maxlength="200" />
-        </label>
-        <label class="overlay-field">Kỳ thi <b aria-hidden="true">*</b>
-          <select v-model="knowledgeEditForm.certificateId" required>
-            <option disabled value="">Chọn kỳ thi</option>
-            <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">{{ program.name }}</option>
-          </select>
-        </label>
-        <fieldset v-if="knowledgeEditTopics.length" class="overlay-skill-field">
-          <legend>Kỹ năng / môn thi <small>Tùy chọn</small></legend>
-          <div class="knowledge-skill-choice" role="group" aria-label="Chọn kỹ năng hoặc môn thi cho tài liệu">
-            <button type="button" class="knowledge-skill-chip skill-auto" :class="{ selected: !knowledgeEditForm.topicId }" :aria-pressed="!knowledgeEditForm.topicId" @click="knowledgeEditForm.topicId = ''"><Check v-if="!knowledgeEditForm.topicId" :size="15" /><span v-else class="knowledge-skill-dot"></span>Tất cả</button>
-            <button v-for="topic in knowledgeEditTopics" :key="topic.topicId" type="button" class="knowledge-skill-chip" :class="[knowledgeSkillTone(topic), { selected: String(topic.topicId) === knowledgeEditForm.topicId }]" :aria-pressed="String(topic.topicId) === knowledgeEditForm.topicId" @click="knowledgeEditForm.topicId = String(topic.topicId)">
-              <Check v-if="String(topic.topicId) === knowledgeEditForm.topicId" :size="15" /><span v-else class="knowledge-skill-dot"></span>{{ topic.name }}
-            </button>
+        <section class="knowledge-edit-section" aria-labelledby="knowledge-edit-info-title">
+          <div class="knowledge-edit-section-heading">
+            <div>
+              <h3 id="knowledge-edit-info-title">Thông tin tài liệu</h3>
+              <p>Cập nhật tiêu đề và chương trình học của tài liệu.</p>
+            </div>
+            <span class="knowledge-required-note"><b aria-hidden="true">*</b> Bắt buộc</span>
           </div>
-        </fieldset>
-        <label class="overlay-field">Nội dung tài liệu <b aria-hidden="true">*</b>
-          <textarea v-model="knowledgeEditForm.content" required maxlength="500000" rows="14"></textarea>
-          <small>{{ formatAdminNumber(knowledgeEditForm.content.length) }} / 500.000 ký tự</small>
-        </label>
+          <div class="knowledge-edit-grid">
+            <label class="overlay-field knowledge-edit-field knowledge-edit-field-wide">Tên tài liệu <b aria-hidden="true">*</b>
+              <input v-model.trim="knowledgeEditForm.title" required maxlength="200" placeholder="Ví dụ: TOEIC Listening and Reading" />
+            </label>
+            <label class="overlay-field knowledge-edit-field">Kỳ thi <b aria-hidden="true">*</b>
+              <select v-model="knowledgeEditForm.certificateId" required>
+                <option disabled value="">Chọn kỳ thi</option>
+                <option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">{{ program.name }}</option>
+              </select>
+            </label>
+          </div>
+          <fieldset v-if="knowledgeEditTopics.length" class="overlay-skill-field">
+            <legend>Kỹ năng / môn thi <small>Tùy chọn</small></legend>
+            <div class="knowledge-skill-choice" role="group" aria-label="Chọn kỹ năng hoặc môn thi cho tài liệu">
+              <button type="button" class="knowledge-skill-chip skill-auto" :class="{ selected: !knowledgeEditForm.topicId }" :aria-pressed="!knowledgeEditForm.topicId" @click="knowledgeEditForm.topicId = ''"><Check v-if="!knowledgeEditForm.topicId" :size="15" /><span v-else class="knowledge-skill-dot"></span>Tất cả</button>
+              <button v-for="topic in knowledgeEditTopics" :key="topic.topicId" type="button" class="knowledge-skill-chip" :class="[knowledgeSkillTone(topic), { selected: String(topic.topicId) === knowledgeEditForm.topicId }]" :aria-pressed="String(topic.topicId) === knowledgeEditForm.topicId" @click="knowledgeEditForm.topicId = String(topic.topicId)">
+                <Check v-if="String(topic.topicId) === knowledgeEditForm.topicId" :size="15" /><span v-else class="knowledge-skill-dot"></span>{{ topic.name }}
+              </button>
+            </div>
+          </fieldset>
+        </section>
+        <section class="knowledge-edit-section knowledge-content-section" aria-labelledby="knowledge-edit-content-title">
+          <div class="knowledge-edit-section-heading">
+            <div>
+              <h3 id="knowledge-edit-content-title">Nội dung tài liệu <b aria-hidden="true">*</b></h3>
+              <p>Hỗ trợ Markdown. Giữ nguyên tiêu đề, danh sách và liên kết khi chỉnh sửa.</p>
+            </div>
+            <span class="knowledge-content-count">{{ formatAdminNumber(knowledgeEditForm.content.length) }} / 500.000</span>
+          </div>
+          <textarea class="knowledge-content-editor" v-model="knowledgeEditForm.content" required maxlength="500000" aria-label="Nội dung tài liệu" placeholder="Nhập nội dung tài liệu..."></textarea>
+        </section>
       </form>
       <template #footer>
         <button type="button" class="overlay-button overlay-button-secondary" :disabled="savingKnowledgeEdit" @click="requestKnowledgeEditorClose">Hủy</button>
@@ -3003,6 +3029,39 @@ import '../styles/shared.css'
     cursor: pointer;
   }
   .overview-refresh-button { height: 38px; }
+
+  /* Knowledge editor is rendered from this page, so its controls need local layout rules. */
+  .knowledge-edit-form { display: grid; gap: 24px; }
+  .knowledge-edit-section { display: grid; gap: 18px; padding: 18px; border: 1px solid #E2E8F0; border-radius: 12px; background: #FFFFFF; }
+  .knowledge-edit-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .knowledge-edit-section-heading h3 { margin: 0; color: #0F172A; font-size: 15px; line-height: 22px; font-weight: 700; }
+  .knowledge-edit-section-heading p { margin: 4px 0 0; color: #64748B; font-size: 12.5px; line-height: 1.5; }
+  .knowledge-required-note, .knowledge-content-count { flex: 0 0 auto; color: #64748B; font-size: 11.5px; white-space: nowrap; }
+  .knowledge-required-note b, .knowledge-edit-section-heading h3 > b { color: #DC2626; }
+  .knowledge-edit-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(180px, .65fr); gap: 16px; }
+  .knowledge-edit-field, .overlay-field { display: grid; min-width: 0; gap: 7px; color: #334155; font-size: 12.5px; font-weight: 650; }
+  .knowledge-edit-field input, .knowledge-edit-field select, .knowledge-content-editor { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #CBD5E1; border-radius: 8px; color: #0F172A; background: #FFFFFF; font: inherit; font-size: 13.5px; transition: border-color .15s ease, box-shadow .15s ease; }
+  .knowledge-edit-field input, .knowledge-edit-field select { height: 42px; padding: 0 12px; }
+  .knowledge-edit-field input:focus, .knowledge-edit-field select:focus, .knowledge-content-editor:focus { outline: none; border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+  .knowledge-edit-field input::placeholder, .knowledge-content-editor::placeholder { color: #94A3B8; }
+  .knowledge-edit-section .overlay-skill-field { display: grid; gap: 9px; margin: 0; padding: 0; border: 0; }
+  .knowledge-edit-section .overlay-skill-field legend { margin: 0; color: #334155; font-size: 12.5px; font-weight: 650; }
+  .knowledge-edit-section .overlay-skill-field legend small { margin-left: 5px; color: #64748B; font-size: 11.5px; font-weight: 400; }
+  .knowledge-edit-section .knowledge-skill-choice { display: flex; flex-wrap: wrap; gap: 8px; }
+  .knowledge-edit-section .knowledge-skill-chip { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #CBD5E1; border-radius: 7px; color: #475569; background: #FFFFFF; font: inherit; font-size: 12.5px; cursor: pointer; }
+  .knowledge-edit-section .knowledge-skill-chip:hover { border-color: #93C5FD; background: #EFF6FF; }
+  .knowledge-edit-section .knowledge-skill-chip.selected { border-color: #2563EB; color: #1D4ED8; background: #EFF6FF; box-shadow: 0 0 0 1px #2563EB inset; }
+  .knowledge-edit-section .knowledge-skill-dot { width: 7px; height: 7px; border-radius: 50%; background: #94A3B8; }
+  .knowledge-content-section { gap: 12px; }
+  .knowledge-content-editor { display: block; min-height: 390px; padding: 14px; resize: vertical; line-height: 1.65; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+
+  @media (max-width: 640px) {
+    .knowledge-edit-section { padding: 14px; }
+    .knowledge-edit-grid { grid-template-columns: 1fr; gap: 14px; }
+    .knowledge-edit-section-heading { flex-direction: column; gap: 6px; }
+    .knowledge-content-count { align-self: flex-start; }
+    .knowledge-content-editor { min-height: 320px; }
+  }
 
   @media (max-width: 1024px) {
     .admin-sidebar {

@@ -35,7 +35,7 @@ public class ExamImportResource extends BaseEntity {
     @Column(name = "resource_type", nullable = false, length = 24)
     private String resourceType = "AUDIO";
 
-    @Column(name = "storage_key", nullable = false, length = 36)
+    @Column(name = "storage_key", nullable = false, length = 1000)
     private String storageKey;
 
     @Column(name = "file_name", nullable = false, length = 255)

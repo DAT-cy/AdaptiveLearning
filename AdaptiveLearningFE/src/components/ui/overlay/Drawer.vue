@@ -20,7 +20,7 @@ interface Props {
   title: string
   description?: string
   icon?: Component
-  size?: 'md' | 'lg'
+  size?: 'md' | 'lg' | 'xl'
   variant?: OverlayVariant
   dirty?: boolean
   submitting?: boolean
@@ -49,7 +49,7 @@ function setOpen(value: boolean) {
 }
 
 async function requestClose() {
-  if (closePending) return
+  if (closePending || !props.open) return
   closePending = true
   try {
     if (props.submitting || !props.dismissible) return
@@ -64,7 +64,7 @@ async function requestClose() {
     }
     setOpen(false)
   } finally {
-    closePending = false
+    if (props.open) closePending = false
   }
 }
 
@@ -85,6 +85,7 @@ watch(() => props.open, async (open, previous) => {
       : null
     await focusInitialField()
   } else if (!open && previous) {
+    closePending = false
     await nextTick()
     if (returnFocusElement?.isConnected) returnFocusElement.focus()
     returnFocusElement = null
@@ -96,7 +97,7 @@ function onOpenChange(value: boolean, details: { cancel: () => void }) {
     setOpen(true)
     return
   }
-  details.cancel()
+  details?.cancel?.()
   void requestClose()
 }
 
@@ -139,6 +140,7 @@ defineExpose({ requestClose })
 .overlay-drawer { position: fixed; z-index: 91; inset-block: 0; right: 0; display: flex; width: min(var(--drawer-width,480px),100vw); flex-direction: column; overflow: hidden; border-left: 1px solid var(--ds-border); border-radius: var(--radius-3xl) 0 0 var(--radius-3xl); outline: none; background: var(--surface); box-shadow: var(--overlay-shadow); transform: translateX(var(--drawer-swipe-movement-x,0px)); animation: drawer-enter 220ms cubic-bezier(.16,1,.3,1) both; }
 .overlay-drawer.size-md { --drawer-width: 480px; }
 .overlay-drawer.size-lg { --drawer-width: 640px; }
+.overlay-drawer.size-xl { --drawer-width: 70vw; }
 .overlay-drawer .overlay-header { flex: 0 0 auto; }
 .overlay-drawer-body { min-height: 0; flex: 1; overflow: auto; padding: 24px; }
 .overlay-drawer .overlay-footer { flex: 0 0 auto; }

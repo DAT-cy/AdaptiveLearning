@@ -94,13 +94,7 @@ public class OpenAiProvider implements AiProvider {
                                 ? "Gemini returned no candidates"
                                 : "Gemini blocked the prompt: " + reason);
                     }
-                    JsonNode parts = candidates.path(0).path("content").path("parts");
-                    StringBuilder text = new StringBuilder();
-                    for (JsonNode part : parts) {
-                        if (part.hasNonNull("text")) text.append(part.path("text").asText());
-                    }
-                    if (text.isEmpty()) throw new IllegalStateException("Gemini returned no text content");
-                    return text.toString();
+                    return extractGeminiText(candidates.path(0));
                 })
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryable)
@@ -194,13 +188,7 @@ public class OpenAiProvider implements AiProvider {
                                 ? "Gemini returned no candidates"
                                 : "Gemini blocked the prompt: " + reason);
                     }
-                    JsonNode parts = candidates.path(0).path("content").path("parts");
-                    StringBuilder text = new StringBuilder();
-                    for (JsonNode part : parts) {
-                        if (part.hasNonNull("text")) text.append(part.path("text").asText());
-                    }
-                    if (text.isEmpty()) throw new IllegalStateException("Gemini returned no text content");
-                    return text.toString();
+                    return extractGeminiText(candidates.path(0));
                 })
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                         .filter(this::isRetryable)
@@ -228,6 +216,21 @@ public class OpenAiProvider implements AiProvider {
         detail = detail.replaceAll("AIza[0-9A-Za-z_-]{20,}", "[REDACTED]");
         String status = response.getStatusCode() + " " + response.getStatusText();
         return detail.isBlank() ? status : status + ": " + detail;
+    }
+
+    private String extractGeminiText(JsonNode candidate) {
+        JsonNode parts = candidate.path("content").path("parts");
+        StringBuilder text = new StringBuilder();
+        if (parts.isArray()) {
+            for (JsonNode part : parts) {
+                if (part.hasNonNull("text")) text.append(part.path("text").asText());
+            }
+        }
+        if (!text.isEmpty()) return text.toString();
+
+        String finishReason = candidate.path("finishReason").asText();
+        if (finishReason.isBlank()) finishReason = "UNKNOWN";
+        throw new IllegalStateException("Gemini returned no text content (finishReason=" + finishReason + ")");
     }
 
     private boolean isRetryable(Throwable throwable) {

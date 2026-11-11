@@ -13,6 +13,7 @@ import adaptivelearning.config.response.CommonException;
 import adaptivelearning.config.response.ErrorCode;
 import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.ai.gateway.AiProvider;
+import adaptivelearning.module.examimports.storage.FileStorage;
 import adaptivelearning.module.rag.dto.request.DocumentUploadRequest;
 import adaptivelearning.module.rag.dto.request.KnowledgeBaseUploadRequest;
 import adaptivelearning.module.rag.entity.DocumentChunk;
@@ -34,6 +35,7 @@ class RagServiceImplTest {
     private DocumentChunkRepository chunks;
     private TopicRepository topics;
     private CertificateRepository certificates;
+    private FileStorage fileStorage;
     private RagServiceImpl service;
 
     @BeforeEach
@@ -42,7 +44,8 @@ class RagServiceImplTest {
         chunks = mock(DocumentChunkRepository.class);
         topics = mock(TopicRepository.class);
         certificates = mock(CertificateRepository.class);
-        service = new RagServiceImpl(documents, chunks, topics, certificates, mock(AiProvider.class));
+        fileStorage = mock(FileStorage.class);
+        service = new RagServiceImpl(documents, chunks, topics, certificates, mock(AiProvider.class), fileStorage);
         when(documents.save(any(StudyDocument.class))).thenAnswer(invocation -> {
             StudyDocument document = invocation.getArgument(0);
             if (document.getDocumentId() == null) document.setDocumentId(41L);

@@ -34,7 +34,6 @@ const uploading = ref(false)
 const importingAnswerKey = ref(false)
 const rescanningMissing = ref(false)
 const deletingImportId = ref(null)
-const itemToDelete = ref(null)
 const analysisProgress = ref(null)
 const saving = ref(false)
 const unansweredOnly = ref(false)
@@ -63,8 +62,11 @@ const availableTopics = computed(() => topics.value.filter((topic) => String(top
 const reviewTopics = computed(() => topics.value.filter((topic) => String(topic.certificateId) === String(selected.value?.certificateId)))
 const availableTopicGroups = computed(() => groupTopics(availableTopics.value))
 const reviewTopicGroups = computed(() => groupTopics(reviewTopics.value))
+function isWritingQuestion(question) {
+  return ['ESSAY', 'WRITING', 'OPEN_ENDED', 'FREE_TEXT'].includes(String(question?.questionType || '').toUpperCase())
+}
 const missingAnswerCount = computed(() => (selected.value?.questions || []).filter(
-  (question) => !String(question.correctAnswer ?? '').trim(),
+  (question) => !isWritingQuestion(question) && !String(question.correctAnswer ?? '').trim(),
 ).length)
 const answeredCount = computed(() => Math.max(0, (selected.value?.questions?.length || 0) - missingAnswerCount.value))
 const uploadingAudioKey = ref('')
@@ -603,6 +605,9 @@ async function uploadExam() {
       body.append('topicId', form.topicId)
     }
     body.append('examFile', examFile.value)
+    if (answerFile.value && !answerInExam.value) {
+      body.append('answerFile', answerFile.value)
+    }
     let progress = await adminService.startExamImportAnalysis(body)
     analysisProgress.value = progress
     while (progress.status === 'PROCESSING') {
@@ -658,17 +663,6 @@ async function openImport(item) {
   }
 }
 
-function promptDelete(item) {
-  if (!item || deletingImportId.value) return
-  error.value = ''
-  itemToDelete.value = item
-}
-
-function cancelDelete() {
-  if (deletingImportId.value) return
-  itemToDelete.value = null
-}
-
 async function confirmDeleteImport(item) {
   if (!item || deletingImportId.value) return
   const id = item.importId
@@ -683,7 +677,6 @@ async function confirmDeleteImport(item) {
       clearSourcePdf()
       clearResourcePreviews()
     }
-    itemToDelete.value = null
     notice.value = `Đã xóa bộ đề "${title}".`
     await loadImports()
   } catch (exception) {
@@ -694,9 +687,16 @@ async function confirmDeleteImport(item) {
   }
 }
 
-// Giữ lại alias deleteImport trỏ tới promptDelete để tương thích
-function deleteImport(item) {
-  promptDelete(item)
+async function deleteImport(item) {
+  if (!item || deletingImportId.value) return
+  const accepted = await confirm({
+    title: 'Xóa bộ đề?',
+    description: `Bộ đề "${item.title}" sẽ bị xóa vĩnh viễn khỏi hàng chờ duyệt. Thao tác này không thể hoàn tác.`,
+    confirmText: 'Xóa vĩnh viễn',
+    cancelText: 'Giữ lại',
+    variant: 'danger',
+  })
+  if (accepted) await confirmDeleteImport(item)
 }
 
 async function importAnswerKey() {
@@ -739,8 +739,9 @@ async function rescanMissingQuestions() {
     const updated = await adminService.rescanMissingExamImportQuestions(current.importId)
     const known = new Set((current.questions || []).map(questionIdentity))
     const additions = (updated.questions || []).filter((question) => !known.has(questionIdentity(question)))
-    selected.value = { ...updated, canDelete: current.canDelete,
-      questions: [...(current.questions || []), ...additions] }
+    // The endpoint persists and returns the complete question list. Use it as the
+    // source of truth so recovered questions cannot be hidden by a stale local merge.
+    selected.value = { ...updated, canDelete: current.canDelete }
     notice.value = additions.length
       ? `Đã quét bổ sung ${additions.length} câu. Còn thiếu ${missingSourceQuestions.value.length} câu theo dải trong PDF.`
       : `Lần quét này chưa bổ sung được câu mới. Còn thiếu ${missingSourceQuestions.value.length} câu theo dải trong PDF.`
@@ -756,6 +757,56 @@ async function rescanMissingQuestions() {
 function normalizeAnswer(question) {
   if (question.correctAnswer == null) question.correctAnswer = ''
   if (question.options == null) question.options = []
+}
+
+function createQuestionForSection(section) {
+  const firstQuestion = section.questions[0]?.question
+  const firstGroup = section.groups[0]
+  const numbers = section.questions
+    .map(({ question }) => parsedQuestionNumber(question.sourceQuestionNumber))
+    .filter((number) => number != null)
+  const declaredRange = declaredSectionRange(section)
+  const nextNumber = numbers.length
+    ? Math.max(...numbers) + 1
+    : (declaredRange?.start ?? (selected.value?.questions?.length || 0) + 1)
+  const topicId = firstQuestion?.topicId ?? section.majorSkill?.topicId ?? selected.value?.topicId ?? null
+  return {
+    questionType: 'MULTIPLE_CHOICE', difficulty: 'MEDIUM', content: '',
+    options: ['A', 'B', 'C', 'D'].map((label) => ({ label, text: '' })),
+    correctAnswer: '', explanation: '', points: firstQuestion?.points ?? 1, topicId,
+    skill: firstQuestion?.skill || section.majorSkill?.name || '', sourceQuestionNumber: String(nextNumber),
+    sourceSectionOrder: firstQuestion?.sourceSectionOrder ?? section.sourceSectionOrder,
+    sourceSectionTitle: firstQuestion?.sourceSectionTitle || section.sourceSectionTitle || '',
+    sourceSectionQuestionStart: firstQuestion?.sourceSectionQuestionStart || section.sourceQuestionStart || '',
+    sourceSectionQuestionEnd: firstQuestion?.sourceSectionQuestionEnd || section.sourceQuestionEnd || '',
+    sectionInstructions: firstQuestion?.sectionInstructions || section.sectionInstructions || '',
+    stimulusContent: firstQuestion?.stimulusContent || section.stimulusContent || '',
+    sourceGroupOrder: firstQuestion?.sourceGroupOrder ?? firstGroup?.groupOrder ?? 0,
+    sourceGroupTitle: firstQuestion?.sourceGroupTitle || firstGroup?.groupTitle || '',
+    sourceGroupQuestionStart: firstQuestion?.sourceGroupQuestionStart || firstGroup?.startQuestion || '',
+    sourceGroupQuestionEnd: firstQuestion?.sourceGroupQuestionEnd || firstGroup?.endQuestion || '',
+    groupInstruction: firstQuestion?.groupInstruction || firstGroup?.groupInstruction || '',
+    groupStimulusContent: firstQuestion?.groupStimulusContent || firstGroup?.groupStimulusContent || '',
+  }
+}
+
+function addQuestionToSection(section) {
+  if (!selected.value) return
+  selected.value.questions.push(createQuestionForSection(section))
+  unansweredOnly.value = false
+  notice.value = 'Da them cau hoi moi. Hay hoan thien noi dung va bam Luu chinh sua.'
+}
+
+function removeQuestion(question) {
+  if (!selected.value) return
+  if (selected.value.questions.length <= 1) {
+    error.value = 'Bo de phai con it nhat mot cau hoi.'
+    return
+  }
+  const index = selected.value.questions.indexOf(question)
+  if (index < 0) return
+  selected.value.questions.splice(index, 1)
+  notice.value = 'Da xoa cau hoi khoi section. Bam Luu chinh sua de ghi thay doi.'
 }
 
 async function saveReview() {
@@ -779,6 +830,13 @@ async function saveReview() {
 
 async function confirmImport() {
   if (!selected.value || saving.value) return
+  const accepted = await confirm({
+    title: 'Xác nhận bộ đề chính thức?',
+    description: 'Các câu hỏi và đáp án hiện tại sẽ được đưa vào ngân hàng câu hỏi đã duyệt để dùng khi tạo đề.',
+    confirmText: 'Xác nhận bộ đề',
+    cancelText: 'Tiếp tục rà soát',
+  })
+  if (!accepted) return
   if (missingAnswerCount.value) {
     error.value = `Còn ${missingAnswerCount.value} câu chưa có đáp án. Hãy bổ sung đáp án cho các câu được viền đỏ trước khi xác nhận.`
     return
@@ -787,13 +845,6 @@ async function confirmImport() {
     error.value = 'Hãy chọn kỹ năng/môn cho từng câu chưa được phân loại trước khi xác nhận.'
     return
   }
-  const accepted = await confirm({
-    title: 'Xác nhận bộ đề chính thức?',
-    description: 'Các câu hỏi và đáp án hiện tại sẽ được đưa vào ngân hàng câu hỏi đã duyệt để dùng khi tạo đề.',
-    confirmText: 'Xác nhận bộ đề',
-    cancelText: 'Tiếp tục rà soát',
-  })
-  if (!accepted) return
   saving.value = true
   error.value = ''
   try {
@@ -907,7 +958,7 @@ function changeQuestionType(question) {
         <p v-if="!loading && !imports.length" class="empty-list">Chưa có bộ đề cần duyệt.</p>
       </aside>
 
-      <section v-if="selected" class="review-panel" :class="{ 'has-source-pdf': sourcePdfUrl }">
+      <section v-if="selected" class="review-panel">
         <header class="review-heading">
           <div>
             <p class="eyebrow">{{ selected.answerGenerated ? 'ĐÁP ÁN AI GỢI Ý · CẦN KIỂM TRA' : 'ĐÁP ÁN TỪ NGUỒN ĐỀ / ĐÁP ÁN' }}</p>
@@ -915,6 +966,11 @@ function changeQuestionType(question) {
             <p>{{ selected.questionCount }} câu · {{ selected.questions?.length || 0 }} câu đang xem</p>
           </div>
           <div class="review-heading-actions">
+            <button type="button" class="save-heading-btn" :disabled="saving" @click="saveReview">
+              <LoaderCircle v-if="saving" class="spin" :size="14" />
+              <Save v-else :size="14" />
+              <span>{{ saving ? 'Dang luu...' : 'Luu chinh sua' }}</span>
+            </button>
             <button v-if="selected.sourceFileName?.toLowerCase().endsWith('.pdf') && missingSourceQuestions.length" class="rescan-missing-btn" type="button"
               :disabled="rescanningMissing || saving || importingAnswerKey"
               :title="`Quét lại các câu còn thiếu: ${missingSourceQuestions.join(', ')}`"
@@ -932,7 +988,7 @@ function changeQuestionType(question) {
           </div>
         </header>
         <p v-if="missingAnswerCount" class="feedback error" role="status">{{ missingAnswerCount }} câu chưa có đáp án; cần hoàn thiện trước khi xác nhận chính thức.</p>
-        <details v-if="sourcePdfUrl" class="source-pdf-details" open>
+        <details v-if="sourcePdfUrl" class="source-pdf-details">
           <summary>PDF gốc · {{ selected.sourceFileName }}</summary>
           <iframe :src="sourcePdfUrl" :title="`PDF gốc ${selected.title}`" />
         </details>
@@ -960,6 +1016,9 @@ function changeQuestionType(question) {
             <small :class="['section-question-count', { 'section-count-mismatch': section.rangeAudit.mismatch }]">
               {{ section.questions.length }}<template v-if="section.questions.length !== section.rangeAudit.actualCount"> / {{ section.rangeAudit.actualCount }} tổng</template><template v-else-if="section.rangeAudit.mismatch"> / {{ section.rangeAudit.expectedCount }} theo dải</template> câu
             </small>
+            <button type="button" class="add-question-btn" :disabled="saving" @click.stop="addQuestionToSection(section)">
+              <span aria-hidden="true">+</span> Them cau
+            </button>
             <button
               type="button"
               class="section-toggle"
@@ -1066,10 +1125,13 @@ function changeQuestionType(question) {
                 <label>Hướng dẫn nhóm<textarea :value="group.groupInstruction" rows="2" placeholder="Ví dụ: Complete the sentences below using NO MORE THAN TWO WORDS." @input="updateGroupText(group, 'groupInstruction', $event.target.value)" /></label>
                 <label>Đoạn văn / nội dung riêng của nhóm<textarea :value="group.groupStimulusContent" rows="3" placeholder="Đoạn đọc, bảng hoặc tình huống dành riêng cho nhóm câu này." @input="updateGroupText(group, 'groupStimulusContent', $event.target.value)" /></label>
               </details>
-              <article v-for="entry in group.questions" :key="entry.index" class="question-editor" :class="{ 'needs-answer': !String(entry.question.correctAnswer ?? '').trim() }" @vue:mounted="normalizeAnswer(entry.question)">
+                <article v-for="entry in group.questions" :key="entry.question" class="question-editor" :class="{ 'needs-answer': !isWritingQuestion(entry.question) && !String(entry.question.correctAnswer ?? '').trim() }" @vue:mounted="normalizeAnswer(entry.question)">
                 <header>
                   <span class="question-index" :title="entry.question.sourceQuestionNumber ? `Số câu trong PDF: ${entry.question.sourceQuestionNumber}` : 'Thứ tự câu được nhận diện'">{{ questionDisplayNumber(entry.question, entry.index) }}</span>
-                  <span class="answer-state" :class="{ 'is-missing': !String(entry.question.correctAnswer ?? '').trim() }">{{ String(entry.question.correctAnswer ?? '').trim() ? 'Đã có đáp án' : 'Thiếu đáp án' }}</span>
+                  <button type="button" class="remove-question-btn" :disabled="saving" :aria-label="`Xóa câu ${questionDisplayNumber(entry.question, entry.index)}`" title="Xóa câu hỏi" @click="removeQuestion(entry.question)">
+                    <Trash2 :size="14" />
+                  </button>
+                  <span v-if="isWritingQuestion(entry.question)" class="answer-state">Không cần đáp án</span><span v-else class="answer-state" :class="{ 'is-missing': !String(entry.question.correctAnswer ?? '').trim() }">{{ String(entry.question.correctAnswer ?? '').trim() ? 'Đã có đáp án' : 'Thiếu đáp án' }}</span>
                   <label>Kỹ năng / Môn
                     <select v-model="entry.question.topicId">
                       <option v-if="!entry.question.topicId && !form.topicId" :value="null" disabled>Chọn kỹ năng</option>
@@ -1123,30 +1185,6 @@ function changeQuestionType(question) {
       <section v-else class="review-empty"><FileText :size="26" /><h2>Chọn một bộ đề</h2><p>Mở bộ đề để rà từng câu và xác nhận đáp án.</p></section>
     </div>
 
-    <!-- Dialog xác nhận xóa bộ đề trực tiếp -->
-    <div v-if="itemToDelete" class="delete-confirm-backdrop" @click.self="cancelDelete">
-      <div class="delete-confirm-card" role="alertdialog" aria-modal="true">
-        <div class="delete-confirm-content">
-          <div class="delete-confirm-icon">
-            <Trash2 :size="22" />
-          </div>
-          <div class="delete-confirm-text">
-            <h3>Xóa bộ đề?</h3>
-            <p>Bộ đề "<strong>{{ itemToDelete.title }}</strong>" sẽ bị xóa vĩnh viễn khỏi hàng chờ duyệt. Thao tác này không thể hoàn tác.</p>
-          </div>
-        </div>
-        <div class="delete-confirm-actions">
-          <button type="button" class="btn-cancel-delete" :disabled="deletingImportId === itemToDelete.importId" @click="cancelDelete">
-            Hủy
-          </button>
-          <button type="button" class="btn-confirm-delete" :disabled="deletingImportId === itemToDelete.importId" @click="confirmDeleteImport(itemToDelete)">
-            <LoaderCircle v-if="deletingImportId === itemToDelete.importId" class="spin" :size="15" />
-            <Trash2 v-else :size="15" />
-            <span>{{ deletingImportId === itemToDelete.importId ? 'Đang xóa…' : 'Xóa vĩnh viễn' }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
   </main>
 </template>
 
@@ -1182,6 +1220,8 @@ function changeQuestionType(question) {
 .source-details { margin-bottom: 16px; border: 1px solid #dce2e9; border-radius: 6px; }.source-details summary { padding: 10px 12px; color: #435565; font-size: 12px; cursor: pointer; }.source-details > div { max-height: 260px; overflow: auto; padding: 0 12px 12px; }.source-details h3 { font-size: 12px; }.source-details pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #475569; font-family: inherit; font-size: 12px; line-height: 1.5; }
 .question-editor { margin: 0 0 14px; padding: 16px; border: 1px solid #dce2e9; border-radius: 6px; }.question-editor > header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }.question-editor > header > span { color: #126b68; font-size: 13px; font-weight: 700; }.question-editor > header label { display: flex; align-items: center; gap: 7px; color: #64748b; font-size: 11px; }.question-editor select { min-height: 36px; }.editor-label { margin-top: 11px; }.editor-label textarea { resize: vertical; line-height: 1.45; }.editor-subheading { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 8px; color: #3a4757; font-size: 12px; }.editor-subheading button { border: 0; background: transparent; color: #126b68; font-size: 12px; cursor: pointer; }.option-row { display: grid; grid-template-columns: 28px minmax(0,1fr) 30px; gap: 8px; align-items: center; margin-bottom: 7px; }.option-row b { color: #126b68; }.option-row button { height: 32px; border: 0; background: transparent; color: #9b3028; font-size: 20px; cursor: pointer; }.answer-field { width: 100%; max-width: 100%; }.review-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }.review-primary-actions { display: flex; align-items: center; gap: 12px; }.review-actions .save-button { border: 1px solid #cbd5df; background: white; color: #344256; }.review-actions .confirm-button { background: #126b68; }
 .review-heading-actions { display: flex; align-items: center; gap: 10px; }
+.save-heading-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 11px; border: 1px solid #176b5d; border-radius: 5px; background: #176b5d; color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.save-heading-btn:disabled { opacity: .55; cursor: wait; }
 .rescan-missing-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid #b7d8d6; border-radius: 5px; background: #f0f8f7; color: #075e5c; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .rescan-missing-btn:disabled { opacity: .55; cursor: wait; }
 .delete-header-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #fecdd3; border-radius: 6px; background: #fff1f2; color: #be123c; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
@@ -1198,19 +1238,6 @@ function changeQuestionType(question) {
 .section-toggle:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .review-empty { display: grid; align-content: center; justify-items: center; min-height: 300px; color: #64748b; text-align: center; }.review-empty h2 { margin: 12px 0 0; color: #344256; font-size: 17px; }.review-empty p { font-size: 13px; }.feedback { padding: 12px 14px; border-radius: 6px; font-size: 13px; }.feedback.error { background: #fff1f0; color: #9f2f27; }.feedback.success { background: #eef8f2; color: #1e6a46; }.spin { animation: spin 1s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }
 .no-permission { padding: 28px 0; border-top: 1px solid #dce2e9; color: #64748b; }.no-permission h2 { margin: 0; color: #344256; font-size: 17px; }.no-permission p { font-size: 13px; }
-.delete-confirm-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, 0.48); backdrop-filter: blur(2px); }
-.delete-confirm-card { width: min(440px, calc(100vw - 32px)); border: 1px solid #fee2e2; border-radius: 12px; background: white; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 10px 10px -5px rgba(0, 0, 0, 0.04); overflow: hidden; }
-.delete-confirm-content { display: flex; align-items: flex-start; gap: 14px; padding: 22px; }
-.delete-confirm-icon { display: grid; width: 42px; height: 42px; flex-shrink: 0; place-items: center; border-radius: 10px; background: #fee2e2; color: #dc2626; }
-.delete-confirm-text h3 { margin: 0 0 6px; color: #0f172a; font-size: 17px; font-weight: 600; }
-.delete-confirm-text p { margin: 0; color: #475569; font-size: 13.5px; line-height: 1.5; }
-.delete-confirm-text strong { color: #0f172a; word-break: break-word; }
-.delete-confirm-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 22px; background: #f8fafc; border-top: 1px solid #f1f5f9; }
-.btn-cancel-delete { min-height: 38px; padding: 0 16px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #475569; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s ease; }
-.btn-cancel-delete:hover:not(:disabled) { background: #f1f5f9; }
-.btn-confirm-delete { display: inline-flex; min-height: 38px; align-items: center; gap: 8px; padding: 0 16px; border: 0; border-radius: 6px; background: #dc2626; color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s ease; }
-.btn-confirm-delete:hover:not(:disabled) { background: #b91c1c; }
-.btn-cancel-delete:disabled, .btn-confirm-delete:disabled { opacity: 0.6; cursor: wait; }
 @media (max-width: 800px) { .exam-import-page { width: 95%; padding: 20px 0 40px; }.form-grid { grid-template-columns: 1fr; }.work-area { grid-template-columns: 1fr; }.import-list { border-right: 0; border-bottom: 1px solid #dce2e9; padding: 0 0 14px; }.file-grid { grid-template-columns: 1fr; }.answer-key-upload { align-items: stretch; flex-direction: column; }.answer-key-upload button { justify-content: center; }.question-editor > header { flex-wrap: wrap; }.question-editor > header label { flex: 1 1 140px; justify-content: space-between; }.review-actions { flex-wrap: wrap; }.review-actions button { flex: 1; justify-content: center; } }
 .review-panel.has-source-pdf { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); align-items: start; gap: 0 18px; }
 .review-heading,.review-panel > .feedback { grid-column: 1 / -1; }
@@ -1334,4 +1361,11 @@ function changeQuestionType(question) {
 .question-group.is-collapsed .group-body { display: none; }
 .question-group > .question-editor { margin: 9px 14px; border-radius: 6px; }
 .question-group > .question-editor:last-child { margin-bottom: 14px; }
+.remove-question-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 1px solid #fecdd3; border-radius: 4px; background: #fff1f2; color: #be123c; cursor: pointer; }
+.remove-question-btn:disabled { opacity: .55; cursor: wait; }
+.add-question-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; margin-left: 4px; padding: 0 9px; border: 1px solid #b7d8d6; border-radius: 5px; background: #f0f8f7; color: #075e5c; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.add-question-btn span { font-size: 16px; line-height: 1; }
+.add-question-btn:disabled { opacity: .55; cursor: wait; }
+.source-details { display: none; }
+.review-tools, .major-skill-section { grid-column: 1; }
 </style>

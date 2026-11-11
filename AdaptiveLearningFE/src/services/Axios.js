@@ -102,6 +102,10 @@ function getInstance() {
         isLoading.value = pendingRequests > 0;
       }
       const { data, config } = response
+      // Binary endpoints (PDF/audio/image) do not use the JSON response envelope.
+      if (config?.responseType === 'blob' || data instanceof Blob) {
+        return response
+      }
       if (['PREMIUM_REQUIRED', 'FREE_LIMIT_REACHED'].includes(data?.responseCode)) {
         router.push({ path: '/pricing', query: { reason: data.responseCode } })
         return Promise.reject(new Error(data.responseCode))
@@ -159,6 +163,13 @@ function get(endpointApiUrl, payload = {}, config = {}) {
   });
 }
 
+function getBlob(endpointApiUrl, config = {}) {
+  return getInstance().get(endpointApiUrl, {
+    ...config,
+    responseType: 'blob',
+  });
+}
+
 function post(endpointApiUrl, payload = {}, config = {}) {
   return getInstance().post(endpointApiUrl, payload, config);
 }
@@ -178,6 +189,7 @@ function patch(endpointApiUrl, payload = {}, config = {}) {
 export const Axios = {
   axiosInstance,
   get,
+  getBlob,
   post,
   put,
   del,

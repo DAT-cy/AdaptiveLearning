@@ -53,7 +53,7 @@ function setOpen(value: boolean) {
 }
 
 async function requestClose() {
-  if (closePending) return
+  if (closePending || !props.open) return
   closePending = true
   try {
     if (props.submitting || !props.dismissible) return
@@ -68,7 +68,8 @@ async function requestClose() {
     }
     setOpen(false)
   } finally {
-    closePending = false
+    // Keep the guard active until the parent has observed the close event.
+    if (props.open) closePending = false
   }
 }
 
@@ -99,6 +100,7 @@ watch(() => props.open, async (open, previous) => {
       : null
     await focusInitialField()
   } else if (!open && previous) {
+    closePending = false
     await nextTick()
     if (returnFocusElement?.isConnected) returnFocusElement.focus()
     returnFocusElement = null

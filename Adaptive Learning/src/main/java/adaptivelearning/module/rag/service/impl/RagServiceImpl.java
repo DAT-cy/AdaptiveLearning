@@ -16,6 +16,8 @@ import adaptivelearning.module.rag.repository.DocumentChunkRepository;
 import adaptivelearning.module.rag.repository.StudyDocumentRepository;
 import adaptivelearning.module.rag.service.RagService;
 import adaptivelearning.module.rag.service.PdfTextExtractor;
+import adaptivelearning.module.examimports.storage.FileStorage;
+import adaptivelearning.module.examimports.storage.StoredFile;
 import adaptivelearning.module.ai.gateway.AiProvider;
 import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.topics.repository.TopicRepository;
@@ -48,6 +50,7 @@ public class RagServiceImpl implements RagService {
     private final TopicRepository topics;
     private final CertificateRepository certificates;
     private final AiProvider aiProvider;
+    private final FileStorage fileStorage;
 
     @Override
     public StudyDocumentResponse uploadDocument(Long userId, DocumentUploadRequest request) {
@@ -108,6 +111,7 @@ public class RagServiceImpl implements RagService {
     public void deleteDocument(Long userId, Long id) {
         StudyDocument document = owned(userId, id);
         chunks.deleteByDocumentId(document.getDocumentId());
+        if (document.getStoragePath() != null) fileStorage.delete(document.getStoragePath());
         documents.delete(document);
     }
 
@@ -185,6 +189,10 @@ public class RagServiceImpl implements RagService {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
 
+        StoredFile stored;
+        try { stored = fileStorage.store(file.getBytes(), fileName, "application/pdf"); }
+        catch (java.io.IOException exception) { throw new CommonException(ErrorCode.BAD_REQUEST); }
+
         StudyDocument document = documents.save(StudyDocument.builder()
                 .userId(adminId)
                 .certificateId(certificateId)
@@ -192,6 +200,7 @@ public class RagServiceImpl implements RagService {
                 .shared(true)
                 .title(title.trim())
                 .fileName(fileName)
+                .storagePath(stored.key())
                 .mimeType("application/pdf")
                 .sourceContent(text)
                 .status(DocumentStatus.READY)
@@ -280,6 +289,7 @@ public class RagServiceImpl implements RagService {
                 .filter(StudyDocument::isShared)
                 .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
         chunks.deleteByDocumentId(document.getDocumentId());
+        if (document.getStoragePath() != null) fileStorage.delete(document.getStoragePath());
         documents.delete(document);
     }
 

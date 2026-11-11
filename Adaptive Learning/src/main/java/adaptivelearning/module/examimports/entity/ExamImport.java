@@ -39,7 +39,7 @@ public class ExamImport extends BaseEntity {
     @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String questionsJson;
 
-    @Column(name = "source_file_key", length = 36)
+    @Column(name = "source_file_key", length = 1000)
     private String sourceFileKey;
 
     @Column(name = "source_file_name", length = 255)
@@ -60,6 +60,9 @@ public class ExamImport extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 24)
     private ExamImportStatus status = ExamImportStatus.PENDING_REVIEW;
+
+    @Column(nullable = false)
+    private boolean active = false;
 
     @Column(nullable = false)
     private Long uploadedBy;

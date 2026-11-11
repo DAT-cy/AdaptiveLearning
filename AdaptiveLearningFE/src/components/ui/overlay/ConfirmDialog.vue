@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import {
-  AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogOverlay,
@@ -34,7 +32,7 @@ const emit = defineEmits<{
 const cancelButton = ref<HTMLButtonElement | null>(null)
 let settled = false
 
-watch(() => props.open, (open) => { settled = !open })
+watch(() => props.open, (open) => { settled = !open }, { immediate: true })
 
 function settle(choice: 'confirm' | 'cancel') {
   if (settled) return
@@ -65,16 +63,12 @@ function onOpenAutoFocus(event: Event) {
           </div>
         </header>
         <footer class="overlay-footer">
-          <AlertDialogCancel as-child>
-            <button ref="cancelButton" type="button" class="overlay-button overlay-button-secondary" @click="settle('cancel')">
-              {{ cancelText }}
-            </button>
-          </AlertDialogCancel>
-          <AlertDialogAction as-child>
-            <button type="button" class="overlay-button" :class="variant === 'danger' ? 'overlay-button-danger' : 'overlay-button-primary'" @click="settle('confirm')">
-              {{ confirmText }}
-            </button>
-          </AlertDialogAction>
+          <button ref="cancelButton" type="button" class="overlay-button overlay-button-secondary" @click.stop.prevent="settle('cancel')">
+            {{ cancelText }}
+          </button>
+          <button type="button" class="overlay-button" :class="variant === 'danger' ? 'overlay-button-danger' : 'overlay-button-primary'" @click.stop.prevent="settle('confirm')">
+            {{ confirmText }}
+          </button>
         </footer>
       </AlertDialogContent>
     </AlertDialogPortal>

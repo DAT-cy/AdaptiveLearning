@@ -44,7 +44,7 @@ public class QuestionController {
     private final QuestionService questionService;
 
     @GetMapping("/random")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'EXAM_APPROVER')")
     @Operation(summary = "Get random approved questions for a test")
     public ResponseEntity<DefaultRes<List<QuestionResponse>>> getRandomQuestions(
             @Parameter(description = "Certificate ID", required = true, example = "1")
@@ -61,7 +61,7 @@ public class QuestionController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'EXAM_APPROVER')")
     @Operation(summary = "List questions with optional filters")
     public ResponseEntity<DefaultRes<List<QuestionResponse>>> getAll(
             QuestionFilterRequest filter) {

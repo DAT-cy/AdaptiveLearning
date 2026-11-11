@@ -1,0 +1,230 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "org.springframework.boot",
+    "module": "spring-boot-starter-webflux",
+    "version": "3.2.3",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "7.6.4"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.springframework.boot",
+          "module": "spring-boot-starter",
+          "version": {
+            "requires": "3.2.3"
+          }
+        },
+        {
+          "group": "org.springframework.boot",
+          "module": "spring-boot-starter-json",
+          "version": {
+            "requires": "3.2.3"
+          }
+        },
+        {
+          "group": "org.springframework.boot",
+          "module": "spring-boot-starter-reactor-netty",
+          "version": {
+            "requires": "3.2.3"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-web",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-webflux",
+          "version": {
+            "requires": "6.1.4"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spring-boot-starter-webflux-3.2.3.jar",
+          "url": "spring-boot-starter-webflux-3.2.3.jar",
+          "size": 4787,
+          "sha512": "4f479c137de22a008ce096b110ceadd1ca03bdd868ad0a5922d34fa9e74d0d3150cd7790f1066b8955e6198b54c028ac0d558129e9ccbf8c805e9d1c900114a5",
+          "sha256": "93ed254b98ee8b5dc3c7683374e4407e111c4a923ec73c6b0450ec38b9a2b14b",
+          "sha1": "94ced38f4b6b089d9708a5e7831ad182a88546fb",
+          "md5": "6b37ebfc424036b55793f9de20d46abc"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.springframework.boot",
+          "module": "spring-boot-starter",
+          "version": {
+            "requires": "3.2.3"
+          }
+        },
+        {
+          "group": "org.springframework.boot",
+          "module": "spring-boot-starter-json",
+          "version": {
+            "requires": "3.2.3"
+          }
+        },
+        {
+          "group": "org.springframework.boot",
+          "module": "spring-boot-starter-reactor-netty",
+          "version": {
+            "requires": "3.2.3"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-web",
+          "version": {
+            "requires": "6.1.4"
+          }
+        },
+        {
+          "group": "org.springframework",
+          "module": "spring-webflux",
+          "version": {
+            "requires": "6.1.4"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spring-boot-starter-webflux-3.2.3.jar",
+          "url": "spring-boot-starter-webflux-3.2.3.jar",
+          "size": 4787,
+          "sha512": "4f479c137de22a008ce096b110ceadd1ca03bdd868ad0a5922d34fa9e74d0d3150cd7790f1066b8955e6198b54c028ac0d558129e9ccbf8c805e9d1c900114a5",
+          "sha256": "93ed254b98ee8b5dc3c7683374e4407e111c4a923ec73c6b0450ec38b9a2b14b",
+          "sha1": "94ced38f4b6b089d9708a5e7831ad182a88546fb",
+          "md5": "6b37ebfc424036b55793f9de20d46abc"
+        }
+      ]
+    },
+    {
+      "name": "mavenOptionalApiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "files": [
+        {
+          "name": "spring-boot-starter-webflux-3.2.3.jar",
+          "url": "spring-boot-starter-webflux-3.2.3.jar",
+          "size": 4787,
+          "sha512": "4f479c137de22a008ce096b110ceadd1ca03bdd868ad0a5922d34fa9e74d0d3150cd7790f1066b8955e6198b54c028ac0d558129e9ccbf8c805e9d1c900114a5",
+          "sha256": "93ed254b98ee8b5dc3c7683374e4407e111c4a923ec73c6b0450ec38b9a2b14b",
+          "sha1": "94ced38f4b6b089d9708a5e7831ad182a88546fb",
+          "md5": "6b37ebfc424036b55793f9de20d46abc"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "org.springframework.boot",
+          "name": "spring-boot-starter-webflux-maven-optional",
+          "version": "3.2.3"
+        }
+      ]
+    },
+    {
+      "name": "mavenOptionalRuntimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "spring-boot-starter-webflux-3.2.3.jar",
+          "url": "spring-boot-starter-webflux-3.2.3.jar",
+          "size": 4787,
+          "sha512": "4f479c137de22a008ce096b110ceadd1ca03bdd868ad0a5922d34fa9e74d0d3150cd7790f1066b8955e6198b54c028ac0d558129e9ccbf8c805e9d1c900114a5",
+          "sha256": "93ed254b98ee8b5dc3c7683374e4407e111c4a923ec73c6b0450ec38b9a2b14b",
+          "sha1": "94ced38f4b6b089d9708a5e7831ad182a88546fb",
+          "md5": "6b37ebfc424036b55793f9de20d46abc"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "org.springframework.boot",
+          "name": "spring-boot-starter-webflux-maven-optional",
+          "version": "3.2.3"
+        }
+      ]
+    },
+    {
+      "name": "javadocElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "spring-boot-starter-webflux-3.2.3-javadoc.jar",
+          "url": "spring-boot-starter-webflux-3.2.3-javadoc.jar",
+          "size": 4744,
+          "sha512": "3aaf54970872b61a268d743bc984e46c475d668b5dbedee721aa60676e715c3f001e27356c5dbec79fb5b266888298019adf8ce08e04b170d87a4da71b128ebb",
+          "sha256": "1a168aec90a75408c578185e6f97bb594546fbd5c7fb4cad20a92f7d22f4090c",
+          "sha1": "b3f627255c166194f71f811cfd6ce1405b1c2bf7",
+          "md5": "256330670c6d3eff1a778cbbc7c0fbed"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "spring-boot-starter-webflux-3.2.3-sources.jar",
+          "url": "spring-boot-starter-webflux-3.2.3-sources.jar",
+          "size": 4743,
+          "sha512": "351c5a845d3569fe66b08f73a05ae7fd0e82ff33a4a5e7151fac350fc9411ce2fcfb105856288033c9f3d89d0365ff492fc09fd9b4f08b06b44813d4ea1992a5",
+          "sha256": "9062dbd3d9763db8d76be905e93f3f2eefc12dcd8be294380b74e9de575ccac4",
+          "sha1": "7d56051312f00450d2d9cfec1c61c7b1a414f969",
+          "md5": "e31d4df31d142886ae3ecae0dc977261"
+        }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,7 @@ public class ExamImportResponse {
     boolean answerGenerated;
     boolean hasAnswers;
     ExamImportStatus status;
+    boolean active;
     int questionCount;
     String sourceFileName;
     String sourceFileContentType;

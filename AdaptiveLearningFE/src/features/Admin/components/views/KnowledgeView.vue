@@ -1,5 +1,5 @@
 <script setup>
-import { inject } from 'vue'
+import { inject, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Check,
@@ -23,16 +23,34 @@ import {
   Upload,
   X
 } from 'lucide-vue-next'
-import {
-  DropdownMenu,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator
-} from '@/components/ui/overlay'
 import { adminContextKey } from '../../composables/adminContext'
 
 const router = useRouter()
 const admin = inject(adminContextKey)
+const openDocumentMenuId = ref(null)
+
+function toggleDocumentMenu(documentId) {
+  openDocumentMenuId.value = openDocumentMenuId.value === documentId ? null : documentId
+}
+
+function closeDocumentMenu() {
+  openDocumentMenuId.value = null
+}
+
+async function viewDocument(document) {
+  closeDocumentMenu()
+  await viewKnowledgeDocument(document)
+}
+
+async function editDocument(document) {
+  closeDocumentMenu()
+  await editKnowledgeDocument(document)
+}
+
+async function deleteDocument(document) {
+  closeDocumentMenu()
+  await removeKnowledge(document)
+}
 
 const {
   knowledgeDocuments,
@@ -101,10 +119,6 @@ const {
                 <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
                 <span>Tải lại</span>
               </button>
-              <a href="#kb-add" class="knowledge-btn-primary">
-                <Upload :size="16" />
-                <span>Nạp tài liệu mới</span>
-              </a>
             </div>
           </div>
 
@@ -176,7 +190,7 @@ const {
                 </button>
               </div>
 
-              <form class="knowledge-upload-form" @submit.prevent="importKnowledge">
+              <form v-if="false" class="knowledge-upload-form" @submit.prevent="importKnowledge">
                 <!-- DROPZONE -->
                 <label
                   class="knowledge-dropzone"
@@ -409,10 +423,6 @@ const {
                 </div>
                 <h3 class="knowledge-empty-title">Kho tri thức đang trống</h3>
                 <p class="knowledge-empty-desc">Chưa có tài liệu PDF nào được tải lên. Hãy nạp tài liệu ở khung bên trái để AI có dữ liệu sinh đề và giải thích.</p>
-                <a href="#kb-add" class="knowledge-empty-action">
-                  <Upload :size="15" />
-                  <span>Nạp tài liệu đầu tiên</span>
-                </a>
               </div>
 
               <div v-else-if="!filteredKnowledgeDocuments.length" class="knowledge-empty-state compact">
@@ -482,27 +492,34 @@ const {
                       </div>
 
                       <!-- ACTIONS MENU -->
-                      <DropdownMenu trigger-label="Tùy chọn tài liệu">
-                        <template #trigger>
-                          <button type="button" class="knowledge-more-btn" :aria-label="`Tùy chọn ${doc.title}`">
-                            <MoreHorizontal :size="18" />
+                      <div class="knowledge-document-actions">
+                        <button
+                          type="button"
+                          class="knowledge-more-btn"
+                          :aria-label="`Tùy chọn ${doc.title}`"
+                          :aria-expanded="openDocumentMenuId === doc.documentId"
+                          title="Tùy chọn tài liệu"
+                          @click.stop="toggleDocumentMenu(doc.documentId)"
+                        >
+                          <MoreHorizontal :size="18" />
+                        </button>
+                        <div v-if="openDocumentMenuId === doc.documentId" class="knowledge-inline-menu" @click.stop>
+                          <strong class="knowledge-inline-menu-title">{{ doc.title }}</strong>
+                          <button type="button" class="knowledge-inline-menu-item" @click="viewDocument(doc)">
+                            <Eye :size="15" />
+                            <span>Xem đoạn kiến thức</span>
                           </button>
-                        </template>
-                        <DropdownMenuLabel>{{ doc.title }}</DropdownMenuLabel>
-                        <DropdownMenuItem @select="viewKnowledgeDocument(doc)">
-                          <template #icon><Eye :size="15" /></template>
-                          <span>Xem đoạn kiến thức</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @select="editKnowledgeDocument(doc)">
-                          <template #icon><Pencil :size="15" /></template>
-                          <span>Sửa tài liệu</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem destructive @select="removeKnowledge(doc)">
-                          <template #icon><Trash2 :size="15" /></template>
-                          <span>Xóa khỏi kho</span>
-                        </DropdownMenuItem>
-                      </DropdownMenu>
+                          <button type="button" class="knowledge-inline-menu-item" @click="editDocument(doc)">
+                            <Pencil :size="15" />
+                            <span>Sửa tài liệu</span>
+                          </button>
+                          <div class="knowledge-inline-menu-separator"></div>
+                          <button type="button" class="knowledge-inline-menu-item is-danger" @click="deleteDocument(doc)">
+                            <Trash2 :size="15" />
+                            <span>Xóa khỏi kho</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -730,6 +747,9 @@ const {
     grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
     gap: 20px;
     align-items: start;
+  }
+  .knowledge-workspace-grid.knowledge-library-only {
+    grid-template-columns: minmax(0, 1fr);
   }
   .knowledge-panel {
     background: #FFFFFF;
@@ -1401,6 +1421,52 @@ const {
     color: #0F172A;
     border-color: #CBD5E1;
   }
+  .knowledge-document-actions {
+    position: relative;
+  }
+  .knowledge-inline-menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 6px);
+    right: 0;
+    display: grid;
+    min-width: 220px;
+    gap: 3px;
+    padding: 8px 6px;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.16), 0 4px 10px -2px rgba(15, 23, 42, 0.08);
+  }
+  .knowledge-inline-menu-title {
+    max-width: 208px;
+    overflow: hidden;
+    padding: 5px 10px 7px;
+    color: #64748B;
+    font-size: 11px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .knowledge-inline-menu-item {
+    display: flex;
+    min-height: 36px;
+    align-items: center;
+    gap: 9px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #1E293B;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .knowledge-inline-menu-item:hover { background: #F1F5F9; }
+  .knowledge-inline-menu-item.is-danger { color: #DC2626; }
+  .knowledge-inline-menu-item.is-danger:hover { background: #FEF2F2; }
+  .knowledge-inline-menu-separator { height: 1px; margin: 4px 6px; background: #E2E8F0; }
   .knowledge-pagination-bar {
     display: flex;
     align-items: center;

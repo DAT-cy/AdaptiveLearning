@@ -322,6 +322,10 @@ public class ExamServiceImpl implements ExamService {
 
     private ExamDetailResponse toDetailResponse(Exam exam, List<ExamQuestion> examQuestions) {
         ExamResponse base = toResponse(exam, examQuestions.size());
+        Map<Long, Question> questionsById = examQuestions.isEmpty()
+                ? Map.of()
+                : questionRepository.findAllById(examQuestions.stream().map(ExamQuestion::getQuestionId).toList())
+                        .stream().collect(Collectors.toMap(Question::getQuestionId, Function.identity()));
 
         return ExamDetailResponse.builder()
                 .examId(base.getExamId())
@@ -343,18 +347,35 @@ public class ExamServiceImpl implements ExamService {
                 .questionCount(base.getQuestionCount())
                 .createdAt(base.getCreatedAt())
                 .updatedAt(base.getUpdatedAt())
-                .questions(examQuestions.stream().map(this::toQuestionResponse).toList())
+                .questions(examQuestions.stream().map(item -> toQuestionResponse(item, questionsById.get(item.getQuestionId()))).toList())
                 .build();
     }
 
     private ExamQuestionResponse toQuestionResponse(ExamQuestion examQuestion) {
-        return ExamQuestionResponse.builder()
+        return toQuestionResponse(examQuestion, null);
+    }
+
+    private ExamQuestionResponse toQuestionResponse(ExamQuestion examQuestion, Question question) {
+        ExamQuestionResponse.ExamQuestionResponseBuilder builder = ExamQuestionResponse.builder()
                 .id(examQuestion.getId())
                 .examId(examQuestion.getExamId())
                 .questionId(examQuestion.getQuestionId())
                 .questionOrder(examQuestion.getQuestionOrder())
                 .pointsOverride(examQuestion.getPointsOverride())
-                .sectionName(examQuestion.getSectionName())
-                .build();
+                .sectionName(examQuestion.getSectionName());
+        if (question != null) {
+            builder.topicId(question.getTopicId())
+                    .questionType(question.getQuestionType())
+                    .difficulty(question.getDifficulty())
+                    .content(question.getContent())
+                    .contentJson(question.getContentJson())
+                    .optionsJson(question.getOptionsJson())
+                    .correctAnswer(question.getCorrectAnswer())
+                    .explanation(question.getExplanation())
+                    .points(question.getPoints())
+                    .tags(question.getTags())
+                    .questionStatus(question.getStatus());
+        }
+        return builder.build();
     }
 }
