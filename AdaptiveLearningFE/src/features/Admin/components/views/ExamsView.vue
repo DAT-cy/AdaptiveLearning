@@ -36,6 +36,7 @@ const {
   formatAdminNumber,
   formatAttemptDate,
   programName,
+  topicName,
   loadData,
   topics
 } = admin

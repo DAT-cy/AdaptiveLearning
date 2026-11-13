@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, CheckCircle2, Clock3, Flag, GraduationCap, LoaderCircle, ListChecks, Plus, Search, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3, Flag, GraduationCap, LoaderCircle, ListChecks, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import { adminService } from '@/services/adminService'
 import { useConfirm } from '@/components/ui/overlay'
 
@@ -21,6 +21,8 @@ const simulationAnswers = reactive({})
 const flaggedQuestionIds = ref(new Set())
 const draftQuestionSelections = ref([])
 const draftSavedAt = ref(null)
+const collapsedParts = ref(new Set())
+const collapsedSections = ref(new Set())
 const restoringDraft = ref(false)
 const remainingSeconds = ref(0)
 let timerInterval
@@ -34,7 +36,7 @@ const form = reactive({
   targetScoreMin: 0,
   targetScoreMax: 0,
   passingScore: 5,
-  sections: [],
+  parts: [],
 })
 const saving = ref(false)
 const previewLoading = ref(false)
@@ -46,6 +48,26 @@ const previewTotalPoints = computed(() => previewSections.value.reduce(
   (total, section) => total + section.selectedQuestionIds.length * Number(section.form.pointsPerQuestion || 0),
   0
 ))
+const questionGroups = computed(() => form.parts.flatMap((part, partIndex) =>
+  (part.sections || []).flatMap((section, sectionIndex) =>
+    (section.groups || []).map((group, groupIndex) => ({
+      ...group,
+      partName: part.name,
+      sectionName: section.name,
+      topicId: group.topicId || section.topicId || form.topicId,
+      sectionInstructions: section.instructions,
+      passage: section.passage,
+      groupInstruction: group.instruction,
+      partIndex,
+      sectionIndex,
+      groupIndex,
+    }))
+  )
+))
+const maxPoints = computed(() => questionGroups.value.reduce(
+  (total, group) => total + Number(group.questionCount || 0) * Number(group.pointsPerQuestion || 0), 0
+))
+const questionCount = computed(() => questionGroups.value.reduce((total, group) => total + Number(group.questionCount || 0), 0))
 const simulationQuestions = computed(() => previewSections.value.flatMap((section, sectionIndex) =>
   section.selectedQuestionIds.map((questionId) => ({
     question: section.candidates.find((candidate) => candidate.questionId === questionId),
@@ -125,12 +147,11 @@ const selectedTopic = computed(() => availableTopics.value.find(
   (topic) => String(topic.topicId) === String(form.topicId)
 ))
 const hasTargetScale = computed(() => Boolean(
-  selectedTopic.value?.scoreUnit && selectedTopic.value.scoreStep > 0
-  && selectedTopic.value.scoreMin != null && selectedTopic.value.scoreMax != null
-))
-const maxPoints = computed(() => form.sections.reduce(
-  (total, section) => total + Number(section.questionCount || 0) * Number(section.pointsPerQuestion || 0),
-  0
+  (!form.topicId && questionGroups.value.length > 0 && questionGroups.value.every((group) => {
+    const topic = availableTopics.value.find((item) => String(item.topicId) === String(group.topicId))
+    return topic?.scoreUnit && topic.scoreStep > 0 && topic.scoreMin != null && topic.scoreMax != null
+  })) || (selectedTopic.value?.scoreUnit && selectedTopic.value.scoreStep > 0
+    && selectedTopic.value.scoreMin != null && selectedTopic.value.scoreMax != null)
 ))
 const scoreOptions = computed(() => {
   const topic = selectedTopic.value
@@ -170,8 +191,10 @@ function resetForm() {
     targetScoreMin: range.min,
     targetScoreMax: range.max,
     passingScore: 5,
+    parts: [{ name: 'PART I', description: '', sections: [{ name: 'SECTION 1', topicId: '', instructions: '', passage: '', groups: [{ name: 'Questions 1-10', instruction: '', topicId: '', questionType: 'MULTIPLE_CHOICE', difficulty: 'MEDIUM', questionCount: 10, pointsPerQuestion: 1 }] }] }],
     sections: [{ name: 'Phần 1', questionType: 'MULTIPLE_CHOICE', difficulty: 'MEDIUM', questionCount: 10, pointsPerQuestion: 1 }],
   })
+  delete form.sections
   stage.value = 'builder'
   templateId.value = null
   previewSections.value = []
@@ -188,7 +211,7 @@ async function initializeDialog() {
   try {
     const stored = localStorage.getItem(storageKey())
     const parsed = stored ? JSON.parse(stored) : null
-    if (parsed?.version === 1 && parsed.form && Array.isArray(parsed.form.sections)) draft = parsed
+    if (parsed?.version === 1 && parsed.form && (Array.isArray(parsed.form.parts) || Array.isArray(parsed.form.sections))) draft = parsed
   } catch {
     draft = null
   }
@@ -201,6 +224,10 @@ async function initializeDialog() {
   }
 
   const restoredForm = JSON.parse(JSON.stringify(draft.form))
+  if (!Array.isArray(restoredForm.parts)) {
+    restoredForm.parts = [{ name: 'PART I', description: '', sections: [{ name: 'SECTION 1', instructions: '', passage: '', groups: restoredForm.sections || [] }] }]
+  }
+  delete restoredForm.sections
   Object.assign(form, restoredForm)
   stage.value = 'builder'
   templateId.value = null
@@ -282,6 +309,41 @@ function moveSection(index, direction) {
   }
 }
 
+function newGroup() {
+  return { name: `Questions ${questionCount.value + 1}-${questionCount.value + 10}`, instruction: '', topicId: '', questionType: 'MULTIPLE_CHOICE', difficulty: 'MEDIUM', questionCount: 10, pointsPerQuestion: 1 }
+}
+function addPart() {
+  form.parts.push({ name: `PART ${String.fromCharCode(65 + form.parts.length)}`, description: '', sections: [{ name: `SECTION ${form.parts.length + 1}`, topicId: '', instructions: '', passage: '', groups: [newGroup()] }] })
+}
+function removePart(index) { if (form.parts.length > 1) form.parts.splice(index, 1) }
+function addExamSection(part) { part.sections.push({ name: `SECTION ${part.sections.length + 1}`, topicId: '', instructions: '', passage: '', groups: [newGroup()] }) }
+function removeExamSection(part, index) { if (part.sections.length > 1) part.sections.splice(index, 1) }
+function addGroup(section) { section.groups.push(newGroup()) }
+function removeGroup(section, index) { if (section.groups.length > 1) section.groups.splice(index, 1) }
+function movePart(index, direction) {
+  const target = index + direction
+  if (target < 0 || target >= form.parts.length) return
+  const [part] = form.parts.splice(index, 1)
+  form.parts.splice(target, 0, part)
+}
+function sectionKey(partIndex, sectionIndex) { return `${partIndex}:${sectionIndex}` }
+function togglePart(index) {
+  const next = new Set(collapsedParts.value)
+  if (next.has(index)) next.delete(index)
+  else next.add(index)
+  collapsedParts.value = next
+}
+function toggleSection(partIndex, sectionIndex) {
+  const key = sectionKey(partIndex, sectionIndex)
+  const next = new Set(collapsedSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedSections.value = next
+}
+function scrollToStructure(target) {
+  document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 watch(() => props.open, (open) => {
   if (open) void initializeDialog()
 })
@@ -305,18 +367,19 @@ watch(maxPoints, (value) => {
 })
 
 async function createTemplate() {
+  const representativeTopicId = Number(form.topicId || questionGroups.value.find((group) => group.topicId)?.topicId || 0)
   const template = await adminService.createExamTemplate({
       certificateId: Number(form.certificateId),
-      topicId: Number(form.topicId),
+      topicId: representativeTopicId,
       title: form.title.trim(),
       description: form.description.trim(),
       durationMinutes: Number(form.durationMinutes),
       targetScoreMin: Number(form.targetScoreMin),
       targetScoreMax: Number(form.targetScoreMax),
       passingScore: Number(form.passingScore),
-      sections: form.sections.map((section) => ({
-        topicId: Number(form.topicId),
-        name: section.name.trim(),
+      sections: questionGroups.value.map((section) => ({
+        topicId: Number(section.topicId),
+        name: `${section.partName} / ${section.sectionName} / ${section.name}`.trim(),
         questionType: section.questionType,
         questionCount: Number(section.questionCount),
         pointsPerQuestion: Number(section.pointsPerQuestion),
@@ -344,7 +407,11 @@ async function deactivateDraftTemplate() {
 async function loadPreview() {
   if (previewLoading.value || saving.value) return
   error.value = ''
-  if (!selectedTopic.value) {
+  if (!form.topicId && questionGroups.value.some((group) => !group.topicId)) {
+    error.value = 'Hãy chọn kỹ năng cho từng Section khi không chọn kỹ năng chung.'
+    return
+  }
+   if (form.topicId && !selectedTopic.value) {
     error.value = 'Chọn kỳ thi và kỹ năng hoặc môn thi trước khi xem trước.'
     return
   }
@@ -363,17 +430,17 @@ async function loadPreview() {
   previewLoading.value = true
   try {
     if (!templateId.value) await createTemplate()
-      const sections = await Promise.all(form.sections.map(async (section) => {
+    const sections = await Promise.all(questionGroups.value.map(async (section) => {
       const candidates = asList(await adminService.questions({
         certificateId: Number(form.certificateId),
-        topicId: Number(form.topicId),
+        topicId: Number(section.topicId),
         questionType: section.questionType,
         difficulty: section.difficulty,
         status: 'APPROVED',
       }))
       const available = candidates.filter((question) =>
         String(question.certificateId) === String(form.certificateId)
-        && String(question.topicId) === String(form.topicId)
+        && String(question.topicId) === String(section.topicId)
         && question.questionType?.toUpperCase() === section.questionType
         && question.difficulty === section.difficulty
         && question.status === 'APPROVED'
@@ -499,7 +566,7 @@ async function publishExam() {
   saving.value = true
   try {
     await adminService.generateExamFromTemplate(templateId.value, {
-      sectionDifficulties: form.sections.map((section) => section.difficulty),
+      sectionDifficulties: questionGroups.value.map((section) => section.difficulty),
       questionIdsBySection: previewSections.value.map((section) => section.selectedQuestionIds),
     })
     await deactivateDraftTemplate()
@@ -526,11 +593,25 @@ async function publishExam() {
       <button type="button" class="exam-creation-exit" aria-label="Thoát tạo bài kiểm tra" title="Thoát tạo bài kiểm tra" @click="closeDialog"><X :size="20" /></button>
     </header>
     <div class="exam-creation-body">
-      <form id="exam-builder-form" class="exam-builder-form" @submit.prevent="stage === 'preview' ? publishExam() : loadPreview()">
-        <div v-if="stage === 'builder'" class="exam-builder-content">
+      <form id="exam-builder-form" class="exam-builder-form" novalidate @submit.prevent="stage === 'preview' ? publishExam() : loadPreview()">
+        <div v-if="stage === 'builder'" class="exam-builder-content builder-workspace">
+          <aside class="structure-tree" aria-label="Cây cấu trúc đề thi">
+            <div class="structure-tree-heading"><strong>Cấu trúc đề thi</strong><small>{{ questionCount }} câu</small></div>
+            <nav>
+              <div v-for="(part, partIndex) in form.parts" :key="`tree-part-${partIndex}`" class="tree-part">
+                <button type="button" class="tree-node tree-part-node" @click="scrollToStructure(`part-${partIndex}`)"><ChevronDown :size="14" /><span>{{ part.name || `PART ${partIndex + 1}` }}</span></button>
+                <div v-for="(section, sectionIndex) in part.sections" :key="`tree-section-${partIndex}-${sectionIndex}`" class="tree-section">
+                  <button type="button" class="tree-node tree-section-node" @click="scrollToStructure(`section-${partIndex}-${sectionIndex}`)"><ChevronDown :size="13" /><span>{{ section.name || `SECTION ${sectionIndex + 1}` }}</span><small>{{ (section.groups || []).reduce((sum, group) => sum + Number(group.questionCount || 0), 0) }}</small></button>
+                  <button v-for="(group, groupIndex) in section.groups" :key="`tree-group-${partIndex}-${sectionIndex}-${groupIndex}`" type="button" class="tree-node tree-group-node" @click="scrollToStructure(`group-${partIndex}-${sectionIndex}-${groupIndex}`)"><span class="tree-branch"></span><span>{{ group.name || `Nhóm ${groupIndex + 1}` }}</span><small>{{ group.questionCount || 0 }}</small></button>
+                </div>
+              </div>
+            </nav>
+          </aside>
+          <div class="builder-main-column">
           <section class="exam-builder-section exam-details-section">
             <div class="exam-builder-section-heading"><span>01</span><div><h3>Thông tin bài thi</h3><p>Chọn kỳ thi và kỹ năng/môn áp dụng cho toàn bộ bài.</p></div></div>
             <div class="exam-builder-grid">
+              <label class="topic-mode-field">Kỹ năng / môn thi<select v-model="form.topicId"><option value="">Không chọn kỹ năng chung</option><option v-for="topic in availableTopics" :key="`global-${topic.topicId}`" :value="String(topic.topicId)">{{ topic.name }}</option></select><small>Để trống nếu mỗi Section dùng một kỹ năng riêng.</small></label>
               <label>Kỳ thi / chứng chỉ<select v-model="form.certificateId" required><option disabled value="">Chọn kỳ thi</option><option v-for="program in programs" :key="program.certificateId" :value="String(program.certificateId)">{{ program.name }} ({{ program.code }})</option></select></label>
               <label>Kỹ năng / môn thi<select v-model="form.topicId" required><option disabled value="">Chọn một kỹ năng hoặc môn thi</option><option v-for="topic in availableTopics" :key="topic.topicId" :value="String(topic.topicId)">{{ topic.name }}</option></select></label>
               <label class="span-two">Tên bài kiểm tra<input v-model.trim="form.title" required maxlength="200" placeholder="Ví dụ: IELTS Academic - Reading Practice" /></label>
@@ -549,15 +630,35 @@ async function publishExam() {
             </div>
           </section>
 
-          <section class="exam-builder-section structure-section">
+           <section v-if="false" class="exam-builder-section structure-section">
             <div class="exam-builder-section-heading"><span>02</span><div><h3>Cấu trúc bài kiểm tra</h3><p>{{ form.sections.length }} phần · {{ form.sections.reduce((sum, section) => sum + Number(section.questionCount || 0), 0) }} câu · {{ maxPoints }} điểm</p></div><button class="exam-builder-add-button" type="button" @click="addSection"><Plus :size="16" /> Thêm phần</button></div>
             <article v-for="(section, index) in form.sections" :key="section" class="exam-builder-part">
               <header class="exam-builder-part-header"><span class="exam-builder-part-number">{{ String(index + 1).padStart(2, '0') }}</span><strong>Phần {{ index + 1 }}</strong><div class="exam-builder-part-actions"><button type="button" title="Di chuyển lên" aria-label="Di chuyển phần lên" :disabled="index === 0" @click="moveSection(index, -1)"><ArrowUp :size="16" /></button><button type="button" title="Di chuyển xuống" aria-label="Di chuyển phần xuống" :disabled="index === form.sections.length - 1" @click="moveSection(index, 1)"><ArrowDown :size="16" /></button><button type="button" title="Xóa phần" aria-label="Xóa phần" :disabled="form.sections.length <= 1" @click="removeSection(index)"><Trash2 :size="16" /></button></div></header>
               <div class="exam-builder-part-fields"><label>Tên phần<input v-model.trim="section.name" required maxlength="120" :aria-label="`Tên phần ${index + 1}`" /></label><label>Dạng câu hỏi<select v-model="section.questionType"><option value="MULTIPLE_CHOICE">Trắc nghiệm</option><option value="TRUE_FALSE">Đúng / sai</option><option value="ESSAY">Tự luận</option><option value="FILL_BLANK">Điền khuyết</option></select></label><label>Độ khó<select v-model="section.difficulty"><option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option></select></label><label>Số câu<input v-model.number="section.questionCount" type="number" min="1" max="200" required /></label><label>Điểm / câu<input v-model.number="section.pointsPerQuestion" type="number" min="0.1" step="0.1" required /></label></div>
             </article>
-          </section>
+           </section>
+           <section class="exam-builder-section structured-editor">
+             <div class="exam-builder-section-heading"><span>02</span><div><h3>Xây dựng cấu trúc đề thi</h3><p>{{ form.parts.length }} Part · {{ questionGroups.length }} nhóm câu hỏi · {{ questionCount }} câu · {{ maxPoints }} điểm</p></div><button class="exam-builder-add-button" type="button" @click="addPart"><Plus :size="16" /> Thêm Part</button></div>
+            <article v-for="(part, partIndex) in form.parts" :id="`part-${partIndex}`" :key="part" class="exam-builder-part hierarchy-part" :class="{ 'is-collapsed': collapsedParts.has(partIndex) }">
+              <button type="button" class="collapse-toggle part-collapse-toggle" :aria-expanded="String(!collapsedParts.has(partIndex))" @click="togglePart(partIndex)"><ChevronRight v-if="collapsedParts.has(partIndex)" :size="15" /><ChevronDown v-else :size="15" /> {{ collapsedParts.has(partIndex) ? 'Mở rộng Part' : 'Thu gọn Part' }}</button>
+               <header class="exam-builder-part-header"><span class="exam-builder-part-number">{{ String(partIndex + 1).padStart(2, '0') }}</span><input v-model.trim="part.name" class="structure-title-input" aria-label="Tên Part" /><div class="exam-builder-part-actions"><button type="button" title="Di chuyển lên" :disabled="partIndex === 0" @click="movePart(partIndex, -1)"><ArrowUp :size="16" /></button><button type="button" title="Di chuyển xuống" :disabled="partIndex === form.parts.length - 1" @click="movePart(partIndex, 1)"><ArrowDown :size="16" /></button><button type="button" title="Xóa Part" :disabled="form.parts.length <= 1" @click="removePart(partIndex)"><Trash2 :size="16" /></button></div></header>
+               <label class="structure-description">Mô tả Part<textarea v-model.trim="part.description" rows="2" placeholder="Mục tiêu hoặc ngữ cảnh của Part"></textarea></label>
+                <div v-for="(section, sectionIndex) in part.sections" :id="`section-${partIndex}-${sectionIndex}`" :key="section" class="hierarchy-section" :class="{ 'is-collapsed': collapsedSections.has(sectionKey(partIndex, sectionIndex)) }">
+                  <button type="button" class="collapse-toggle section-collapse-toggle" :aria-expanded="String(!collapsedSections.has(sectionKey(partIndex, sectionIndex)))" @click="toggleSection(partIndex, sectionIndex)"><ChevronRight v-if="collapsedSections.has(sectionKey(partIndex, sectionIndex))" :size="14" /><ChevronDown v-else :size="14" /> {{ collapsedSections.has(sectionKey(partIndex, sectionIndex)) ? 'Mở rộng Section' : 'Thu gọn Section' }}</button>
+                  <label class="section-topic-field">Kỹ năng của Section<select v-model="section.topicId"><option value="">Chọn kỹ năng</option><option v-for="topic in availableTopics" :key="`section-${topic.topicId}`" :value="String(topic.topicId)">{{ topic.name }}</option></select></label>
+                 <header class="hierarchy-section-header"><input v-model.trim="section.name" aria-label="Tên Section" /><button type="button" class="exam-builder-add-button" @click="addGroup(section)"><Plus :size="14" /> Thêm nhóm</button><button type="button" class="icon-danger" title="Xóa Section" :disabled="part.sections.length <= 1" @click="removeExamSection(part, sectionIndex)"><Trash2 :size="14" /></button></header>
+                 <div class="structure-context-grid"><label>Hướng dẫn làm bài<textarea v-model.trim="section.instructions" rows="2" placeholder="Complete the sentences below..."></textarea></label><label>Nội dung chung / Passage / Audio<textarea v-model.trim="section.passage" rows="2" placeholder="Đoạn văn, hội thoại hoặc ngữ cảnh dùng chung"></textarea></label></div>
+                <div v-for="(group, groupIndex) in section.groups" :id="`group-${partIndex}-${sectionIndex}-${groupIndex}`" :key="group" class="question-group-editor">
+                   <div class="question-group-heading"><strong>Nhóm câu hỏi {{ groupIndex + 1 }}</strong><button type="button" class="icon-danger" title="Xóa nhóm" :disabled="section.groups.length <= 1" @click="removeGroup(section, groupIndex)"><Trash2 :size="14" /></button></div>
+                   <div class="exam-builder-part-fields"><label>Tên nhóm<input v-model.trim="group.name" required maxlength="120" /></label><label>Hướng dẫn nhóm<input v-model.trim="group.instruction" placeholder="Questions 1-4..."></label><label>Dạng câu hỏi<select v-model="group.questionType"><option value="MULTIPLE_CHOICE">Trắc nghiệm</option><option value="MULTIPLE_SELECT">Nhiều lựa chọn</option><option value="TRUE_FALSE">Đúng / sai</option><option value="YES_NO_NOT_GIVEN">Yes / No / Not Given</option><option value="FILL_BLANK">Điền khuyết</option><option value="MATCHING">Matching</option><option value="SHORT_ANSWER">Trả lời ngắn</option><option value="ESSAY">Tự luận</option></select></label><label>Độ khó<select v-model="group.difficulty"><option value="EASY">Dễ</option><option value="MEDIUM">Trung bình</option><option value="HARD">Khó</option></select></label><label>Số câu<input v-model.number="group.questionCount" type="number" min="1" max="200" required /></label><label>Điểm / câu<input v-model.number="group.pointsPerQuestion" type="number" min="0.1" step="0.1" required /></label></div>
+                 </div>
+               </div>
+               <button type="button" class="section-add-button" @click="addExamSection(part)"><Plus :size="14" /> Thêm Section</button>
+             </article>
+           </section>
           <p v-if="error" class="exam-builder-error" role="alert">{{ error }}</p>
         </div>
+          </div>
         <div v-else class="exam-builder-content preview-content">
           <div class="preview-stage-toolbar">
             <div><span class="preview-stage-kicker">MÔ PHỎNG TRẢI NGHIỆM THÍ SINH</span><h2>{{ form.title }}</h2><p>{{ selectedTopic?.name }} · {{ simulationQuestions.length }} câu · {{ previewTotalPoints }} điểm · mục tiêu {{ form.targetScoreMin }}–{{ form.targetScoreMax }} {{ selectedTopic?.scoreUnit }}</p></div>
@@ -629,6 +730,47 @@ async function publishExam() {
 
 <style scoped>
 .exam-creation-page { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 4vh 4vw; overflow: hidden; background: var(--overlay-scrim, rgba(15, 23, 42, 0.45)); backdrop-filter: blur(4px); color: var(--text, #0F172A); font-family: inherit; }
+.structured-editor { display: grid; gap: 16px; }
+.builder-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
+.builder-main-column { min-width: 0; display: grid; gap: 16px; }
+.structure-tree { position: sticky; top: 0; max-height: calc(100vh - 180px); overflow: auto; padding: 12px; border-right: 1px solid #e2e8f0; background: #fff; }
+.structure-tree-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 12px; }
+.structure-tree-heading small { color: #94a3b8; font-size: 10px; }
+.tree-part { margin-top: 9px; }
+.tree-section { margin-left: 8px; border-left: 1px solid #dbe4f0; }
+.tree-node { display: flex; width: 100%; align-items: center; gap: 5px; min-width: 0; padding: 6px 5px; border: 0; background: transparent; color: #475569; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.tree-node:hover, .tree-node:focus-visible { border-radius: 5px; color: #1d4ed8; background: #eff6ff; outline: none; }
+.tree-node span:not(.tree-branch) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-node small { margin-left: auto; color: #94a3b8; font-size: 10px; }
+.tree-part-node { color: #0f172a; font-weight: 700; }
+.tree-group-node { margin-left: 8px; color: #64748b; font-size: 10px; }
+.tree-branch { width: 7px; height: 1px; flex: 0 0 auto; background: #cbd5e1; }
+.exam-details-section .exam-builder-grid > label:nth-child(3) { display: none; }
+.topic-mode-field, .section-topic-field { display: grid; gap: 5px; color: #64748b; font-size: 11px; }
+.topic-mode-field small { color: #94a3b8; font-size: 10px; }
+.section-topic-field { margin: 8px 0; max-width: 360px; }
+.topic-mode-field select, .section-topic-field select { min-height: 36px; padding: 0 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #334155; }
+.hierarchy-part { padding: 16px; border: 1px solid #dbe4f0; border-radius: 10px; background: #fff; }
+.collapse-toggle { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 8px; border: 1px solid #dbe4f0; border-radius: 6px; color: #475569; background: #f8fafc; font: inherit; font-size: 11px; cursor: pointer; }
+.part-collapse-toggle { float: right; margin: -3px 0 6px 8px; }
+.section-collapse-toggle { margin-bottom: 8px; }
+.hierarchy-part.is-collapsed > :not(.exam-builder-part-header):not(.part-collapse-toggle) { display: none; }
+.hierarchy-section.is-collapsed > :not(.section-collapse-toggle):not(.exam-builder-part-header) { display: none; }
+.structure-title-input { min-width: 0; flex: 1; border: 0; border-bottom: 1px solid #cbd5e1; background: transparent; color: #0f172a; font: inherit; font-weight: 700; }
+.structure-description { display: grid; gap: 6px; margin: 12px 0; color: #64748b; font-size: 11px; }
+.hierarchy-section { margin-top: 12px; padding: 12px; border-left: 3px solid #2563eb; background: #f8fafc; }
+.hierarchy-section-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.hierarchy-section-header input { min-width: 0; flex: 1; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; font: inherit; font-weight: 700; }
+.structure-context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.structure-context-grid label { display: grid; gap: 5px; color: #64748b; font-size: 11px; }
+.structure-context-grid textarea, .structure-description textarea { width: 100%; padding: 8px 10px; border: 1px solid #dbe4f0; border-radius: 6px; background: #fff; font: inherit; resize: vertical; }
+.question-group-editor { margin-top: 10px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }
+.question-group-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #334155; font-size: 12px; }
+.icon-danger { display: inline-grid; width: 30px; height: 30px; place-items: center; border: 1px solid #fecaca; border-radius: 6px; color: #b91c1c; background: #fff; cursor: pointer; }
+.icon-danger:disabled { opacity: .4; cursor: not-allowed; }
+.section-add-button { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; padding: 7px 10px; border: 1px dashed #93c5fd; border-radius: 6px; color: #1d4ed8; background: #eff6ff; font: inherit; font-size: 11px; cursor: pointer; }
+@media (max-width: 760px) { .structure-context-grid { grid-template-columns: 1fr; } .hierarchy-section-header { flex-wrap: wrap; } .hierarchy-section-header input { flex-basis: 100%; } }
+@media (max-width: 900px) { .builder-workspace { grid-template-columns: 1fr; } .structure-tree { position: static; max-height: none; border-right: 0; border-bottom: 1px solid #e2e8f0; } .structure-tree nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; } }
 .exam-creation-window { display: grid; width: 100%; height: 100%; min-width: 0; grid-template-rows: 68px minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--ds-border, #E2E8F0); border-radius: var(--radius-2xl, 16px); background: var(--bg-page, #F8FAFC); box-shadow: 0 24px 48px -12px rgba(15, 23, 42, 0.18); }
 .exam-creation-topbar { display: flex; min-width: 0; align-items: center; gap: 18px; padding: 0 clamp(16px, 3vw, 40px); border-bottom: 1px solid var(--ds-border, #E2E8F0); background: var(--surface, #FFFFFF); }
 .exam-creation-brand { display: flex; min-width: 0; flex: 1; align-items: center; gap: 12px; }
@@ -982,6 +1124,26 @@ async function publishExam() {
   color: #9b3028;
   background: #fff7f6;
 }
+
+/* Keep the builder calm and scannable while preserving the dense editor workflow. */
+.exam-creation-window { max-width: 1560px; }
+.exam-creation-body { padding: 22px clamp(18px, 3vw, 42px) 30px; background: #f5f8fc; }
+.builder-workspace { grid-template-columns: 238px minmax(0, 1fr); gap: 22px; }
+.structure-tree { top: 0; padding: 15px 12px; border: 1px solid #e1e8f0; border-radius: 12px; background: #fff; box-shadow: 0 8px 22px rgba(15, 23, 42, .04); }
+.structure-tree-heading { padding: 2px 5px 12px; border-bottom-color: #e8eef5; }
+.tree-part { margin-top: 11px; padding: 4px; border: 1px solid #edf1f6; border-radius: 8px; background: #fbfdff; }
+.tree-section { margin: 4px 0 0 8px; padding-left: 5px; border-left-color: #dce6ef; }
+.tree-node { border-radius: 6px; }
+.tree-part-node { padding: 8px 6px; color: #16324f; background: #f0f8f8; }
+.tree-section-node { color: #31536f; font-weight: 600; }
+.tree-group-node { color: #7890a4; }
+.exam-builder-section { border-color: #e1e8f0; border-radius: 12px; box-shadow: 0 7px 22px rgba(15, 23, 42, .035); }
+.exam-details-section { border-top: 3px solid #1f7a78; }
+.structured-editor { gap: 14px; }
+.hierarchy-part { border-color: #dce6ef; box-shadow: 0 5px 16px rgba(15, 23, 42, .03); }
+.hierarchy-section { border: 1px solid #dce8f0; border-left: 3px solid #398f8d; border-radius: 8px; background: #f8fbfd; }
+.question-group-editor { border-color: #e3ebf2; box-shadow: 0 2px 7px rgba(15, 23, 42, .025); }
+.exam-creation-footer { box-shadow: 0 -5px 18px rgba(15, 23, 42, .04); }
 
 @media (max-width: 768px) {
   .exam-creation-page { padding: 0; }

@@ -31,14 +31,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional
-@RequiredArgsConstructor
 @Slf4j
 public class AiServiceImpl implements AiService {
 
@@ -55,6 +54,23 @@ public class AiServiceImpl implements AiService {
     private final ExamRepository examRepository;
     private final QuestionRepository questionRepository;
     private final RagService ragService;
+
+    @Autowired
+    public AiServiceImpl(AiEvaluationRepository evaluationRepository, AiJobRepository jobRepository,
+            RubricRepository rubricRepository, AiProvider aiProvider, ObjectMapper objectMapper,
+            ExamAttemptRepository attemptRepository, ExamQuestionRepository examQuestionRepository,
+            ExamRepository examRepository, QuestionRepository questionRepository, RagService ragService) {
+        this.evaluationRepository = evaluationRepository;
+        this.jobRepository = jobRepository;
+        this.rubricRepository = rubricRepository;
+        this.aiProvider = aiProvider;
+        this.objectMapper = objectMapper;
+        this.attemptRepository = attemptRepository;
+        this.examQuestionRepository = examQuestionRepository;
+        this.examRepository = examRepository;
+        this.questionRepository = questionRepository;
+        this.ragService = ragService;
+    }
 
     /** Keeps the previous constructor contract for existing unit tests and integrations. */
     public AiServiceImpl(AiEvaluationRepository evaluationRepository, AiJobRepository jobRepository,

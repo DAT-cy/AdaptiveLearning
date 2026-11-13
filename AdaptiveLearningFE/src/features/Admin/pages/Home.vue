@@ -99,7 +99,7 @@ import '../styles/shared.css'
     if (raw === 'knowledge-base') return 'knowledge'
     return sectionIds.includes(raw) ? raw : 'overview'
   }
-  const initialSection = resolveSectionId(route.query.section)
+  const initialSection = resolveSectionId(route.params.section || route.query.section)
   const activeSection = ref(initialSection)
 
   const users = ref([])
@@ -180,6 +180,7 @@ import '../styles/shared.css'
   const topics = ref([])
   const query = ref('')
   const loading = ref(false)
+  let loadDataGuard
   const pageError = ref('')
   const adminModalError = ref('')
   const mobileMenuOpen = ref(false)
@@ -710,6 +711,8 @@ import '../styles/shared.css'
 
   async function loadData() {
     loading.value = true
+    clearTimeout(loadDataGuard)
+    loadDataGuard = setTimeout(() => { loading.value = false }, 8000)
     pageError.value = ''
     const results = await Promise.allSettled([
       adminService.users(),
@@ -734,6 +737,12 @@ import '../styles/shared.css'
       plans.value = asList(results[5].value)
     if (results[6].status === 'fulfilled')
       userBillings.value = asList(results[6].value)
+    // Do not keep the exam list blocked on optional skill metadata requests.
+    loading.value = false
+    clearTimeout(loadDataGuard)
+    if (results.every((result) => result.status === 'rejected')) {
+      pageError.value = 'Không thể kết nối backend. Kiểm tra API tại http://localhost:9090 và biến môi trường JWT_SECRET.'
+    }
     if (programs.value.length) {
       const topicResults = await Promise.allSettled(
         programs.value.map((program) =>
@@ -821,9 +830,9 @@ import '../styles/shared.css'
   }
 
   watch(
-    () => route.query.section,
-    (section) => {
-      activeSection.value = resolveSectionId(section)
+    () => [route.params.section, route.query.section],
+    ([section, querySection]) => {
+      activeSection.value = resolveSectionId(section || querySection)
     }
   )
   watch(() => knowledgeForm.topicId, () => {
@@ -1801,6 +1810,7 @@ import '../styles/shared.css'
     openAccount,
     openProgram,
     formatAdminNumber,
+    topicName,
     formatPercent,
     formatSignedPoint,
     formatTrendDate,

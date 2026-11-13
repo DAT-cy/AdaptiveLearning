@@ -32,7 +32,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.io.ByteArrayOutputStream;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -41,7 +41,6 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 
 @Service
 @Transactional
-@RequiredArgsConstructor
 public class RagServiceImpl implements RagService {
     private static final int CHUNK_SIZE = 700;
     private static final int CHUNK_OVERLAP = 120;
@@ -54,6 +53,19 @@ public class RagServiceImpl implements RagService {
     private final ExamRepository exams;
     private final AiProvider aiProvider;
     private final FileStorage fileStorage;
+
+    @Autowired
+    public RagServiceImpl(StudyDocumentRepository documents, DocumentChunkRepository chunks,
+            TopicRepository topics, CertificateRepository certificates, ExamRepository exams,
+            AiProvider aiProvider, FileStorage fileStorage) {
+        this.documents = documents;
+        this.chunks = chunks;
+        this.topics = topics;
+        this.certificates = certificates;
+        this.exams = exams;
+        this.aiProvider = aiProvider;
+        this.fileStorage = fileStorage;
+    }
 
     /** Backwards-compatible constructor used by existing focused unit tests. */
     public RagServiceImpl(StudyDocumentRepository documents, DocumentChunkRepository chunks, TopicRepository topics,
