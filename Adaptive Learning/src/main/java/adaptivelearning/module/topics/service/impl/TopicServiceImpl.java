@@ -28,6 +28,7 @@ public class TopicServiceImpl implements TopicService {
     @Override
     public List<TopicResponse> getAll() {
         return topicRepository.findAll().stream()
+                .filter(Topic::isActive)
                 .map(this::toResponse)
                 .toList();
     }
@@ -40,6 +41,7 @@ public class TopicServiceImpl implements TopicService {
     @Override
     public List<TopicResponse> getByCertificateId(Long certificateId) {
         return topicRepository.findByCertificateId(certificateId).stream()
+                .filter(Topic::isActive)
                 .map(this::toResponse)
                 .toList();
     }
@@ -47,6 +49,7 @@ public class TopicServiceImpl implements TopicService {
     @Override
     public List<TopicResponse> getByType(TopicType type) {
         return topicRepository.findAll().stream()
+                .filter(Topic::isActive)
                 .filter(topic -> topic.getType() == type)
                 .map(this::toResponse)
                 .toList();
@@ -55,6 +58,7 @@ public class TopicServiceImpl implements TopicService {
     @Override
     public List<TopicResponse> getChildren(Long parentId) {
         return topicRepository.findByParentId(parentId).stream()
+                .filter(Topic::isActive)
                 .map(this::toResponse)
                 .toList();
     }
@@ -87,6 +91,7 @@ public class TopicServiceImpl implements TopicService {
     @Override
     public List<TopicResponse> getTreeByCertificate(Long certificateId) {
         List<TopicResponse> allTopics = topicRepository.findByCertificateId(certificateId).stream()
+                .filter(Topic::isActive)
                 .map(this::toResponse)
                 .toList();
 

@@ -22,6 +22,8 @@ import adaptivelearning.module.ai.gateway.AiProvider;
 import adaptivelearning.module.certificates.repository.CertificateRepository;
 import adaptivelearning.module.topics.repository.TopicRepository;
 import adaptivelearning.shared.enums.DocumentStatus;
+import adaptivelearning.shared.enums.KnowledgeDocumentType;
+import adaptivelearning.module.exams.repository.ExamRepository;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -49,8 +51,15 @@ public class RagServiceImpl implements RagService {
     private final DocumentChunkRepository chunks;
     private final TopicRepository topics;
     private final CertificateRepository certificates;
+    private final ExamRepository exams;
     private final AiProvider aiProvider;
     private final FileStorage fileStorage;
+
+    /** Backwards-compatible constructor used by existing focused unit tests. */
+    public RagServiceImpl(StudyDocumentRepository documents, DocumentChunkRepository chunks, TopicRepository topics,
+            CertificateRepository certificates, AiProvider aiProvider, FileStorage fileStorage) {
+        this(documents, chunks, topics, certificates, null, aiProvider, fileStorage);
+    }
 
     @Override
     public StudyDocumentResponse uploadDocument(Long userId, DocumentUploadRequest request) {
@@ -133,19 +142,17 @@ public class RagServiceImpl implements RagService {
         if (!lowerName.endsWith(".txt") && !lowerName.endsWith(".md")) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
-        if (request.getTopicId() != null) {
-            var topic = topics.findById(request.getTopicId())
-                    .filter(item -> request.getCertificateId().equals(item.getCertificateId()))
-                    .orElseThrow(() -> new CommonException(ErrorCode.BAD_REQUEST));
-            if (!topic.isActive()) {
-                throw new CommonException(ErrorCode.BAD_REQUEST);
-            }
-        }
+        KnowledgeDocumentType type = request.getDocumentType() == null
+                ? KnowledgeDocumentType.KNOWLEDGE : request.getDocumentType();
+        validateKnowledgeScope(request.getCertificateId(), request.getTopicId(), request.getExamId(), type);
 
         StudyDocument document = documents.save(StudyDocument.builder()
                 .userId(adminId)
                 .certificateId(request.getCertificateId())
                 .topicId(request.getTopicId())
+                .examId(request.getExamId())
+                .documentType(type)
+                .description(trimToNull(request.getDescription()))
                 .shared(true)
                 .title(request.getTitle().trim())
                 .fileName(fileName)
@@ -159,18 +166,16 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public StudyDocumentResponse uploadKnowledgePdf(
-            Long adminId, String title, Long certificateId, Long topicId, MultipartFile file) {
+            Long adminId, String title, String description, Long certificateId, Long topicId,
+            Long examId, KnowledgeDocumentType documentType, MultipartFile file) {
         if (title == null || title.isBlank() || title.trim().length() > 200) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
         if (certificateId == null || !certificates.existsById(certificateId)) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
-        if (topicId != null) {
-            var topic = topics.findById(topicId)
-                    .filter(item -> certificateId.equals(item.getCertificateId()) && item.isActive())
-                    .orElseThrow(() -> new CommonException(ErrorCode.BAD_REQUEST));
-        }
+        KnowledgeDocumentType type = documentType == null ? KnowledgeDocumentType.KNOWLEDGE : documentType;
+        validateKnowledgeScope(certificateId, topicId, examId, type);
         if (file == null || file.isEmpty() || file.getSize() > 20L * 1024 * 1024) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
@@ -197,6 +202,9 @@ public class RagServiceImpl implements RagService {
                 .userId(adminId)
                 .certificateId(certificateId)
                 .topicId(topicId)
+                .examId(examId)
+                .documentType(type)
+                .description(trimToNull(description))
                 .shared(true)
                 .title(title.trim())
                 .fileName(fileName)
@@ -220,7 +228,9 @@ public class RagServiceImpl implements RagService {
         if (!certificates.existsById(request.getCertificateId())) {
             throw new CommonException(ErrorCode.BAD_REQUEST);
         }
-        validateKnowledgeTopic(request.getCertificateId(), request.getTopicId());
+        KnowledgeDocumentType type = request.getDocumentType() == null
+                ? KnowledgeDocumentType.KNOWLEDGE : request.getDocumentType();
+        validateKnowledgeScope(request.getCertificateId(), request.getTopicId(), request.getExamId(), type);
 
         StudyDocument document = sharedDocument(id);
         String content = request.getContent().trim();
@@ -228,17 +238,37 @@ public class RagServiceImpl implements RagService {
         document.setTitle(request.getTitle().trim());
         document.setCertificateId(request.getCertificateId());
         document.setTopicId(request.getTopicId());
+        document.setExamId(request.getExamId());
+        document.setDocumentType(type);
+        document.setDescription(trimToNull(request.getDescription()));
         document.setSourceContent(content);
         document.setChunkCount(0);
         saveChunks(document, content);
         return to(documents.save(document));
     }
 
-    private void validateKnowledgeTopic(Long certificateId, Long topicId) {
-        if (topicId == null) return;
+    private void validateKnowledgeScope(Long certificateId, Long topicId, Long examId, KnowledgeDocumentType type) {
+        if (type == KnowledgeDocumentType.SCORING_CRITERIA && topicId == null) {
+            throw new CommonException(ErrorCode.BAD_REQUEST);
+        }
+        if (topicId != null) {
         topics.findById(topicId)
                 .filter(topic -> certificateId.equals(topic.getCertificateId()) && topic.isActive())
                 .orElseThrow(() -> new CommonException(ErrorCode.BAD_REQUEST));
+        }
+        if (examId != null && exams != null) {
+            exams.findById(examId)
+                    .filter(exam -> certificateId.equals(exam.getCertificateId())
+                            && (topicId == null || topicId.equals(exam.getTopicId())))
+                    .orElseThrow(() -> new CommonException(ErrorCode.BAD_REQUEST));
+        }
+    }
+
+    /** Kept for callers compiled against the original PDF upload contract. */
+    public StudyDocumentResponse uploadKnowledgePdf(Long adminId, String title, Long certificateId, Long topicId,
+            MultipartFile file) {
+        return uploadKnowledgePdf(adminId, title, null, certificateId, topicId, null,
+                KnowledgeDocumentType.KNOWLEDGE, file);
     }
 
     @Override
@@ -266,10 +296,13 @@ public class RagServiceImpl implements RagService {
                 .documentId(document.getDocumentId())
                 .title(document.getTitle())
                 .fileName(document.getFileName())
+                .description(document.getDescription())
+                .documentType(document.getDocumentType())
                 .content(content)
                 .chunks(documentChunks)
                 .certificateId(document.getCertificateId())
                 .topicId(document.getTopicId())
+                .examId(document.getExamId())
                 .chunkCount(document.getChunkCount())
                 .active(document.isActive())
                 .createdAt(document.getDocCreatedAt())
@@ -301,6 +334,7 @@ public class RagServiceImpl implements RagService {
                 .findByCertificateIdAndSharedTrueOrderByDocCreatedAtDesc(certificateId)
                 .stream()
                 .filter(StudyDocument::isActive)
+                .filter(document -> document.getDocumentType() != KnowledgeDocumentType.SCORING_CRITERIA)
                 .toList();
         if (matchingDocuments.isEmpty()) return List.of();
 
@@ -326,6 +360,31 @@ public class RagServiceImpl implements RagService {
                             .build();
                 })
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<KnowledgeContextResponse> retrieveScoringCriteria(
+            Long certificateId, Long topicId, Long examId, String query, int limit) {
+        List<StudyDocument> candidates = documents.findByCertificateIdAndSharedTrueOrderByDocCreatedAtDesc(certificateId)
+                .stream().filter(StudyDocument::isActive)
+                .filter(document -> document.getDocumentType() == KnowledgeDocumentType.SCORING_CRITERIA)
+                .filter(document -> topicId != null && topicId.equals(document.getTopicId()))
+                .toList();
+        List<StudyDocument> scoped = candidates.stream()
+                .filter(document -> examId != null && examId.equals(document.getExamId())).toList();
+        List<StudyDocument> selected = scoped.isEmpty()
+                ? candidates.stream().filter(document -> document.getExamId() == null).toList() : scoped;
+        if (selected.isEmpty()) return List.of();
+        List<Long> ids = selected.stream().map(StudyDocument::getDocumentId).toList();
+        Set<String> queryTerms = terms(query);
+        return chunks.findByDocumentIdIn(ids).stream().map(chunk -> new RankedChunk(chunk, score(chunk, queryTerms)))
+                .filter(item -> item.score() > 0).sorted(Comparator.comparingInt(RankedChunk::score).reversed())
+                .limit(Math.max(1, limit)).map(item -> {
+                    StudyDocument document = selected.stream().filter(candidate -> candidate.getDocumentId().equals(item.chunk().getDocumentId())).findFirst().orElseThrow();
+                    return KnowledgeContextResponse.builder().chunkId(item.chunk().getId()).documentId(document.getDocumentId())
+                            .title(document.getTitle()).chunkIndex(item.chunk().getChunkIndex()).content(item.chunk().getContent()).build();
+                }).toList();
     }
 
     private void saveChunks(StudyDocument document, String rawText) {
@@ -431,10 +490,13 @@ public class RagServiceImpl implements RagService {
                 .documentId(document.getDocumentId())
                 .title(document.getTitle())
                 .fileName(document.getFileName())
+                .description(document.getDescription())
+                .documentType(document.getDocumentType())
                 .status(document.getStatus())
                 .chunkCount(document.getChunkCount())
                 .certificateId(document.getCertificateId())
                 .topicId(document.getTopicId())
+                .examId(document.getExamId())
                 .shared(document.isShared())
                 .active(document.isActive())
                 .createdAt(document.getDocCreatedAt())
@@ -457,4 +519,8 @@ public class RagServiceImpl implements RagService {
     }
 
     private record RankedChunk(DocumentChunk chunk, int score) {}
+
+    private String trimToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
 }

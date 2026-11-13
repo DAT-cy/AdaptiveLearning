@@ -156,6 +156,7 @@ import '../styles/shared.css'
   const knowledgeSearch = ref('')
   const knowledgeFilter = ref('all')
   const knowledgeProgramFilter = ref('all')
+  const knowledgeDocumentTypeFilter = ref('all')
   const knowledgePage = ref(1)
   const knowledgePageSize = ref(8)
   const knowledgeDragging = ref(false)
@@ -250,9 +251,44 @@ import '../styles/shared.css'
     passingBand: 0,
     skills: '[]',
   })
+  const programSkillDraft = ref('')
+  const suggestedProgramSkills = ['LISTENING', 'READING', 'WRITING', 'SPEAKING', 'GRAMMAR', 'VOCABULARY']
+  const selectedProgramSkills = computed({
+    get() {
+      try {
+        const skills = Array.isArray(programForm.skills) ? programForm.skills : JSON.parse(programForm.skills || '[]')
+        return Array.isArray(skills) ? [...new Set(skills.map((skill) => String(skill).trim()).filter(Boolean))] : []
+      } catch {
+        return []
+      }
+    },
+    set(skills) {
+      programForm.skills = JSON.stringify([...new Set(skills.map((skill) => String(skill).trim()).filter(Boolean))])
+    },
+  })
+  const customProgramSkillOptions = ref([])
+  const programSkillOptions = computed(() => [...new Set([
+    ...suggestedProgramSkills,
+    ...customProgramSkillOptions.value,
+    ...selectedProgramSkills.value,
+  ])])
+  function toggleProgramSkill(skill) {
+    selectedProgramSkills.value = selectedProgramSkills.value.includes(skill)
+      ? selectedProgramSkills.value.filter((item) => item !== skill)
+      : [...selectedProgramSkills.value, skill]
+  }
+  function addProgramSkill() {
+    const skill = programSkillDraft.value.trim().toUpperCase().replace(/\s+/g, '_')
+    if (!skill) return
+    if (!programSkillOptions.value.includes(skill)) customProgramSkillOptions.value = [...customProgramSkillOptions.value, skill]
+    programSkillDraft.value = ''
+  }
   const knowledgeForm = reactive({
     certificateId: '',
     topicId: '',
+    examId: '',
+    documentType: 'KNOWLEDGE',
+    description: '',
   })
 
   const adminModalOpen = computed({
@@ -456,6 +492,7 @@ import '../styles/shared.css'
       if (knowledgeFilter.value === 'active' && !document.active) return false
       if (knowledgeFilter.value === 'inactive' && document.active) return false
       if (knowledgeProgramFilter.value !== 'all' && String(document.certificateId) !== String(knowledgeProgramFilter.value)) return false
+      if (knowledgeDocumentTypeFilter.value !== 'all' && document.documentType !== knowledgeDocumentTypeFilter.value) return false
       if (!search) return true
       return `${document.title} ${document.fileName} ${programName(document.certificateId)} ${knowledgeTopicName(document.topicId)}`
         .toLocaleLowerCase('vi')
@@ -473,9 +510,10 @@ import '../styles/shared.css'
     knowledgeSearch.value = ''
     knowledgeFilter.value = 'all'
     knowledgeProgramFilter.value = 'all'
+    knowledgeDocumentTypeFilter.value = 'all'
     knowledgePage.value = 1
   }
-  watch([knowledgeSearch, knowledgeFilter, knowledgeProgramFilter], () => {
+  watch([knowledgeSearch, knowledgeFilter, knowledgeProgramFilter, knowledgeDocumentTypeFilter], () => {
     knowledgePage.value = 1
   })
   const knowledgeTopics = computed(() =>
@@ -485,6 +523,10 @@ import '../styles/shared.css'
         && topic.isActive !== false
     ).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
   )
+  const knowledgeScopeExams = computed(() => exams.value.filter((exam) =>
+    String(exam.certificateId) === String(knowledgeForm.certificateId)
+      && String(exam.topicId) === String(knowledgeForm.topicId)
+  ))
   const students = computed(() =>
     users.value.filter((item) => item.role === 'ROLE_USER')
   )
@@ -784,6 +826,12 @@ import '../styles/shared.css'
       activeSection.value = resolveSectionId(section)
     }
   )
+  watch(() => knowledgeForm.topicId, () => {
+    if (knowledgeForm.examId && !knowledgeScopeExams.value.some((exam) => String(exam.examId) === knowledgeForm.examId)) knowledgeForm.examId = ''
+  })
+  watch(() => knowledgeForm.documentType, (type) => {
+    if (type !== 'SCORING_CRITERIA') knowledgeForm.examId = ''
+  })
 
 
   watch([analyticsPeriod, analyticsCertificateId], () => {
@@ -827,6 +875,7 @@ import '../styles/shared.css'
 
   function openProgram(program = null) {
     adminModalError.value = ''
+    programSkillDraft.value = ''
     editingCertificateId.value = program?.certificateId ?? null
     Object.assign(
       programForm,
@@ -850,6 +899,7 @@ import '../styles/shared.css'
             skills: '[]',
           }
     )
+    customProgramSkillOptions.value = selectedProgramSkills.value.filter((skill) => !suggestedProgramSkills.includes(skill))
     modal.value = 'program'
     adminModalBaseline.value = JSON.stringify(programForm)
   }
@@ -951,6 +1001,10 @@ import '../styles/shared.css'
     const wasEditing = Boolean(editingCertificateId.value)
     const savedName = programForm.name.trim()
     try {
+      if (!selectedProgramSkills.value.length) {
+        adminModalError.value = 'Hãy chọn ít nhất một kỹ năng hoặc môn thi.'
+        return
+      }
       const payload = {
         ...programForm,
         name: programForm.name.trim(),
@@ -992,7 +1046,7 @@ import '../styles/shared.css'
     let invalidCount = 0
     for (const file of files) {
       const key = `${file.name}:${file.size}:${file.lastModified}`
-      if (!file.name.toLowerCase().endsWith('.pdf') || !file.size || file.size > 20 * 1024 * 1024) {
+      if (!/\.(pdf|txt|md)$/i.test(file.name) || !file.size || file.size > 20 * 1024 * 1024) {
         invalidCount += 1
         continue
       }
@@ -1001,12 +1055,12 @@ import '../styles/shared.css'
       knowledgeFiles.value.push({
         id: key,
         file,
-        title: file.name.replace(/\.pdf$/i, ''),
+        title: file.name.replace(/\.(pdf|txt|md)$/i, ''),
       })
     }
     knowledgeNotice.value = ''
     knowledgeFormErrors.files = invalidCount
-      ? 'Chỉ nhận file PDF tối đa 20 MB mỗi file.'
+      ? 'Chỉ nhận file PDF, TXT hoặc MD tối đa 20 MB mỗi file.'
       : ''
     if (knowledgeFiles.value.length && !invalidCount) knowledgeFormErrors.files = ''
   }
@@ -1033,6 +1087,9 @@ import '../styles/shared.css'
   function clearKnowledgeForm() {
     knowledgeFiles.value = []
     knowledgeForm.topicId = ''
+    knowledgeForm.examId = ''
+    knowledgeForm.documentType = 'KNOWLEDGE'
+    knowledgeForm.description = ''
     knowledgeForm.certificateId = programs.value[0]
       ? String(programs.value[0].certificateId)
       : ''
@@ -1055,6 +1112,9 @@ import '../styles/shared.css'
     knowledgeFormErrors.titles = knowledgeFiles.value.some((item) => !item.title.trim())
       ? 'Nhập tiêu đề cho từng tài liệu.'
       : ''
+    if (knowledgeForm.documentType === 'SCORING_CRITERIA' && !knowledgeForm.topicId) {
+      knowledgeFormErrors.exam = 'Chọn kỹ năng áp dụng cho tài liệu tiêu chí chấm điểm.'
+    }
     if (knowledgeFormErrors.files || knowledgeFormErrors.exam || knowledgeFormErrors.titles) return
 
     importingKnowledge.value = true
@@ -1067,9 +1127,24 @@ import '../styles/shared.css'
         formData.append('title', item.title.trim())
         formData.append('certificateId', knowledgeForm.certificateId)
         if (knowledgeForm.topicId) formData.append('topicId', knowledgeForm.topicId)
-        formData.append('file', item.file)
+        if (knowledgeForm.examId) formData.append('examId', knowledgeForm.examId)
+        formData.append('documentType', knowledgeForm.documentType)
+        if (knowledgeForm.description.trim()) formData.append('description', knowledgeForm.description.trim())
         try {
-          await adminService.uploadKnowledgePdf(formData)
+          if (/\.pdf$/i.test(item.file.name)) {
+            formData.append('file', item.file)
+            await adminService.uploadKnowledgePdf(formData)
+          } else {
+            await adminService.uploadKnowledgeDocument({
+              title: item.title.trim(), fileName: item.file.name,
+              certificateId: Number(knowledgeForm.certificateId),
+              topicId: knowledgeForm.topicId ? Number(knowledgeForm.topicId) : null,
+              examId: knowledgeForm.examId ? Number(knowledgeForm.examId) : null,
+              documentType: knowledgeForm.documentType,
+              description: knowledgeForm.description.trim() || null,
+              content: await item.file.text(),
+            })
+          }
           importedCount += 1
           removeKnowledgeFile(item.id)
         } catch (error) {
@@ -1675,6 +1750,7 @@ import '../styles/shared.css'
     knowledgeForm,
     knowledgeFormErrors,
     knowledgeTopics,
+    knowledgeScopeExams,
     importingKnowledge,
 
     // Results / Learner Report additions
@@ -1805,6 +1881,7 @@ import '../styles/shared.css'
     knowledgeSearch,
     knowledgeFilter,
     knowledgeProgramFilter,
+    knowledgeDocumentTypeFilter,
     knowledgePage,
     knowledgePageSize,
     knowledgeDragging,
@@ -2111,7 +2188,7 @@ import '../styles/shared.css'
       :description="adminModalDescription"
       :dirty="adminModalDirty"
       :submitting="saving"
-      size="md"
+      :size="modal === 'program' ? 'lg' : 'md'"
     >
       <form v-if="modal === 'account'" id="admin-account-form" class="admin-overlay-form" @submit.prevent="saveAccount">
         <p v-if="adminModalError" class="overlay-form-error" role="alert">{{ adminModalError }}</p>
@@ -2128,7 +2205,7 @@ import '../styles/shared.css'
           <input v-model="accountForm.canApproveExams" type="checkbox" /> Có quyền duyệt bộ đề và đáp án
         </label>
       </form>
-      <form v-else-if="modal === 'program'" id="admin-program-form" class="admin-overlay-form" @submit.prevent="saveProgram">
+      <form v-else-if="modal === 'program'" id="admin-program-form" class="admin-overlay-form program-editor-form" @submit.prevent="saveProgram">
         <p v-if="adminModalError" class="overlay-form-error" role="alert">{{ adminModalError }}</p>
         <div class="form-row">
           <label class="admin-overlay-field">Tên chứng chỉ / kỳ thi <b aria-hidden="true">*</b>
@@ -2152,10 +2229,15 @@ import '../styles/shared.css'
             <input v-model.number="programForm.passingBand" type="number" min="0" step="0.5" />
           </label>
         </div>
-        <label class="admin-overlay-field">Kỹ năng / môn thi (Mảng JSON) <b aria-hidden="true">*</b>
-          <textarea v-model.trim="programForm.skills" rows="3" required placeholder='["LISTENING","READING","WRITING","SPEAKING"]'></textarea>
-          <small class="table-secondary">Định dạng mảng JSON: ["LISTENING","READING"] hoặc ["TOAN","VAN","ANH"]</small>
-        </label>
+        <fieldset class="program-skill-field">
+          <legend>Kỹ năng / môn thi <b aria-hidden="true">*</b><small>{{ selectedProgramSkills.length }} đã chọn</small></legend>
+          <div class="program-skill-options">
+            <button v-for="skill in programSkillOptions" :key="skill" type="button" class="program-skill-option" :class="{ selected: selectedProgramSkills.includes(skill) }" :aria-pressed="selectedProgramSkills.includes(skill)" @click="toggleProgramSkill(skill)">
+              <Check v-if="selectedProgramSkills.includes(skill)" :size="14" />{{ skill }}
+            </button>
+          </div>
+          <div class="program-skill-add"><input v-model="programSkillDraft" maxlength="50" placeholder="Thêm kỹ năng hoặc môn khác" @keydown.enter.prevent="addProgramSkill" /><button type="button" title="Thêm kỹ năng" aria-label="Thêm kỹ năng" :disabled="!programSkillDraft.trim()" @click="addProgramSkill"><Plus :size="17" /></button></div>
+        </fieldset>
       </form>
       <template #footer>
         <button type="button" class="overlay-button overlay-button-secondary" @click="requestAdminModalClose">Hủy</button>
@@ -3030,6 +3112,36 @@ import '../styles/shared.css'
   }
   .overview-refresh-button { height: 38px; }
 
+  .program-editor-form { display: grid; gap: 18px; }
+  .program-editor-form .form-row { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, .65fr); gap: 16px; }
+  .program-editor-form .form-row:nth-of-type(2) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .program-editor-form .admin-overlay-field { display: grid; min-width: 0; gap: 7px; color: #334155; font-size: 12.5px; font-weight: 650; }
+  .program-editor-form .admin-overlay-field > b { color: #dc2626; }
+  .program-editor-form input,
+  .program-editor-form textarea { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 9px; color: #0f172a; background: #fff; font: inherit; font-size: 13.5px; transition: border-color .15s ease, box-shadow .15s ease; }
+  .program-editor-form input { height: 42px; padding: 0 12px; }
+  .program-editor-form textarea { min-height: 92px; padding: 11px 12px; line-height: 1.5; resize: vertical; }
+  .program-editor-form input::placeholder,
+  .program-editor-form textarea::placeholder { color: #94a3b8; }
+  .program-editor-form input:focus,
+  .program-editor-form textarea:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+  .program-editor-form .table-secondary { color: #64748b; font-size: 11px; font-weight: 400; line-height: 1.45; }
+  .program-editor-form .overlay-form-error { margin: 0; padding: 10px 12px; border: 1px solid #fecaca; border-radius: 8px; color: #b91c1c; background: #fef2f2; font-size: 12px; }
+  .program-skill-field { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; }
+  .program-skill-field legend { display: flex; width: 100%; align-items: baseline; gap: 5px; padding: 0; color: #334155; font-size: 12.5px; font-weight: 650; }
+  .program-skill-field legend b { color: #dc2626; }
+  .program-skill-field legend small { margin-left: 3px; color: #64748b; font-size: 11px; font-weight: 400; }
+  .program-skill-options { display: flex; flex-wrap: wrap; gap: 8px; }
+  .program-skill-option { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid #d7dee9; border-radius: 6px; color: #475569; background: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .program-skill-option:hover { border-color: #93c5fd; color: #1d4ed8; background: #f8fbff; }
+  .program-skill-option.selected { border-color: #2563eb; color: #fff; background: #2563eb; box-shadow: 0 1px 2px rgba(37,99,235,.2); }
+  .program-skill-add { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 8px; padding-top: 4px; border-top: 1px solid #e2e8f0; }
+  .program-skill-add input { height: 38px; border-color: transparent; background: #f8fafc; }
+  .program-skill-add input:focus { border-color: #2563eb; background: #fff; }
+  .program-skill-add button { display: grid; width: 38px; height: 38px; place-items: center; padding: 0; border: 0; border-radius: 8px; color: #fff; background: #2563eb; cursor: pointer; }
+  .program-skill-add button:hover:not(:disabled) { background: #1d4ed8; }
+  .program-skill-add button:disabled { opacity: .55; cursor: not-allowed; }
+
   /* Knowledge editor is rendered from this page, so its controls need local layout rules. */
   .knowledge-edit-form { display: grid; gap: 24px; }
   .knowledge-edit-section { display: grid; gap: 18px; padding: 18px; border: 1px solid #E2E8F0; border-radius: 12px; background: #FFFFFF; }
@@ -3056,6 +3168,10 @@ import '../styles/shared.css'
   .knowledge-content-editor { display: block; min-height: 390px; padding: 14px; resize: vertical; line-height: 1.65; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
 
   @media (max-width: 640px) {
+    .program-editor-form .form-row,
+    .program-editor-form .form-row:nth-of-type(2) { grid-template-columns: 1fr; gap: 14px; }
+    .program-skill-add { grid-template-columns: 1fr; }
+    .program-skill-field legend small { display: block; margin: 4px 0 0; }
     .knowledge-edit-section { padding: 14px; }
     .knowledge-edit-grid { grid-template-columns: 1fr; gap: 14px; }
     .knowledge-edit-section-heading { flex-direction: column; gap: 6px; }

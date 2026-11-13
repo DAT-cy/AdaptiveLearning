@@ -9,6 +9,7 @@
   import { adminService } from '@/services/adminService'
   import { adminContextKey } from '../../composables/adminContext'
   import ExamPreview from './ExamPreview.vue'
+  import SkillPreview from './SkillPreview.vue'
 
   const admin = inject(adminContextKey)
   const questions = ref([])
@@ -27,6 +28,10 @@
   const preview = ref(null)
   const examDetails = ref({})
   const importDetails = ref({})
+  const skillTree = ref([])
+  const skillTreeLoading = ref(false)
+  const skillTreeError = ref('')
+  const skillPreview = ref(null)
 
   const asList = (value) =>
     Array.isArray(value)
@@ -60,13 +65,15 @@
         setId: `import-${item.importId}`,
       })),
   ])
-  const visibleSkills = computed(() =>
-    skills.value.filter(
-      (skill) =>
-        selectedCertificateId.value === 'all' ||
-        String(skill.certificateId) === String(selectedCertificateId.value)
-    )
-  )
+  const visibleSkills = computed(() => {
+    const unique = new Map()
+    skills.value.forEach((skill) => {
+      if ((selectedCertificateId.value === 'all' || String(skill.certificateId) === String(selectedCertificateId.value)) && skill.topicId != null) {
+        unique.set(`${skill.certificateId}-${skill.topicId}`, skill)
+      }
+    })
+    return [...unique.values()].filter((skill) => skillQuestionCount(skill) > 0)
+  })
   const activeImportIds = computed(() => new Set(imports.value.map((item) => String(item.importId))))
   function isQuestionFromActiveImport(question) {
     if (!String(question.tags || '').includes('CONFIRMED_EXAM_IMPORT')) return true
@@ -78,6 +85,20 @@
     } catch {
       return true
     }
+  }
+  function metadata(question) {
+    try {
+      return typeof question?.contentJson === 'string' ? JSON.parse(question.contentJson) : question?.contentJson || {}
+    } catch {
+      return {}
+    }
+  }
+  function skillQuestionCount(skill) {
+    return questions.value.filter((question) =>
+      String(question.certificateId) === String(skill.certificateId) &&
+      String(question.topicId) === String(skill.topicId) &&
+      isQuestionFromActiveImport(question)
+    ).length
   }
   const selectedQuestions = computed(() => {
     const query = search.value.trim().toLowerCase()
@@ -144,6 +165,9 @@
     selectedParent.value = null
     selectedSkill.value = null
     search.value = ''
+    skillTree.value = []
+    skillTreeError.value = ''
+    skillPreview.value = null
   }
   async function loadData() {
     loading.value = true
@@ -181,27 +205,82 @@
       skills.value = []
     }
   }
-  function chooseSkill(skill) {
+  async function chooseSkill(skill) {
     selectedSkill.value = skill
     selectedParent.value = null
-    const selected = questions.value.filter(
-      (question) => String(question.topicId) === String(skill.topicId) && isQuestionFromActiveImport(question)
-    )
-    preview.value = {
-      title: skill.name,
-      description: `Chi tiết kỹ năng · ${examName(skill.certificateId)}`,
-      status: 'APPROVED',
-      questions: selected.map((question, index) => ({
-        ...question,
-        questionId: question.questionId || `skill-${skill.topicId}-${index}`,
-        questionOrder: question.questionOrder || index + 1,
-        questionStatus: question.status || 'APPROVED',
-      })),
-      totalPoints: selected.reduce(
-        (sum, question) => sum + Number(question.points || 0),
-        0
-      ),
+    skillPreview.value = skill
+    skillTreeLoading.value = true
+    skillTreeError.value = ''
+    try {
+      skillTree.value = await loadSkillTree(skill)
+    } catch (exception) {
+      skillTreeError.value = exception?.response?.data?.message || 'Không thể tải cây câu hỏi theo kỹ năng.'
+      skillTree.value = []
+    } finally {
+      skillTreeLoading.value = false
     }
+  }
+  async function loadSkillTree(skill) {
+    const matchesSkill = (question) => String(question?.topicId) === String(skill.topicId)
+      && String(question?.certificateId ?? skill.certificateId) === String(skill.certificateId)
+    const matchingQuestions = questions.value.filter((question) => matchesSkill(question) && isQuestionFromActiveImport(question))
+    const importCandidates = imports.value.filter((item) => String(item.certificateId) === String(skill.certificateId))
+    const examCandidates = exams.value.filter((item) => String(item.certificateId) === String(skill.certificateId))
+    const [importResults, examResults] = await Promise.all([
+      Promise.all(importCandidates.map(async (item) => ({ item, detail: importDetails.value[item.importId] || await adminService.examImport(item.importId) }))),
+      Promise.all(examCandidates.map(async (item) => ({ item, detail: examDetails.value[item.examId] || await adminService.examDetail(item.examId) }))),
+    ])
+    importDetails.value = { ...importDetails.value, ...Object.fromEntries(importResults.map(({ item, detail }) => [item.importId, detail])) }
+    examDetails.value = { ...examDetails.value, ...Object.fromEntries(examResults.map(({ item, detail }) => [item.examId, detail])) }
+    const questionsByImportPosition = new Map()
+    matchingQuestions.forEach((question) => {
+      const source = metadata(question)
+      if (source.examImportId != null && source.questionNumber != null) {
+        questionsByImportPosition.set(`${source.examImportId}-${source.questionNumber}`, question)
+      }
+    })
+    const sets = []
+    importResults.forEach(({ item, detail }) => {
+      const resolved = (detail?.questions || []).map((source, index) => questionsByImportPosition.get(`${item.importId}-${index + 1}`))
+        .filter((question) => question && matchesSkill(question))
+      if (resolved.length) sets.push({ key: `import-${item.importId}`, title: item.title || detail?.title || `Bộ đề #${item.importId}`, order: Number(item.importId), questions: resolved })
+    })
+    examResults.forEach(({ item, detail }) => {
+      const resolved = (detail?.questions || []).filter(matchesSkill)
+      if (resolved.length) sets.push({ key: `exam-${item.examId}`, title: item.title || detail?.title || `Bộ đề #${item.examId}`, order: Number(item.examId), questions: resolved })
+    })
+    return sets.map(buildSkillSetTree).sort((left, right) => left.order - right.order)
+  }
+  function buildSkillSetTree(set) {
+    const sectionMap = new Map()
+    set.questions.forEach((question, index) => {
+      const source = metadata(question)
+      const sectionOrder = question.sourceSectionOrder ?? source.sourceSectionOrder
+      const sectionName = question.sectionName || source.sourceSectionTitle || 'Câu hỏi chưa phân section'
+      const key = `${set.key}-section-${sectionOrder ?? sectionName}`
+      if (!sectionMap.has(key)) sectionMap.set(key, { key, title: sectionName, order: Number(sectionOrder ?? Number.MAX_SAFE_INTEGER), questions: [] })
+      sectionMap.get(key).questions.push({ ...question, questionOrder: question.questionOrder ?? source.questionNumber ?? index + 1 })
+    })
+    return {
+      ...set,
+      sections: [...sectionMap.values()].map((section) => ({ ...section, questions: section.questions.sort((left, right) => Number(left.questionOrder) - Number(right.questionOrder)) })).sort((left, right) => left.order - right.order),
+    }
+  }
+  function closeSkillPreview() {
+    selectedSkill.value = null
+    skillPreview.value = null
+    skillTree.value = []
+    skillTreeError.value = ''
+  }
+  function openSkillQuestion(question, set) {
+    preview.value = {
+      title: `Câu hỏi ${question.questionOrder || ''}`.trim(),
+      description: `${set.title} · ${selectedSkill.value?.name || 'Kỹ năng'}`,
+      status: question.questionStatus || question.status || 'APPROVED',
+      totalPoints: Number(question.pointsOverride ?? question.points ?? 0),
+      questions: [question],
+    }
+    skillPreview.value = null
   }
   async function chooseExam(exam) {
     selectedParent.value = exam
@@ -333,7 +412,7 @@
         </button>
       </div>
     </template>
-    <template v-else-if="mode === 'skills' && !selectedSkill">
+    <template v-else-if="mode === 'skills' && !skillPreview">
       <div class="section-heading">
         <div>
           <h2>Danh sách kỹ năng</h2>
@@ -348,7 +427,7 @@
       <div v-else class="parent-grid">
         <button
           v-for="skill in visibleSkills"
-          :key="skill.topicId"
+          :key="`${skill.certificateId}-${skill.topicId}`"
           class="parent-card"
           @click="chooseSkill(skill)"
         >
@@ -357,11 +436,7 @@
             <strong>{{ skill.name }}</strong>
             <small>{{ examName(skill.certificateId) }}</small>
             <small>
-              {{
-                questions.filter(
-                  (item) => String(item.topicId) === String(skill.topicId)
-                ).length
-              }}
+              {{ skillQuestionCount(skill) }}
               câu hỏi
             </small>
           </span>
@@ -373,6 +448,16 @@
       <div v-if="detailLoading" class="state">Đang tải chi tiết đề thi...</div>
     </template>
     <ExamPreview v-if="preview" :detail="preview" @close="preview = null" />
+    <SkillPreview
+      v-if="skillPreview"
+      :skill="skillPreview"
+      :exam-name="examName(skillPreview.certificateId)"
+      :sets="skillTree"
+      :loading="skillTreeLoading"
+      :error="skillTreeError"
+      @close="closeSkillPreview"
+      @question="openSkillQuestion"
+    />
   </section>
 </template>
 

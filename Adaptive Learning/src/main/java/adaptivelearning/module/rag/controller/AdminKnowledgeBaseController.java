@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
+import adaptivelearning.shared.enums.KnowledgeDocumentType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 
@@ -53,9 +54,12 @@ public class AdminKnowledgeBaseController {
             @RequestParam("certificateId") Long certificateId,
             @Parameter(description = "Optional display tag. AI retrieval remains scoped to certificateId.")
             @RequestParam(value = "topicId", required = false) Long topicId,
+            @RequestParam(value = "examId", required = false) Long examId,
+            @RequestParam(value = "description", required = false) String description,
+            @RequestParam(value = "documentType", defaultValue = "KNOWLEDGE") KnowledgeDocumentType documentType,
             @RequestParam("file") MultipartFile file) {
         StudyDocumentResponse uploaded = ragService.uploadKnowledgePdf(
-                SecurityUtils.getCurrentUserId(), title, certificateId, topicId, file);
+                SecurityUtils.getCurrentUserId(), title, description, certificateId, topicId, examId, documentType, file);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(DefaultRes.res(HttpStatus.CREATED.value(), "PDF knowledge imported", uploaded));
     }

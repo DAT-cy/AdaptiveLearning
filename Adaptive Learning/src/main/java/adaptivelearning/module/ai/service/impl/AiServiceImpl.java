@@ -20,6 +20,9 @@ import adaptivelearning.module.attempts.repository.ExamAttemptRepository;
 import adaptivelearning.module.exams.entity.Exam;
 import adaptivelearning.module.exams.repository.ExamQuestionRepository;
 import adaptivelearning.module.exams.repository.ExamRepository;
+import adaptivelearning.module.questions.repository.QuestionRepository;
+import adaptivelearning.module.rag.dto.response.KnowledgeContextResponse;
+import adaptivelearning.module.rag.service.RagService;
 import adaptivelearning.shared.enums.AiJobStatus;
 import adaptivelearning.shared.enums.AiJobType;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -50,6 +53,17 @@ public class AiServiceImpl implements AiService {
     private final ExamAttemptRepository attemptRepository;
     private final ExamQuestionRepository examQuestionRepository;
     private final ExamRepository examRepository;
+    private final QuestionRepository questionRepository;
+    private final RagService ragService;
+
+    /** Keeps the previous constructor contract for existing unit tests and integrations. */
+    public AiServiceImpl(AiEvaluationRepository evaluationRepository, AiJobRepository jobRepository,
+            RubricRepository rubricRepository, AiProvider aiProvider, ObjectMapper objectMapper,
+            ExamAttemptRepository attemptRepository, ExamQuestionRepository examQuestionRepository,
+            ExamRepository examRepository) {
+        this(evaluationRepository, jobRepository, rubricRepository, aiProvider, objectMapper, attemptRepository,
+                examQuestionRepository, examRepository, null, null);
+    }
 
     @Override
     public AiEvaluationResponse gradeWriting(AiGradeRequest request) {
@@ -62,7 +76,19 @@ public class AiServiceImpl implements AiService {
             requireRubricMatchesAttempt(rubric, attempt);
         }
 
-        String systemPrompt = buildWritingPrompt(rubric);
+        List<KnowledgeContextResponse> criteria = List.of();
+        if (ragService != null) {
+            Exam exam = examRepository.findById(attempt.getExamId())
+                    .orElseThrow(() -> new CommonException(ErrorCode.ENTITY_NOT_FOUND));
+            Long topicId = questionRepository == null ? exam.getTopicId()
+                    : questionRepository.findById(request.getQuestionId())
+                            .map(question -> question.getTopicId()).orElse(exam.getTopicId());
+            if (topicId != null) {
+                criteria = ragService.retrieveScoringCriteria(exam.getCertificateId(), topicId, exam.getExamId(),
+                        request.getUserAnswerText(), 8);
+            }
+        }
+        String systemPrompt = buildWritingPrompt(rubric, criteria);
         String userPrompt = "Grade the following answer and return only valid JSON:\n\n"
                 + request.getUserAnswerText();
 
@@ -265,10 +291,14 @@ public class AiServiceImpl implements AiService {
         }
     }
 
-    private String buildWritingPrompt(Rubric rubric) {
+    private String buildWritingPrompt(Rubric rubric, List<KnowledgeContextResponse> criteriaSources) {
         String rubricSection = rubric != null
                 ? "Use this rubric criteria: " + rubric.getCriteriaJson()
-                : "Evaluate based on general writing quality criteria (grammar, vocabulary, coherence, task response).";
+                : criteriaSources.isEmpty()
+                    ? "No matching scoring document is configured. Use the configured fallback evaluation policy only."
+                    : "Use ONLY the following scoring criteria source excerpts. Do not invent criteria or a scale: "
+                        + criteriaSources.stream().map(source -> "[" + source.getTitle() + "] " + source.getContent())
+                            .collect(Collectors.joining("\n\n"));
         return "You are an expert language examiner. Score the student's writing answer objectively. "
                 + rubricSection + " "
                 + "Return ONLY a valid JSON object with the following fields: "

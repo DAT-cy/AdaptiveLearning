@@ -58,6 +58,7 @@ const {
   knowledgeSearch,
   knowledgeFilter,
   knowledgeProgramFilter,
+  knowledgeDocumentTypeFilter,
   knowledgePage,
   knowledgePageSize,
   knowledgeDragging,
@@ -89,6 +90,7 @@ const {
   knowledgeForm,
   knowledgeFormErrors,
   knowledgeTopics,
+  knowledgeScopeExams,
   importingKnowledge,
   loadData
 } = admin
@@ -190,7 +192,14 @@ const {
                 </button>
               </div>
 
-              <form v-if="false" class="knowledge-upload-form" @submit.prevent="importKnowledge">
+              <form class="knowledge-upload-form" @submit.prevent="importKnowledge">
+                <div class="knowledge-field-group">
+                  <label class="knowledge-field-label">Loại tài liệu <span class="required-star">*</span></label>
+                  <select v-model="knowledgeForm.documentType" class="knowledge-select-input">
+                    <option value="KNOWLEDGE">Tài liệu kiến thức</option>
+                    <option value="SCORING_CRITERIA">Tài liệu tiêu chí chấm điểm</option>
+                  </select>
+                </div>
                 <!-- DROPZONE -->
                 <label
                   class="knowledge-dropzone"
@@ -200,7 +209,7 @@ const {
                   @dragleave="knowledgeDragging = false"
                   @drop="dropKnowledgeFiles"
                 >
-                  <input type="file" accept=".pdf,application/pdf" multiple @change="readKnowledgeFiles" />
+                  <input type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" multiple @change="readKnowledgeFiles" />
                   <div class="knowledge-dropzone-icon">
                     <Upload :size="24" />
                   </div>
@@ -261,6 +270,19 @@ const {
                       <span>{{ topic.name }}</span>
                     </button>
                   </div>
+                </div>
+
+                <div v-if="knowledgeForm.documentType === 'SCORING_CRITERIA'" class="knowledge-field-group">
+                  <label class="knowledge-field-label">Phạm vi áp dụng</label>
+                  <select v-model="knowledgeForm.examId" class="knowledge-select-input" :disabled="!knowledgeForm.topicId">
+                    <option value="">Toàn bộ kỹ năng</option>
+                    <option v-for="exam in knowledgeScopeExams" :key="exam.examId" :value="String(exam.examId)">{{ exam.title }}</option>
+                  </select>
+                  <span class="knowledge-field-sub">Đề bài được lọc theo kỹ năng đã chọn.</span>
+                </div>
+                <div class="knowledge-field-group">
+                  <label class="knowledge-field-label">Mô tả</label>
+                  <textarea v-model.trim="knowledgeForm.description" class="knowledge-select-input" maxlength="1000" rows="2" placeholder="Mô tả ngắn về phạm vi tài liệu"></textarea>
                 </div>
 
                 <!-- QUEUED FILES LIST -->
@@ -406,6 +428,11 @@ const {
                   </div>
 
                   <div v-if="programs.length" class="knowledge-program-filter-wrap">
+                    <select v-model="knowledgeDocumentTypeFilter" class="knowledge-program-select" aria-label="Lọc theo loại tài liệu">
+                      <option value="all">Tất cả loại</option>
+                      <option value="KNOWLEDGE">Tài liệu kiến thức</option>
+                      <option value="SCORING_CRITERIA">Tiêu chí chấm điểm</option>
+                    </select>
                     <select v-model="knowledgeProgramFilter" class="knowledge-program-select">
                       <option value="all">Tất cả kỳ thi</option>
                       <option v-for="prog in programs" :key="prog.certificateId" :value="String(prog.certificateId)">
@@ -459,6 +486,9 @@ const {
                       <div class="knowledge-doc-tags">
                         <span class="doc-badge badge-program">
                           {{ programName(doc.certificateId) }}
+                        </span>
+                        <span class="doc-badge badge-topic">
+                          {{ doc.documentType === 'SCORING_CRITERIA' ? 'Tiêu chí chấm điểm' : 'Kiến thức' }}
                         </span>
                         <span v-if="knowledgeTopicName(doc.topicId)" class="doc-badge badge-topic">
                           {{ knowledgeTopicName(doc.topicId) }}
